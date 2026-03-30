@@ -1,0 +1,67 @@
+<!-- ============================================================
+  app.vue — Navigation complète avec tous les liens sidebar
+============================================================ -->
+<script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
+
+const auth   = useAuthStore()
+const router = useRouter()
+
+onMounted(() => { auth.restoreSession() })
+
+// ── Nav Domiciliataire ────────────────────────────────────
+const domiciNav = computed(() => [
+  { section: 'Principal' },
+  { label: 'Tableau de bord',    to: '/admin/dashboard' },
+  { label: 'Mes Clients',        to: '/admin/clients' },
+  { label: 'Documents',          to: '/admin/documents' },
+  { label: 'Factures & Paiements', to: '/admin/paiements' },
+
+  { section: 'Outils' },
+  { label: 'Nouveau Contrat',    highlight: true, action: () => router.push('/admin/contrat?new=1') },
+  { label: 'Mes Contrats',       to: '/admin/contrats' },
+  { label: 'Scanner / Importer', action: () => router.push('/admin/scanner') },
+  { label: 'Articles',           to: '/admin/articles' },
+
+  { section: 'Communication' },
+  { label: 'Messages clients',   to: '/admin/messages' },
+  { label: 'Notifications',      to: '/admin/notifications' },
+  { label: 'Paramètres',         to: '/admin/parametres' },
+])
+
+// ── Nav Super Admin ───────────────────────────────────────
+const adminNav = computed(() => [
+  { section: 'Principal' },
+  { label: 'Tableau de bord',    to: '/admin/dashboard' },
+  { label: 'Domiciliataires',    to: '/admin/domiciliataires' },
+
+  { section: 'Compte' },
+  { label: 'Notifications',      to: '/admin/notifications' },
+  { label: 'Paramètres',         to: '/admin/parametres' },
+])
+
+// ── Nav Client ────────────────────────────────────────────
+const clientNav = computed(() => [
+  { section: 'Mon Espace' },
+  { label: 'Tableau de bord',    to: '/client/dashboard' },
+  { label: 'Mes Documents',      to: '/client/documents' },
+  { label: 'Mon Contrat',        to: '/client/contrat' },
+
+  { section: 'Communication' },
+  { label: 'Messages',           to: '/client/messages' },
+  { label: 'Notifications',      to: '/client/notifications' },
+])
+
+const navigation = computed(() => {
+  if (auth.isAdmin)          return adminNav.value
+  if (auth.isDomiciliataire) return domiciNav.value
+  if (auth.isClient)         return clientNav.value
+  return []
+})
+</script>
+
+<template>
+  <NuxtLayout :nav="navigation">
+    <NuxtPage />
+  </NuxtLayout>
+</template>
