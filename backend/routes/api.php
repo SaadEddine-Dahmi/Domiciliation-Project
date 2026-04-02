@@ -16,6 +16,7 @@ use App\Http\Controllers\Api\RepresentantController;
 use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\PaiementController;
 use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\FactureController;
 
 Route::post('/auth/register', [AuthController::class, 'register']);
 Route::post('/auth/login', [AuthController::class, 'login']);
@@ -51,6 +52,10 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/contrats/{contrat}/paiements', [PaiementController::class, 'index']);
     Route::post('/contrats/{contrat}/paiements', [PaiementController::class, 'store']);
     Route::get('/contrats/{contrat}/paiements/summary', [PaiementController::class, 'summary']);
+
+    // Factures (par contrat)
+    Route::get('/factures', [FactureController::class, 'index']);
+
 
     // Articles
     Route::get('/articles', [ArticleController::class, 'index']);

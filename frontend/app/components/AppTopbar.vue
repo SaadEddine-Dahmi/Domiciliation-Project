@@ -3,15 +3,17 @@
           style="background:rgba(11,13,19,0.88);backdrop-filter:blur(12px);border-bottom:1px solid rgba(255,255,255,0.06)">
     <h1 class="font-serif text-[17px] font-normal">{{ title }}</h1>
     <div class="ml-auto flex items-center gap-2">
-      <NuxtLink :to="auth.isAdmin ? '/admin/notifs' : '/client/notifs'"
+      <NuxtLink :to="auth.isInternal ? '/admin/notifs' : '/client/notifs'"
                 class="relative w-9 h-9 rounded-xl flex items-center justify-center"
                 style="background:#1a1e2a;border:1px solid rgba(255,255,255,0.07)">
         🔔
       </NuxtLink>
-      <div class="w-9 h-9 rounded-xl flex items-center justify-center text-[12px] font-bold"
-           :style="`background:${auth.user?.color}22;color:${auth.user?.color}`">
-        {{ auth.user?.avatar }}
-      </div>
+     <NuxtLink :to="auth.isInternal ? '/admin/settings' : '/client/settings'">
+        <div class="w-9 h-9 rounded-xl flex items-center justify-center text-[12px] font-bold"
+             :style="`background:${auth.user?.color}22;color:${auth.user?.color}`">
+          {{ auth.user?.avatar }}
+        </div>
+      </NuxtLink>
     </div>
   </header>
 </template>

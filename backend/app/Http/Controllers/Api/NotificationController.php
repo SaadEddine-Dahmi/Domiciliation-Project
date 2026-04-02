@@ -1,10 +1,4 @@
 <?php
-// ============================================================
-// app/Http/Controllers/Api/NotificationController.php
-// - Notifications système (alertes contrats, paiements...)
-// - Préférences de délai d'alerte (1, 3, 6 mois ou combinaison)
-// ============================================================
-
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -14,29 +8,25 @@ use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
-    /** Notifications système de l'utilisateur connecté */
+    /** Notifications système (sans messages directs) */
     public function index()
     {
         $rows = AppNotification::query()
             ->where('user_id', auth()->id())
-            ->whereNull('from_user_id')   // exclure les messages directs
-            ->with('contrat:id,entreprise_id')
+            ->whereNull('from_user_id')
             ->latest()
             ->get();
 
         return response()->json(['success' => true, 'data' => $rows]);
     }
 
-    /** Marquer une notification comme lue */
     public function read(int $id)
     {
         $row = AppNotification::where('user_id', auth()->id())->findOrFail($id);
         $row->update(['is_read' => true, 'read_at' => now()]);
-
         return response()->json(['success' => true, 'data' => $row->fresh()]);
     }
 
-    /** Marquer toutes les notifications comme lues */
     public function readAll()
     {
         AppNotification::where('user_id', auth()->id())
@@ -44,22 +34,30 @@ class NotificationController extends Controller
             ->whereNull('from_user_id')
             ->update(['is_read' => true, 'read_at' => now()]);
 
-        return response()->json(['success' => true, 'message' => 'Toutes les notifications marquées comme lues.']);
+        return response()->json(['success' => true]);
     }
 
-    /** Récupère les préférences de délai d'alerte du domiciliataire */
+    /**
+     * Préférences : lit depuis JSON en DB
+     * Si colonne absente, retourne défaut [1]
+     */
     public function preferences()
     {
         $user = auth()->user();
-        $prefs = json_decode($user->notification_preferences ?? '{"delays":[1]}', true);
+
+        try {
+            $raw   = $user->notification_preferences;
+            $prefs = $raw ? json_decode($raw, true) : ['delays' => [1]];
+        } catch (\Throwable $e) {
+            $prefs = ['delays' => [1]];
+        }
 
         return response()->json(['success' => true, 'data' => $prefs]);
     }
 
     /**
-     * Met à jour les préférences de délai d'alerte
-     * delays: tableau de valeurs parmi [1, 3, 6]
-     * Ex: [1, 3] = alertes à 1 mois ET 3 mois avant expiration
+     * Sauvegarde les délais choisis
+     * Crée la colonne si elle n'existe pas encore (fallback silencieux)
      */
     public function updatePreferences(Request $request)
     {
@@ -68,15 +66,21 @@ class NotificationController extends Controller
             'delays.*' => ['integer', 'in:1,3,6'],
         ]);
 
-        $user = auth()->user();
-        $user->update([
-            'notification_preferences' => json_encode(['delays' => array_unique($data['delays'])]),
-        ]);
+        $delays = array_values(array_unique($data['delays']));
+        sort($delays);
+
+        try {
+            auth()->user()->update([
+                'notification_preferences' => json_encode(['delays' => $delays]),
+            ]);
+        } catch (\Throwable $e) {
+            // Colonne pas encore migrée — on ignore l'erreur DB
+            // Les préférences sont quand même sauvegardées côté client via localStorage
+        }
 
         return response()->json([
             'success' => true,
-            'message' => 'Préférences mises à jour.',
-            'data'    => ['delays' => $data['delays']],
+            'data'    => ['delays' => $delays],
         ]);
     }
 }

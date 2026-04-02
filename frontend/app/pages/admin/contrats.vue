@@ -1,5 +1,5 @@
 <!-- ============================================================
-  pages/admin/contrats.vue (liste)
+  pages/admin/contrat.vue (liste)
   Liste des contrats avec actions state machine :
   - Générer PDF (draft)
   - Activer (upload PDF signé → active)

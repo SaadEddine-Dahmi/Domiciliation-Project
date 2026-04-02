@@ -4,12 +4,12 @@
 ============================================================ -->
 <template>
   <aside
-    class="fixed top-0 left-0 bottom-0 w-[220px] flex flex-col z-30"
+    class="fixed top-0 left-0 bottom-0 w-[230px] flex flex-col z-30"
     style="background:#13161f;border-right:1px solid rgba(255,255,255,0.06)"
   >
     <!-- Logo -->
     <div
-      class="flex items-center gap-2.5 px-4 py-5 flex-shrink-0"
+      class="flex items-center gap-2.5 px-4 py-5 shrink-0"
       style="border-bottom:1px solid rgba(255,255,255,0.05)"
     >
       <div

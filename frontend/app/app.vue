@@ -16,17 +16,18 @@ const domiciNav = computed(() => [
   { label: 'Mes Clients',        to: '/admin/clients' },
   { label: 'Documents',          to: '/admin/documents' },
   { label: 'Factures & Paiements', to: '/admin/paiements' },
+  { label: 'Toutes les Factures',           to: '/admin/factures' },
 
   { section: 'Outils' },
   { label: 'Nouveau Contrat',    highlight: true, action: () => router.push('/admin/contrat?new=1') },
   { label: 'Mes Contrats',       to: '/admin/contrats' },
-  { label: 'Scanner / Importer', action: () => router.push('/admin/scanner') },
+  { label: 'Scanner / Importer', action: () => router.push('/admin/scan') },
   { label: 'Articles',           to: '/admin/articles' },
 
   { section: 'Communication' },
   { label: 'Messages clients',   to: '/admin/messages' },
-  { label: 'Notifications',      to: '/admin/notifications' },
-  { label: 'Paramètres',         to: '/admin/parametres' },
+  { label: 'Notifications',      to: '/admin/notifs' },
+  { label: 'Paramètres',         to: '/admin/settings' },
 ])
 
 // ── Nav Super Admin ───────────────────────────────────────
@@ -36,7 +37,7 @@ const adminNav = computed(() => [
   { label: 'Domiciliataires',    to: '/admin/domiciliataires' },
 
   { section: 'Compte' },
-  { label: 'Notifications',      to: '/admin/notifications' },
+  { label: 'Notifications',      to: '/admin/notifs' },
   { label: 'Paramètres',         to: '/admin/parametres' },
 ])
 
@@ -49,7 +50,7 @@ const clientNav = computed(() => [
 
   { section: 'Communication' },
   { label: 'Messages',           to: '/client/messages' },
-  { label: 'Notifications',      to: '/client/notifications' },
+  { label: 'Notifications',      to: '/client/notifs' },
 ])
 
 const navigation = computed(() => {
