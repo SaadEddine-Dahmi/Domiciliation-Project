@@ -1,10 +1,6 @@
 <!-- ============================================================
   pages/admin/clients.vue
   Gestion des clients (entreprises) et représentants
-  FIXES :
-  - Mot de passe mis à jour via PUT /api/clients/{id}/password
-    séparément de la mise à jour des infos entreprise
-  - Validation côté front avant envoi
 ============================================================ -->
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
