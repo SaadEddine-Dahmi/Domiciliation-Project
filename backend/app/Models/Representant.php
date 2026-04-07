@@ -32,6 +32,12 @@ class Representant extends Model
         return $this->belongsTo(Entreprise::class);
     }
 
+    public function history()
+    {
+        return $this->hasMany(RepresentantHistory::class, 'representant_id')
+            ->orderByDesc('created_at');
+    }
+
     // ── Accessors ──────────────────────────────────────────
 
     /**

@@ -25,7 +25,7 @@ class Entreprise extends Model
 
     protected $casts = [
         'date_creation' => 'date',
-        'capital'       => 'decimal:2',
+        'capital' => 'decimal:2',
     ];
 
     // ── Relations ──────────────────────────────────────────
@@ -38,6 +38,12 @@ class Entreprise extends Model
     public function clientUser()
     {
         return $this->belongsTo(User::class, 'client_user_id');
+    }
+
+    public function history()
+    {
+        return $this->hasMany(EntrepriseHistory::class, 'entreprise_id')
+            ->orderByDesc('created_at');
     }
 
     /**
