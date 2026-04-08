@@ -4,6 +4,13 @@ namespace App\Services;
 
 use App\Models\Contrat;
 
+use function App\Providers\Services\e;
+
+use const App\Providers\Services\g;
+use const App\Providers\Services\m;
+use const App\Providers\Services\prix_total;
+use const App\Providers\Services\Replace;
+
 class TemplateService
 {
     /**
