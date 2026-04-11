@@ -8,14 +8,28 @@ use Illuminate\Http\Request;
 
 class ArticleController extends Controller
 {
-    public function index()
+    /**
+     * GET /api/articles
+     * Returns only articles belonging to the authenticated domiciliataire.
+     */
+    public function index(Request $request)
     {
+        $tenantId = auth()->id();
+
+        $articles = Article::forTenant($tenantId)
+            ->latest()
+            ->get();
+
         return response()->json([
             'success' => true,
-            'data' => Article::where('is_active', true)->latest()->get(),
+            'data'    => $articles,
         ]);
     }
 
+    /**
+     * POST /api/articles
+     * Creates an article owned by the authenticated domiciliataire.
+     */
     public function store(Request $request)
     {
         $data = $request->validate([
@@ -25,17 +39,23 @@ class ArticleController extends Controller
         ]);
 
         $article = Article::create([
-            'title'     => $data['title'],
-            'body'      => $data['body'],
-            'is_active' => $data['is_active'] ?? true,
+            'domiciliataire_id' => auth()->id(), // always force tenant
+            'title'             => $data['title'],
+            'body'              => $data['body'],
+            'is_active'         => $data['is_active'] ?? true,
         ]);
 
         return response()->json(['success' => true, 'data' => $article], 201);
     }
 
-    public function update(Request $request, string $id)   // ← string, pas int (UUID)
+    /**
+     * PUT /api/articles/{id}
+     * Updates an article — only if it belongs to the authenticated domiciliataire.
+     */
+    public function update(Request $request, string $id)
     {
-        $article = Article::findOrFail($id);
+        // Tenant check — prevents editing another domiciliataire's articles
+        $article = Article::forTenant(auth()->id())->findOrFail($id);
 
         $data = $request->validate([
             'title'     => ['required', 'string', 'max:255'],
@@ -48,9 +68,14 @@ class ArticleController extends Controller
         return response()->json(['success' => true, 'data' => $article->fresh()]);
     }
 
-    public function destroy(string $id)   // ← string, pas int (UUID)
+    /**
+     * DELETE /api/articles/{id}
+     * Deletes an article — only if it belongs to the authenticated domiciliataire.
+     */
+    public function destroy(string $id)
     {
-        Article::findOrFail($id)->delete();
+        $article = Article::forTenant(auth()->id())->findOrFail($id);
+        $article->delete();
 
         return response()->json(['success' => true, 'message' => 'Article supprimé.']);
     }
