@@ -170,48 +170,50 @@ class ContratController extends Controller
     {
         $tenantId = $this->tenantIdOrFail($request);
 
-        // Load contrat with all relations needed for variable resolution
         $contrat = Contrat::query()
             ->with([
-                'entreprise.representant', // needed for {{gerant_nom}}, {{gerant_cin}} etc.
+                'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
                 'domiciliataire',
             ])
             ->where('domiciliataire_id', $tenantId)
             ->findOrFail($id);
 
-        // Build variable map from contrat data
-        // This resolves all {{variable}} placeholders
+        // Build variable map — all {{variables}} resolved here
         $templateData = $this->templateService->dataFromContrat($contrat);
 
-        // Render each article body — replace variables + wrap in <strong>
+        // Render each article body with variable replacement
         $articlesHtml = $contrat->articles->map(function ($article, $i) use ($templateData) {
-            // Replace {{variables}} in article body with real bold values
             $renderedBody = $this->templateService->render($article->body ?? '', $templateData);
-
             return "
-                <div style='margin:14px 0'>
-                    <p style='font-weight:700;margin:0 0 6px;font-size:13px'>
-                        ARTICLE " . ($i + 1) . " — " . e($article->title) . "
-                    </p>
-                    <p style='margin:0;line-height:1.7;text-align:justify'>
-                        {$renderedBody}
-                    </p>
-                </div>
-            ";
+            <div style='margin:14px 0'>
+                <p style='font-weight:700;margin:0 0 6px;font-size:12px'>
+                    ARTICLE " . ($i + 1) . " — " . e($article->title) . "
+                </p>
+                <p style='margin:0;line-height:1.7;text-align:justify'>
+                    {$renderedBody}
+                </p>
+            </div>
+        ";
         })->implode('');
 
-        // Header values — also use template data for consistency
-        $company  = e($contrat->entreprise->raison_sociale ?? '-');
-        $manager  = e(trim(($contrat->domiciliataire->nom ?? '') . ' ' . ($contrat->domiciliataire->prenom ?? '')));
-        $dateDebut = $templateData['date_debut'] ?: '-';
-        $dateFin   = $templateData['date_fin']   ?: '-';
-        $mensuel   = $templateData['redevance_mensuelle'];
-        $annuel    = $templateData['redevance_annuelle'];
-        $instrNo   = $templateData['instruction_no'] ?: '';
-        $ville     = $templateData['ville_signature'] ?: 'AGADIR';
+        // Header values — use templateData so format is consistent
+        $domiciliataire = e($templateData['domiciliataire_nom'] ?: ($contrat->domiciliataire->nom ?? ''));
+        $domicilie = e($templateData['raison_sociale']);
+        $dateDebut = $templateData['date_debut'] ?: '—';
+        $dateFin = $templateData['date_fin'] ?: '—';
+        $dureeMois = $templateData['duree_mois'] ?: '—';
+        $mensuel = $templateData['redevance_mensuelle'] ?: '—';
+        $annuel = $templateData['redevance_annuelle'] ?: '—';
+        $instrNo = $templateData['instruction_no'] ?: '';
+        $ville = $templateData['ville_signature'] ?: 'AGADIR';
+        $gerantNom = e($templateData['gerant_nom']);
+        $gerantCin = e($templateData['gerant_cin']);
+        $astNom = e(trim(($contrat->domiciliataire->nom ?? '') . ' ' . ($contrat->domiciliataire->prenom ?? '')));
+        $astRC = e($contrat->domiciliataire->rc ?? '');
+        $astIF = e($contrat->domiciliataire->if_number ?? '');
+        $astAdresse = e($contrat->domiciliataire->adresse ?? '');
 
-        // Full PDF HTML — professional contract layout
         $html = "<!DOCTYPE html>
 <html>
 <head>
@@ -238,32 +240,14 @@ class ContratController extends Controller
             font-size: 10px;
             margin: 0 0 14px;
         }
-        .hr-gold {
-            border: none;
-            border-top: 1.5px solid #c8a96e;
-            margin: 12px 0;
-        }
-        .hr-light {
-            border: none;
-            border-top: 1px solid #ddd;
-            margin: 10px 0;
-        }
-        .label { font-weight: bold; }
-        .section-title {
-            font-size: 10px;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-            color: #888;
-            margin: 14px 0 6px;
-        }
-        .signatures {
-            display: table;
-            width: 100%;
-            margin-top: 50px;
-        }
-        .sig-left  { display: table-cell; width: 50%; }
-        .sig-right { display: table-cell; width: 50%; text-align: right; }
-        strong { font-weight: bold; }
+        .hr-gold  { border:none; border-top:1.5px solid #c8a96e; margin:12px 0; }
+        .hr-light { border:none; border-top:1px solid #ddd; margin:10px 0; }
+        .label    { font-weight:bold; }
+        .section  { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#888; margin:14px 0 6px; }
+        .signatures { display:table; width:100%; margin-top:50px; }
+        .sig-left   { display:table-cell; width:50%; }
+        .sig-right  { display:table-cell; width:50%; text-align:right; }
+        strong { font-weight:bold; }
     </style>
 </head>
 <body>
@@ -271,23 +255,22 @@ class ContratController extends Controller
     <h1>Contrat de Domiciliation</h1>
     <p class='sub'>
         " . ($instrNo ? "Instruction N° : <strong>{$instrNo}</strong> &nbsp;|&nbsp;" : '') . "
-        Domiciliataire : <strong>{$manager}</strong>
+        Domiciliataire : <strong>{$astNom}</strong>
     </p>
 
     <hr class='hr-gold'>
 
-    <p class='section-title'>Parties</p>
-    <p>
-        <span class='label'>Domiciliataire :</span> {$manager}
-    </p>
-    <p>
-        <span class='label'>Domicilié :</span> {$company}
-    </p>
+    <p class='section'>Parties</p>
+    <p><span class='label'>Domiciliataire :</span> {$astNom}</p>
+    <p><span class='label'>RC :</span> {$astRC} &nbsp;|&nbsp; <span class='label'>IF :</span> {$astIF}</p>
+    <p><span class='label'>Adresse :</span> {$astAdresse}</p>
+    <p style='margin-top:8px'><span class='label'>Domicilié :</span> {$domicilie}</p>
+    <p><span class='label'>Gérant :</span> {$gerantNom} &nbsp;|&nbsp; <span class='label'>CIN :</span> {$gerantCin}</p>
 
     <hr class='hr-light'>
 
-    <p class='section-title'>Durée &amp; Redevance</p>
-    <p><span class='label'>Période :</span> {$dateDebut} → {$dateFin}</p>
+    <p class='section'>Durée &amp; Redevance</p>
+    <p><span class='label'>Période :</span> {$dateDebut} → {$dateFin} ({$dureeMois} mois)</p>
     <p>
         <span class='label'>Redevance mensuelle :</span> {$mensuel}
         &nbsp;|&nbsp;
@@ -296,8 +279,7 @@ class ContratController extends Controller
 
     <hr class='hr-light'>
 
-    <p class='section-title'>Articles du contrat</p>
-
+    <p class='section'>Articles du contrat</p>
     " . ($articlesHtml ?: "<p style='color:#999'>Aucun article sélectionné.</p>") . "
 
     <hr class='hr-gold'>
@@ -306,28 +288,28 @@ class ContratController extends Controller
         <div class='sig-left'>
             <p style='margin:0 0 50px'>Fait à {$ville}, le _________________</p>
             <p style='margin:0'><strong>Signature du domiciliataire</strong></p>
-            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$manager}</p>
+            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$astNom}</p>
         </div>
         <div class='sig-right'>
             <p style='margin:0 0 50px'>Lu et approuvé, bon pour accord</p>
             <p style='margin:0'><strong>Signature du domicilié</strong></p>
-            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$company}</p>
+            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$domicilie}</p>
         </div>
     </div>
 
 </body>
 </html>";
 
-        $pdf      = PDF::loadHTML($html)->setPaper('a4', 'portrait');
+        $pdf = PDF::loadHTML($html)->setPaper('a4', 'portrait');
         $filePath = "contrats/contrat_{$contrat->id}.pdf";
         Storage::disk('public')->put($filePath, $pdf->output());
         $contrat->update(['pdf_path' => $filePath]);
 
         return response()->json([
             'success' => true,
-            'data'    => [
+            'data' => [
                 'pdf_path' => $filePath,
-                'url'      => asset('storage/' . $filePath),
+                'url' => asset('storage/' . $filePath),
             ],
         ]);
     }

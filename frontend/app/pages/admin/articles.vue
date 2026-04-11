@@ -1,6 +1,4 @@
 <!-- app/pages/admin/articles.vue -->
-<!-- Full CRUD for articles (contract clauses library) -->
-<!-- API: GET/POST/PUT/DELETE /api/articles -->
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useArticlesStore } from '~/stores/articles'
@@ -26,6 +24,9 @@ const form = reactive({
   is_active: true,
 })
 
+// ── Textarea ref — passed to VariablePanel for cursor tracking
+const bodyTextareaRef = ref<HTMLTextAreaElement | null>(null)
+
 // ── Search ────────────────────────────────────────────────
 const filtered = computed(() => {
   if (!search.value.trim()) return items.value
@@ -39,6 +40,9 @@ const filtered = computed(() => {
 // ── Stats ─────────────────────────────────────────────────
 const activeCount   = computed(() => items.value.filter(a => a.is_active).length)
 const inactiveCount = computed(() => items.value.filter(a => !a.is_active).length)
+
+// ── VariablePanel ref — to access onDragOver/onDrop ───────
+const variablePanelRef = ref<any>(null)
 
 // ── Open modal: create ────────────────────────────────────
 function openCreate(): void {
@@ -62,7 +66,7 @@ function openEdit(article: any): void {
   showModal.value = true
 }
 
-// ── Submit create / edit ──────────────────────────────────
+// ── Submit ────────────────────────────────────────────────
 async function submitArticle(): Promise<void> {
   if (!form.title.trim()) {
     serverError.value = 'Le titre est obligatoire.'
@@ -75,12 +79,7 @@ async function submitArticle(): Promise<void> {
       await articlesStore.create(form.title.trim(), form.body.trim())
       success('Article créé avec succès')
     } else if (editId.value) {
-      await articlesStore.update(
-        editId.value,
-        form.title.trim(),
-        form.body.trim(),
-        form.is_active
-      )
+      await articlesStore.update(editId.value, form.title.trim(), form.body.trim(), form.is_active)
       success('Article mis à jour')
     }
     showModal.value = false
@@ -94,15 +93,10 @@ async function submitArticle(): Promise<void> {
   }
 }
 
-// ── Toggle active status directly from list ───────────────
+// ── Toggle active ─────────────────────────────────────────
 async function toggleActive(article: any): Promise<void> {
   try {
-    await articlesStore.update(
-      article.id,
-      article.title,
-      article.body,
-      !article.is_active
-    )
+    await articlesStore.update(article.id, article.title, article.body, !article.is_active)
     success(article.is_active ? 'Article désactivé' : 'Article activé')
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur mise à jour statut')
@@ -111,32 +105,13 @@ async function toggleActive(article: any): Promise<void> {
 
 // ── Delete ────────────────────────────────────────────────
 async function deleteArticle(id: string): Promise<void> {
-  if (!confirm('Supprimer cet article définitivement ? Il sera retiré de tous les contrats.')) return
+  if (!confirm('Supprimer cet article définitivement ?')) return
   try {
     await articlesStore.remove(id)
     success('Article supprimé')
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur suppression')
   }
-}
-
-// ── Template variables ────────────────────────────────────
-const templateVars = [
-  '{{date_debut}}',
-  '{{date_fin}}',
-  '{{raison_sociale}}',
-  '{{gerant_nom}}',
-  '{{gerant_cin}}',
-  '{{gerant_naissance}}',
-  '{{gerant_adresse}}',
-  '{{redevance_mensuelle}}',
-  '{{redevance_annuelle}}',
-  '{{instruction_no}}',
-  '{{ville_signature}}',
-]
-
-function insertVar(v: string): void {
-  form.body += (form.body.endsWith(' ') || form.body === '' ? '' : ' ') + v
 }
 
 onMounted(() => articlesStore.fetchAll())
@@ -168,7 +143,7 @@ onMounted(() => articlesStore.fetchAll())
       </div>
       <div class="card p-4 text-center">
         <p class="text-2xl font-serif text-green-400">{{ activeCount }}</p>
-        <p class="text-xs text-app-text/40 mt-1">Articles actifs</p>
+        <p class="text-xs text-app-text/40 mt-1">Actifs</p>
       </div>
       <div class="card p-4 text-center">
         <p class="text-2xl font-serif text-app-text/40">{{ inactiveCount }}</p>
@@ -198,7 +173,6 @@ onMounted(() => articlesStore.fetchAll())
         class="card p-4 space-y-3 transition"
         :class="!article.is_active ? 'opacity-50' : ''"
       >
-        <!-- Article header -->
         <div class="flex items-start justify-between gap-3 flex-wrap">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
@@ -216,8 +190,6 @@ onMounted(() => articlesStore.fetchAll())
               {{ article.body || '— Aucun contenu —' }}
             </p>
           </div>
-
-          <!-- Actions -->
           <div class="flex gap-2 flex-shrink-0">
             <button
               class="btn btn-outline btn-sm"
@@ -226,23 +198,14 @@ onMounted(() => articlesStore.fetchAll())
             >
               {{ article.is_active ? '⏸' : '▶' }}
             </button>
-            <button class="btn btn-outline btn-sm" @click="openEdit(article)">
-              Modifier
-            </button>
-            <button class="btn btn-danger btn-sm" @click="deleteArticle(article.id)">
-              ✕
-            </button>
+            <button class="btn btn-outline btn-sm" @click="openEdit(article)">Modifier</button>
+            <button class="btn btn-danger btn-sm" @click="deleteArticle(article.id)">✕</button>
           </div>
         </div>
-
-        <!-- Meta -->
-        <div class="flex items-center gap-4 text-xs text-app-text/30 border-t border-white/5 pt-2">
-          <!-- <span>ID : {{ article.id }}</span> -->
+        <div class="flex gap-4 text-xs text-app-text/30 border-t border-white/5 pt-2">
+          <span>ID : {{ article.id }}</span>
           <span v-if="article.created_at">
             Créé le {{ new Date(article.created_at).toLocaleDateString('fr-MA') }}
-          </span>
-          <span v-if="article.updated_at">
-            · Modifié le {{ new Date(article.updated_at).toLocaleDateString('fr-MA') }}
           </span>
         </div>
       </div>
@@ -260,110 +223,109 @@ onMounted(() => articlesStore.fetchAll())
   </div>
 
   <!-- ════ Modal — Teleported to body ════════════════════ -->
-  <!-- Teleport fixes fixed positioning inside scrolled/transformed parents -->
   <Teleport to="body">
     <div
       v-if="showModal"
       class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
       @click.self="showModal = false"
     >
-      <div class="card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
+      <!-- Two-column layout: form left, variables right -->
+      <div
+        class="card w-full max-w-5xl max-h-[90vh] overflow-y-auto p-6"
+        style="display:grid;grid-template-columns:1fr 320px;gap:24px"
+      >
 
-        <!-- Modal header -->
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-xl">
-            {{ modalMode === 'create' ? 'Nouvel article' : 'Modifier l\'article' }}
-          </h2>
-          <button
-            class="text-app-text/40 hover:text-white text-xl"
-            @click="showModal = false"
-          >✕</button>
+        <!-- ── Left: form ──────────────────────────────── -->
+        <div class="space-y-4 min-w-0">
+          <div class="flex items-center justify-between">
+            <h2 class="font-serif text-xl">
+              {{ modalMode === 'create' ? 'Nouvel article' : 'Modifier l\'article' }}
+            </h2>
+            <button
+              class="text-app-text/40 hover:text-white text-xl"
+              @click="showModal = false"
+            >✕</button>
+          </div>
+
+          <form class="space-y-4" @submit.prevent="submitArticle">
+
+            <div>
+              <label class="f-label">Titre *</label>
+              <input
+                v-model="form.title"
+                class="f-input"
+                required
+                placeholder="Ex: ARTICLE 1 — DURÉE"
+              />
+            </div>
+
+            <div>
+              <label class="f-label">
+                Contenu
+                <span class="text-app-text/30 font-normal ml-1 text-xs">
+                  — glissez les variables depuis le panneau →
+                </span>
+              </label>
+              <!-- Drop target: bind drag events from VariablePanel -->
+              <textarea
+                ref="bodyTextareaRef"
+                v-model="form.body"
+                class="f-input min-h-[220px] resize-y leading-relaxed font-mono text-sm"
+                placeholder="Le présent contrat est prévu pour une durée de {{duree_mois}} mois qui commencera le {{date_debut}} et se terminera le {{date_fin}}..."
+                @dragover="variablePanelRef?.onDragOver($event)"
+                @drop="variablePanelRef?.onDrop($event)"
+              />
+              <p class="text-xs text-app-text/30 mt-1">
+Les variables entre <code class="text-gold">&#123;&#123; &#125;&#125;</code> seront remplacées par les vraies valeurs dans le PDF.              </p>
+            </div>
+
+            <!-- Active toggle -->
+            <div class="flex items-center gap-3">
+              <button
+                type="button"
+                class="w-10 h-6 rounded-full transition-colors relative flex-shrink-0"
+                :class="form.is_active ? 'bg-gold' : 'bg-white/20'"
+                @click="form.is_active = !form.is_active"
+              >
+                <span
+                  class="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                  :class="form.is_active ? 'translate-x-4' : 'translate-x-0.5'"
+                />
+              </button>
+              <span class="text-sm text-app-text/70">
+                Article actif (inclus par défaut dans les nouveaux contrats)
+              </span>
+            </div>
+
+            <p v-if="serverError" class="text-red-400 text-sm">{{ serverError }}</p>
+
+            <div class="flex gap-3 justify-end pt-2">
+              <button type="button" class="btn btn-outline btn-md" @click="showModal = false">
+                Annuler
+              </button>
+              <button type="submit" class="btn btn-gold btn-md" :disabled="saving">
+                {{ saving
+                  ? 'Enregistrement...'
+                  : modalMode === 'create' ? 'Créer l\'article' : 'Sauvegarder'
+                }}
+              </button>
+            </div>
+
+          </form>
         </div>
 
-        <!-- Form -->
-        <form class="space-y-4" @submit.prevent="submitArticle">
+        <!-- ── Right: variable panel ───────────────────── -->
+        <div
+          class="border-l border-white/10 pl-6 overflow-y-auto"
+          style="max-height:80vh"
+        >
+          <VariablePanel
+            ref="variablePanelRef"
+            v-model="form.body"
+            :textarea-ref="bodyTextareaRef"
+          />
+        </div>
 
-          <!-- Title -->
-          <div>
-            <label class="f-label">Titre *</label>
-            <input
-              v-model="form.title"
-              class="f-input"
-              required
-              placeholder="Ex: ARTICLE 1 — DURÉE"
-            />
-          </div>
-
-          <!-- Body -->
-          <div>
-            <label class="f-label">Contenu</label>
-            <textarea
-              v-model="form.body"
-              class="f-input min-h-[180px] resize-y leading-relaxed"
-              placeholder="Texte de la clause... Vous pouvez utiliser {{variable}} pour les valeurs dynamiques."
-            />
-
-            <!-- Template variables clickable hints -->
-            <div class="mt-2 p-3 rounded-xl bg-white/3 border border-white/10 space-y-2">
-              <p class="text-xs text-gold font-semibold">
-                Variables disponibles — cliquez pour insérer :
-              </p>
-              <div class="flex flex-wrap gap-2">
-                <code
-                  v-for="v in templateVars"
-                  :key="v"
-                  class="text-xs px-2 py-0.5 rounded bg-gold/10 text-gold font-mono cursor-pointer hover:bg-gold/20 transition"
-                  @click="insertVar(v)"
-                >{{ v }}</code>
-              </div>
-              <p class="text-xs text-app-text/30">
-                Ces variables seront remplacées automatiquement lors de la génération du PDF.
-              </p>
-            </div>
-          </div>
-
-          <!-- Active toggle -->
-          <div class="flex items-center gap-3">
-            <button
-              type="button"
-              class="w-10 h-6 rounded-full transition-colors relative flex-shrink-0"
-              :class="form.is_active ? 'bg-gold' : 'bg-white/20'"
-              @click="form.is_active = !form.is_active"
-            >
-              <span
-                class="absolute top-0.5 w-5 h-5 rounded-full bg-white transition-transform"
-                :class="form.is_active ? 'translate-x-4' : 'translate-x-0.5'"
-              />
-            </button>
-            <span class="text-sm text-app-text/70">
-              Article actif (inclus par défaut dans les nouveaux contrats)
-            </span>
-          </div>
-
-          <p v-if="serverError" class="text-red-400 text-sm">{{ serverError }}</p>
-
-          <!-- Footer buttons -->
-          <div class="flex gap-3 justify-end pt-2">
-            <button
-              type="button"
-              class="btn btn-outline btn-md"
-              @click="showModal = false"
-            >Annuler</button>
-            <button
-              type="submit"
-              class="btn btn-gold btn-md"
-              :disabled="saving"
-            >
-              {{ saving
-                ? 'Enregistrement...'
-                : modalMode === 'create'
-                  ? 'Créer l\'article'
-                  : 'Sauvegarder'
-              }}
-            </button>
-          </div>
-
-        </form>
       </div>
     </div>
   </Teleport>
