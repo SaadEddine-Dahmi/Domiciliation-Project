@@ -221,14 +221,20 @@ const notificationDelayMonths = ref<1 | 3 | 6>(1);
 function buildContratBody() {
   return {
     entreprise_id:             selectedEntrepriseId.value,
-    date_debut:                contract.form.dateDebut  || null,
-    date_fin:                  contract.form.dateFin    || null,
-    duree_mois:                contract.form.months     || null,
-    prix_mensuel:              contract.monthlyTotal    || null,
-    prix_total:                contract.grandTotal      || null,
+    date_debut:                contract.form.dateDebut       || null,
+    date_fin:                  contract.form.dateFin         || null,
+    duree_mois:                contract.form.months          || null,
+    prix_mensuel:              contract.monthlyTotal         || null,
+    prix_total:                contract.grandTotal           || null,
     statut:                    "draft",
     notification_delay_months: notificationDelayMonths.value,
     article_ids:               selectedIds.value,
+    // New fields — feed {{variables}} in article bodies
+    instruction_no:            contract.form.instruction_no  || null,
+    ville_signature:           contract.form.ville_signature || null,
+    date_signature:            contract.form.date_signature  || null,
+    caution:                   contract.form.caution         || null,
+    mode_paiement:             contract.form.mode_paiement   || null,
   };
 }
 
@@ -355,9 +361,14 @@ async function preloadFromRouteId(): Promise<void> {
     currentContratId.value     = String(c.id);
     selectedEntrepriseId.value = c.entreprise_id ?? null;
 
-    contract.form.dateDebut = c.date_debut ?? "";
-    contract.form.dateFin   = c.date_fin   ?? "";
-    contract.form.months    = c.duree_mois ?? 12;
+    contract.form.dateDebut        = c.date_debut      ?? "";
+    contract.form.dateFin          = c.date_fin        ?? "";
+    contract.form.months           = c.duree_mois      ?? 12;
+    contract.form.instruction_no   = c.instruction_no  ?? "";
+    contract.form.ville_signature  = c.ville_signature ?? "";
+    contract.form.date_signature   = c.date_signature  ?? "";
+    contract.form.caution          = c.caution         ?? "";
+    contract.form.mode_paiement    = c.mode_paiement   ?? "";
     contract.setMonthly(Number(c.prix_mensuel ?? 0));
 
     if (Array.isArray(c.articles)) {
@@ -447,24 +458,25 @@ const contractPreviewHtml = computed(() => {
     gerant_nationalite: rep?.nationalite     || "",
 
     // Contrat
-    numero_contrat:  currentContratId.value  || "",
-    instruction_no:  "",
-    date_debut:      formatDatePreview(f.dateDebut),
-    date_fin:        formatDatePreview(f.dateFin),
-    duree_mois:      String(f.months         || ""),
-    date_signature:  "",
-    ville_signature: "",
+numero_contrat:  currentContratId.value          || "",
+instruction_no:  contract.form.instruction_no    || "",
+date_debut:      formatDatePreview(contract.form.dateDebut),
+date_fin:        formatDatePreview(contract.form.dateFin),
+duree_mois:      String(contract.form.months     || ""),
+date_signature:  formatDatePreview(contract.form.date_signature),
+ville_signature: contract.form.ville_signature   || "",
 
-    // Financier
-    redevance_mensuelle: contract.monthlyTotal
-      ? contract.monthlyTotal.toLocaleString("fr-MA") + " DH/mois"
-      : "",
-    redevance_annuelle: contract.grandTotal
-      ? contract.grandTotal.toLocaleString("fr-MA") + " DH"
-      : "",
-    caution:       "",
-    mode_paiement: "",
-  };
+// Financier
+redevance_mensuelle: contract.monthlyTotal
+  ? contract.monthlyTotal.toLocaleString("fr-MA") + " DH/mois"
+  : "",
+redevance_annuelle: contract.grandTotal
+  ? contract.grandTotal.toLocaleString("fr-MA") + " DH"
+  : "",
+caution: contract.form.caution
+  ? Number(contract.form.caution).toLocaleString("fr-MA") + " DH"
+  : "",
+mode_paiement: contract.form.mode_paiement || "",
 
   // Render articles with variable replacement
   const articleLines = selectedSorted.value
@@ -561,18 +573,23 @@ const contractPreviewHtml = computed(() => {
 
 <template>
   <div class="space-y-4 animate-fade-up">
-
     <!-- ── Header ─────────────────────────────────────── -->
     <div class="card p-4 flex items-center justify-between flex-wrap gap-2">
       <div>
         <h1 class="font-serif text-2xl">
-          {{ currentContratId ? `Contrat #${currentContratId}` : "Nouveau contrat" }}
+          {{
+            currentContratId
+              ? `Contrat #${currentContratId}`
+              : "Nouveau contrat"
+          }}
         </h1>
         <p class="text-xs mt-1 text-app-text/40">
           <span v-if="autosaveState === 'saved'">
             ✓ Sauvegardé {{ new Date(autosaveAt).toLocaleTimeString() }}
           </span>
-          <span v-else-if="autosaveState === 'saving'">⏳ Sauvegarde en cours...</span>
+          <span v-else-if="autosaveState === 'saving'"
+            >⏳ Sauvegarde en cours...</span
+          >
           <span v-else-if="autosaveState === 'error'" class="text-red-400">
             ✗ {{ autosaveError }}
           </span>
@@ -582,8 +599,12 @@ const contractPreviewHtml = computed(() => {
         </p>
       </div>
       <div class="flex gap-2">
-        <button class="btn btn-outline btn-sm" @click="showPreview = true">👁 Aperçu</button>
-        <button class="btn btn-outline btn-sm" @click="saveAsDraft(false)">💾 Sauvegarder</button>
+        <button class="btn btn-outline btn-sm" @click="showPreview = true">
+          👁 Aperçu
+        </button>
+        <button class="btn btn-outline btn-sm" @click="saveAsDraft(false)">
+          💾 Sauvegarder
+        </button>
       </div>
     </div>
 
@@ -594,18 +615,21 @@ const contractPreviewHtml = computed(() => {
           v-for="(s, i) in steps"
           :key="s"
           class="px-3 py-1.5 rounded-lg text-xs border font-bold transition"
-          :class="step === i
-            ? 'border-gold text-gold bg-gold/10'
-            : 'border-white/10 text-app-text/50 hover:border-white/20'"
-          @click="step = i"
-        >
+          :class="
+            step === i
+              ? 'border-gold text-gold bg-gold/10'
+              : 'border-white/10 text-app-text/50 hover:border-white/20'
+          "
+          @click="step = i">
           {{ i + 1 }}. {{ s }}
         </button>
       </div>
     </div>
 
     <!-- ── Étape 0 : AST-FISC ────────────────────────── -->
-    <div v-if="step === 0" class="card p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
+    <div
+      v-if="step === 0"
+      class="card p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
       <div>
         <label class="f-label">Raison sociale</label>
         <input v-model="contract.form.astNom" class="f-input" />
@@ -637,15 +661,16 @@ const contractPreviewHtml = computed(() => {
       <div>
         <label class="f-label">Entreprise cliente *</label>
         <select v-model="selectedEntrepriseId" class="f-input">
-          <option :value="null" disabled>-- Sélectionner une entreprise --</option>
+          <option :value="null" disabled>
+            -- Sélectionner une entreprise --
+          </option>
           <option v-for="c in clientItems" :key="c.id" :value="c.id">
             {{ c.raison_sociale }}{{ c.ville ? ` — ${c.ville}` : "" }}
           </option>
         </select>
         <p
           v-if="!clientItems.length && !clientsStore.loading"
-          class="text-xs text-app-text/40 mt-1"
-        >
+          class="text-xs text-app-text/40 mt-1">
           Aucun client —
           <NuxtLink to="/admin/clients" class="text-gold underline">
             créer un client d'abord
@@ -655,15 +680,13 @@ const contractPreviewHtml = computed(() => {
 
       <div
         v-if="selectedEntrepriseId"
-        class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3"
-      >
+        class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3">
         <p class="text-app-text/40 text-xs uppercase tracking-widest mb-2">
           Informations depuis la base de données
         </p>
         <template
           v-for="c in clientItems.filter((x) => x.id === selectedEntrepriseId)"
-          :key="c.id"
-        >
+          :key="c.id">
           <p><b>Raison sociale :</b> {{ c.raison_sociale }}</p>
           <p><b>Forme juridique :</b> {{ c.forme_juridique ?? "-" }}</p>
           <p><b>Adresse :</b> {{ c.adresse ?? "-" }}, {{ c.ville ?? "-" }}</p>
@@ -699,11 +722,18 @@ const contractPreviewHtml = computed(() => {
     </div>
 
     <!-- ── Étape 2 : Durée & Montants ────────────────── -->
-    <div v-else-if="step === 2" class="card p-4 space-y-3">
+    <div v-else-if="step === 2" class="card p-4 space-y-4">
+      <!-- Dates + redevance -->
+      <p class="text-xs uppercase text-gold tracking-widest font-bold">
+        Durée &amp; Redevance
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
         <div>
           <label class="f-label">Date début *</label>
-          <input v-model="contract.form.dateDebut" class="f-input" type="date" />
+          <input
+            v-model="contract.form.dateDebut"
+            class="f-input"
+            type="date" />
         </div>
         <div>
           <label class="f-label">Date fin</label>
@@ -715,8 +745,9 @@ const contractPreviewHtml = computed(() => {
             :value="contract.form.redevanceMensuelle"
             class="f-input"
             type="number"
-            @input="(e: any) => contract.setMonthly(Number(e.target.value) || 0)"
-          />
+            @input="
+              (e: any) => contract.setMonthly(Number(e.target.value) || 0)
+            " />
         </div>
         <div>
           <label class="f-label">Redevance annuelle (DH)</label>
@@ -724,17 +755,28 @@ const contractPreviewHtml = computed(() => {
             :value="contract.form.redevanceAnnuelle"
             class="f-input"
             type="number"
-            @input="(e: any) => contract.setAnnual(Number(e.target.value) || 0)"
-          />
+            @input="
+              (e: any) => contract.setAnnual(Number(e.target.value) || 0)
+            " />
         </div>
       </div>
 
-      <div class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3">
-        <p>Durée calculée : <b>{{ contract.form.months }} mois</b></p>
-        <p>Total mensuel (avec services) : <b>{{ contract.monthlyTotal }} DH</b></p>
-        <p>Total global : <b class="text-gold text-base">{{ contract.grandTotal }} DH</b></p>
+      <!-- Recap -->
+      <div
+        class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3">
+        <p>
+          Durée calculée : <b>{{ contract.form.months }} mois</b>
+        </p>
+        <p>
+          Total mensuel (avec services) : <b>{{ contract.monthlyTotal }} DH</b>
+        </p>
+        <p>
+          Total global :
+          <b class="text-gold text-base">{{ contract.grandTotal }} DH</b>
+        </p>
       </div>
 
+      <!-- Notification delay -->
       <div class="rounded-xl border border-gold/20 p-3 space-y-2 bg-gold/5">
         <p class="text-xs uppercase text-gold tracking-widest font-bold">
           🔔 Rappel avant expiration
@@ -747,13 +789,88 @@ const contractPreviewHtml = computed(() => {
             v-for="m in [1, 3, 6]"
             :key="m"
             class="px-4 py-2 rounded-lg text-sm font-bold border transition"
-            :class="notificationDelayMonths === m
-              ? 'border-gold bg-gold/20 text-gold'
-              : 'border-white/10 text-app-text/50 hover:border-white/30'"
-            @click="notificationDelayMonths = m as 1 | 3 | 6"
-          >
+            :class="
+              notificationDelayMonths === m
+                ? 'border-gold bg-gold/20 text-gold'
+                : 'border-white/10 text-app-text/50 hover:border-white/30'
+            "
+            @click="notificationDelayMonths = m as 1 | 3 | 6">
             {{ m }} mois
           </button>
+        </div>
+      </div>
+
+      <!-- ── Détails contrat — feeds {{variables}} in articles ── -->
+      <p class="text-xs uppercase text-gold tracking-widest font-bold pt-1">
+        Détails du contrat
+      </p>
+      <p class="text-xs text-app-text/40 -mt-2">
+        Ces valeurs remplaceront les variables dans les articles (ex:
+        &#123;&#123;ville_signature&#125;&#125;).
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div>
+          <label class="f-label">
+            N° Instruction
+            <code class="text-gold text-[10px] ml-1 font-mono"
+              >&#123;&#123;instruction_no&#125;&#125;</code
+            >
+          </label>
+          <input
+            v-model="contract.form.instruction_no"
+            class="f-input"
+            placeholder="Ex: 1923" />
+        </div>
+        <div>
+          <label class="f-label">
+            Ville de signature
+            <code class="text-gold text-[10px] ml-1 font-mono"
+              >&#123;&#123;ville_signature&#125;&#125;</code
+            >
+          </label>
+          <input
+            v-model="contract.form.ville_signature"
+            class="f-input"
+            placeholder="Ex: AGADIR" />
+        </div>
+        <div>
+          <label class="f-label">
+            Date de signature
+            <code class="text-gold text-[10px] ml-1 font-mono"
+              >&#123;&#123;date_signature&#125;&#125;</code
+            >
+          </label>
+          <input
+            v-model="contract.form.date_signature"
+            class="f-input"
+            type="date" />
+        </div>
+        <div>
+          <label class="f-label">
+            Mode de paiement
+            <code class="text-gold text-[10px] ml-1 font-mono"
+              >&#123;&#123;mode_paiement&#125;&#125;</code
+            >
+          </label>
+          <select v-model="contract.form.mode_paiement" class="f-input">
+            <option value="">-- Choisir --</option>
+            <option value="Virement bancaire">Virement bancaire</option>
+            <option value="Espèces">Espèces</option>
+            <option value="Chèque">Chèque</option>
+          </select>
+        </div>
+        <div>
+          <label class="f-label">
+            Caution (DH)
+            <code class="text-gold text-[10px] ml-1 font-mono"
+              >&#123;&#123;caution&#125;&#125;</code
+            >
+          </label>
+          <input
+            v-model="contract.form.caution"
+            class="f-input"
+            type="number"
+            placeholder="Ex: 500" />
         </div>
       </div>
     </div>
@@ -761,7 +878,6 @@ const contractPreviewHtml = computed(() => {
     <!-- ── Étape 3 : Articles depuis DB ──────────────── -->
     <div v-else-if="step === 3" class="space-y-3">
       <div class="card p-4 space-y-3">
-
         <div class="flex items-center justify-between">
           <p class="font-semibold text-sm">
             Bibliothèque d'articles
@@ -769,7 +885,9 @@ const contractPreviewHtml = computed(() => {
               ({{ articleItems.length }} disponibles)
             </span>
           </p>
-          <p class="text-xs text-gold">{{ selectedIds.length }} sélectionné(s)</p>
+          <p class="text-xs text-gold">
+            {{ selectedIds.length }} sélectionné(s)
+          </p>
         </div>
 
         <!-- Loading -->
@@ -783,30 +901,40 @@ const contractPreviewHtml = computed(() => {
             v-for="a in articleItems"
             :key="a.id"
             class="rounded-xl border p-3 transition"
-            :class="selectedIds.includes(a.id)
-              ? 'border-gold/40 bg-gold/5'
-              : 'border-white/10 hover:border-white/20'"
-          >
+            :class="
+              selectedIds.includes(a.id)
+                ? 'border-gold/40 bg-gold/5'
+                : 'border-white/10 hover:border-white/20'
+            ">
             <!-- Read mode -->
             <div v-if="editingId !== a.id">
               <div class="flex items-start justify-between gap-2">
-                <button class="text-left flex-1 min-w-0" @click="toggleArticle(a.id)">
+                <button
+                  class="text-left flex-1 min-w-0"
+                  @click="toggleArticle(a.id)">
                   <p class="font-semibold text-sm">{{ a.title }}</p>
-                  <p class="text-xs text-app-text/50 mt-1 line-clamp-2">{{ a.body }}</p>
+                  <p class="text-xs text-app-text/50 mt-1 line-clamp-2">
+                    {{ a.body }}
+                  </p>
                 </button>
                 <div class="flex gap-1 flex-shrink-0 ml-2 items-center">
                   <span
                     class="text-xs px-2 py-0.5 rounded-full"
-                    :class="selectedIds.includes(a.id)
-                      ? 'text-gold bg-gold/10'
-                      : 'text-app-text/40 bg-white/5'"
-                  >
+                    :class="
+                      selectedIds.includes(a.id)
+                        ? 'text-gold bg-gold/10'
+                        : 'text-app-text/40 bg-white/5'
+                    ">
                     {{ selectedIds.includes(a.id) ? "✓ Sélectionné" : "○" }}
                   </span>
-                  <button class="btn btn-outline btn-sm" @click.stop="startEdit(a)">
+                  <button
+                    class="btn btn-outline btn-sm"
+                    @click.stop="startEdit(a)">
                     Éditer
                   </button>
-                  <button class="btn btn-danger btn-sm" @click.stop="deleteArticle(a.id)">
+                  <button
+                    class="btn btn-danger btn-sm"
+                    @click.stop="deleteArticle(a.id)">
                     ✕
                   </button>
                 </div>
@@ -818,8 +946,7 @@ const contractPreviewHtml = computed(() => {
               <input
                 v-model="editTitle"
                 class="f-input text-sm"
-                placeholder="Titre de l'article"
-              />
+                placeholder="Titre de l'article" />
               <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
                 <div>
                   <p class="f-label mb-1">
@@ -834,29 +961,27 @@ const contractPreviewHtml = computed(() => {
                     class="f-input text-sm min-h-[140px] resize-y font-mono"
                     placeholder="Contenu de l'article avec {{variables}}..."
                     @dragover="inlineEditPanelRef?.onDragOver($event)"
-                    @drop="inlineEditPanelRef?.onDrop($event)"
-                  />
+                    @drop="inlineEditPanelRef?.onDrop($event)" />
                 </div>
                 <div
                   class="border border-white/10 rounded-xl p-3 overflow-y-auto"
-                  style="max-height:220px"
-                >
+                  style="max-height: 220px">
                   <VariablePanel
                     ref="inlineEditPanelRef"
                     v-model="editBody"
-                    :textarea-ref="inlineEditTextareaRef"
-                  />
+                    :textarea-ref="inlineEditTextareaRef" />
                 </div>
               </div>
               <div class="flex gap-2">
                 <button
                   class="btn btn-gold btn-sm"
                   :disabled="savingArticle"
-                  @click="saveEdit"
-                >
+                  @click="saveEdit">
                   {{ savingArticle ? "Enregistrement..." : "✓ Enregistrer" }}
                 </button>
-                <button class="btn btn-outline btn-sm" @click="cancelEdit">Annuler</button>
+                <button class="btn btn-outline btn-sm" @click="cancelEdit">
+                  Annuler
+                </button>
               </div>
             </div>
           </div>
@@ -870,8 +995,7 @@ const contractPreviewHtml = computed(() => {
           <input
             v-model="newArtTitle"
             class="f-input"
-            placeholder="Titre du nouvel article"
-          />
+            placeholder="Titre du nouvel article" />
           <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
             <div>
               <textarea
@@ -880,29 +1004,24 @@ const contractPreviewHtml = computed(() => {
                 class="f-input min-h-[140px] resize-y font-mono text-sm"
                 placeholder="Contenu du nouvel article avec {{variables}}..."
                 @dragover="newArtPanelRef?.onDragOver($event)"
-                @drop="newArtPanelRef?.onDrop($event)"
-              />
+                @drop="newArtPanelRef?.onDrop($event)" />
             </div>
             <div
               class="border border-white/10 rounded-xl p-3 overflow-y-auto"
-              style="max-height:220px"
-            >
+              style="max-height: 220px">
               <VariablePanel
                 ref="newArtPanelRef"
                 v-model="newArtBody"
-                :textarea-ref="newArtTextareaRef"
-              />
+                :textarea-ref="newArtTextareaRef" />
             </div>
           </div>
           <button
             class="btn btn-gold btn-md"
             :disabled="savingArticle || !newArtTitle.trim()"
-            @click="addArticle"
-          >
+            @click="addArticle">
             {{ savingArticle ? "Ajout..." : "+ Ajouter à la bibliothèque" }}
           </button>
         </div>
-
       </div>
     </div>
 
@@ -913,7 +1032,10 @@ const contractPreviewHtml = computed(() => {
         <p>
           Entreprise :
           <b>
-            {{ clientItems.find((c) => c.id === selectedEntrepriseId)?.raison_sociale ?? "—" }}
+            {{
+              clientItems.find((c) => c.id === selectedEntrepriseId)
+                ?.raison_sociale ?? "—"
+            }}
           </b>
         </p>
         <p>
@@ -924,39 +1046,57 @@ const contractPreviewHtml = computed(() => {
             {{ formatDatePreview(contract.form.dateFin) }}
           </b>
         </p>
-        <p>Durée : <b>{{ contract.form.months }} mois</b></p>
-        <p>Redevance mensuelle : <b>{{ contract.monthlyTotal }} DH</b></p>
-        <p>Total global : <b class="text-gold text-base">{{ contract.grandTotal }} DH</b></p>
-        <p>Articles inclus : <b>{{ selectedIds.length }}</b></p>
+        <p>
+          Durée : <b>{{ contract.form.months }} mois</b>
+        </p>
+        <p>
+          Redevance mensuelle : <b>{{ contract.monthlyTotal }} DH</b>
+        </p>
+        <p>
+          Total global :
+          <b class="text-gold text-base">{{ contract.grandTotal }} DH</b>
+        </p>
+        <p>
+          Articles inclus : <b>{{ selectedIds.length }}</b>
+        </p>
       </div>
 
-      <div v-if="pdfUrl" class="p-3 rounded-xl border border-green-500/30 bg-green-500/10">
+      <div
+        v-if="pdfUrl"
+        class="p-3 rounded-xl border border-green-500/30 bg-green-500/10">
         <p class="text-sm text-green-400">
           ✓ PDF disponible —
-          <a :href="pdfUrl" target="_blank" class="underline">Ouvrir dans un nouvel onglet</a>
+          <a :href="pdfUrl" target="_blank" class="underline"
+            >Ouvrir dans un nouvel onglet</a
+          >
         </p>
       </div>
     </div>
 
     <!-- ── Navigation ─────────────────────────────────── -->
     <div class="flex items-center justify-between gap-2">
-      <button class="btn btn-outline btn-md" :disabled="step === 0" @click="prev">
+      <button
+        class="btn btn-outline btn-md"
+        :disabled="step === 0"
+        @click="prev">
         ← Précédent
       </button>
       <div class="flex gap-2 flex-wrap justify-end">
-        <button class="btn btn-outline btn-sm" @click="clearDraft">🗑 Vider brouillon</button>
+        <button class="btn btn-outline btn-sm" @click="clearDraft">
+          🗑 Vider brouillon
+        </button>
         <button
           v-if="step === 4"
           class="btn btn-gold btn-md"
           :disabled="pdfLoading"
-          @click="generateAndDownloadPdf"
-        >
+          @click="generateAndDownloadPdf">
           {{ pdfLoading ? "⏳ Génération..." : "⬇ Générer PDF" }}
         </button>
-        <button v-if="step < 4" class="btn btn-gold btn-md" @click="next">Suivant →</button>
+        <button v-if="step < 4" class="btn btn-gold btn-md" @click="next">
+          Suivant →
+        </button>
       </div>
     </div>
-
   </div>
 
   <!-- ── Modal aperçu — teleported to body ─────────────── -->
@@ -964,24 +1104,18 @@ const contractPreviewHtml = computed(() => {
   <Teleport to="body">
     <div
       v-if="showPreview"
-      class="fixed inset-0 z-[200] bg-black/80 overflow-y-auto"
-    >
+      class="fixed inset-0 z-[200] bg-black/80 overflow-y-auto">
       <div class="min-h-full px-4 py-8">
         <div class="max-w-4xl mx-auto">
-
           <!-- Action bar -->
           <div class="flex justify-end mb-4 gap-2">
-            <button
-              class="btn btn-outline btn-sm"
-              @click="showPreview = false"
-            >
+            <button class="btn btn-outline btn-sm" @click="showPreview = false">
               ✕ Fermer
             </button>
             <button
               class="btn btn-gold btn-sm"
               :disabled="pdfLoading"
-              @click="generateAndDownloadPdf"
-            >
+              @click="generateAndDownloadPdf">
               {{ pdfLoading ? "Génération..." : "⬇ Télécharger PDF" }}
             </button>
           </div>
@@ -994,17 +1128,12 @@ const contractPreviewHtml = computed(() => {
 
           <!-- Close button at bottom for long contracts -->
           <div class="flex justify-center mt-6 pb-4">
-            <button
-              class="btn btn-outline btn-md"
-              @click="showPreview = false"
-            >
+            <button class="btn btn-outline btn-md" @click="showPreview = false">
               ✕ Fermer l'aperçu
             </button>
           </div>
-
         </div>
       </div>
     </div>
   </Teleport>
-
 </template>
