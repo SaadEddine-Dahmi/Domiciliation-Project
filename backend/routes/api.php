@@ -1,4 +1,5 @@
 <?php
+// routes/api.php
 
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\AuthController;
@@ -17,12 +18,15 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\FactureController;
 use App\Http\Controllers\Api\DocumentTypeController;
 
-// ── Public ─────────────────────────────────────────────────
-Route::post('/auth/register', [AuthController::class, 'register']);
-Route::post('/auth/login',    [AuthController::class, 'login']);
+// ── Public auth routes — strictly rate limited ─────────────
+// 10 attempts per minute per IP (brute-force protection)
+Route::middleware('throttle:auth')->group(function () {
+    Route::post('/auth/register', [AuthController::class, 'register']);
+    Route::post('/auth/login',    [AuthController::class, 'login']);
+});
 
-// ── Authenticated ──────────────────────────────────────────
-Route::middleware('auth:sanctum')->group(function () {
+// ── Authenticated routes — general rate limit ───────────────
+Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // Auth
     Route::get('/auth/me',      [AuthController::class, 'me']);
@@ -40,7 +44,7 @@ Route::middleware('auth:sanctum')->group(function () {
     // ── Entreprises ─────────────────────────────────────────
     Route::apiResource('entreprises', EntrepriseController::class);
 
-    // ── Representant (1-to-1 — no {id} needed) ─────────────
+    // ── Representant (1-to-1) ───────────────────────────────
     Route::get('entreprises/{entreprise}/representant',    [RepresentantController::class, 'show']);
     Route::post('entreprises/{entreprise}/representant',   [RepresentantController::class, 'store']);
     Route::put('entreprises/{entreprise}/representant',    [RepresentantController::class, 'update']);
@@ -51,9 +55,12 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/contrats',                [ContratController::class, 'store']);
     Route::get('/contrats/{id}',            [ContratController::class, 'show']);
     Route::put('/contrats/{id}',            [ContratController::class, 'update']);
-    Route::post('/contrats/{id}/pdf',       [ContratController::class, 'generatePdf']);
     Route::post('/contrats/{id}/activate',  [ContratController::class, 'activate']);
     Route::post('/contrats/{id}/terminate', [ContratController::class, 'terminate']);
+
+    // PDF generation — heavy rate limit (20/min)
+    Route::post('/contrats/{id}/pdf', [ContratController::class, 'generatePdf'])
+        ->middleware('throttle:heavy');
 
     // ── Paiements ───────────────────────────────────────────
     Route::get('/contrats/{contrat}/paiements',         [PaiementController::class, 'index']);
@@ -77,12 +84,20 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // ── Documents ───────────────────────────────────────────
     Route::get('/documents',         [DocumentController::class, 'index']);
-    Route::post('/documents',        [DocumentController::class, 'store']);
-    Route::put('/documents/{id}',    [DocumentController::class, 'update']);
     Route::delete('/documents/{id}', [DocumentController::class, 'destroy']);
+    Route::put('/documents/{id}',    [DocumentController::class, 'update']);
+
+    // File upload — heavy rate limit
+    Route::post('/documents', [DocumentController::class, 'store'])
+        ->middleware('throttle:heavy');
+
+    // SECURITY: authenticated download — never exposes raw file path
+    Route::get('/documents/{id}/download', [DocumentController::class, 'download'])
+        ->name('documents.download');
 
     // ── Document Types ──────────────────────────────────────
     Route::get('/document-types',  [DocumentTypeController::class, 'index']);
+    // SECURITY: only domiciliataire can create document types
     Route::post('/document-types', [DocumentTypeController::class, 'store']);
 
     // ── Notifications ───────────────────────────────────────
