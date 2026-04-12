@@ -435,8 +435,19 @@ onBeforeUnmount(() => {
 });
 
 // ── HTML Preview computed ─────────────────────────────────
-// NOTE: this MUST stay inside <script setup>, not in <template>
-// Having 'const' inside a template literal caused the compiler error
+// SECURITY: esc() is defined OUTSIDE computed — fixes compiler error
+// All user values must go through esc() before v-html interpolation
+function esc(value: string | null | undefined): string {
+  if (!value) return "";
+  return String(value)
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#x27;")
+    .replace(/\//g, "&#x2F;");
+}
+
 const contractPreviewHtml = computed((): string => {
   const f          = contract.form as any;
   const entreprise = clientItems.value.find((c) => c.id === selectedEntrepriseId.value);
@@ -448,7 +459,6 @@ const contractPreviewHtml = computed((): string => {
     domiciliataire_rc:      f.astRC       || "",
     domiciliataire_if:      f.astIF       || "",
     domiciliataire_adresse: f.astAdresse  || "",
-
     raison_sociale:      entreprise?.raison_sociale  || f.societe || "",
     forme_juridique:     entreprise?.forme_juridique || "",
     adresse_entreprise:  entreprise?.adresse         || "",
@@ -457,7 +467,6 @@ const contractPreviewHtml = computed((): string => {
     capital:             entreprise?.capital
       ? Number(entreprise.capital).toLocaleString("fr-MA") + " DH"
       : "",
-
     gerant_nom:         f.gerantNom       || rep?.nom_complet || "",
     gerant_cin:         f.gerantCIN       || rep?.cin         || "",
     gerant_naissance:   rep?.date_naissance
@@ -467,7 +476,6 @@ const contractPreviewHtml = computed((): string => {
     gerant_telephone:   f.tel             || rep?.telephone   || "",
     gerant_email:       f.email           || rep?.email       || "",
     gerant_nationalite: rep?.nationalite  || "",
-
     numero_contrat:  currentContratId.value       || "",
     instruction_no:  f.instruction_no             || "",
     date_debut:      formatDatePreview(f.dateDebut),
@@ -475,7 +483,6 @@ const contractPreviewHtml = computed((): string => {
     duree_mois:      String(f.months              || ""),
     date_signature:  formatDatePreview(f.date_signature),
     ville_signature: f.ville_signature            || "",
-
     redevance_mensuelle: contract.monthlyTotal
       ? contract.monthlyTotal.toLocaleString("fr-MA") + " DH/mois"
       : "",
@@ -492,21 +499,35 @@ const contractPreviewHtml = computed((): string => {
     .map((a, i) =>
       `<div style="margin-bottom:16px">
         <p style="margin:0 0 6px;font-weight:700;font-size:13px">
-          ARTICLE ${i + 1} — ${a.title}
+          ARTICLE ${i + 1} — ${esc(a.title)}
         </p>
         <p style="margin:0;line-height:1.7;text-align:justify">
-          ${renderVariables(a.body ?? "", vars)}
+          ${renderVariables(esc(a.body ?? ""), vars)}
         </p>
       </div>`
     )
     .join("");
 
-  const domiciliataire = vars.domiciliataire_nom || "-";
-  const domicilie      = vars.raison_sociale      || "-";
-  const dateDebut      = vars.date_debut          || "-";
-  const dateFin        = vars.date_fin            || "-";
-  const mensuel        = vars.redevance_mensuelle || "-";
-  const annuel         = vars.redevance_annuelle  || "-";
+  // SECURITY: every user value goes through esc() before HTML interpolation
+  const domiciliataire  = esc(vars.domiciliataire_nom) || "-";
+  const domicilie       = esc(vars.raison_sociale)      || "-";
+  const astNom          = esc(f.astNom)                 || "-";
+  const astRC           = esc(f.astRC)                  || "-";
+  const astIF           = esc(f.astIF)                  || "-";
+  const astAdresse      = esc(f.astAdresse)             || "-";
+  const astRepresentant = esc(f.astRepresentant)        || "-";
+  const astCIN          = esc(f.astCIN)                 || "-";
+  const gerantNom       = esc(vars.gerant_nom)          || "-";
+  const gerantCin       = esc(vars.gerant_cin)          || "-";
+  const gerantTel       = esc(vars.gerant_telephone)    || "-";
+  const gerantEmail     = esc(vars.gerant_email)        || "-";
+  const dateDebut       = esc(vars.date_debut)          || "-";
+  const dateFin         = esc(vars.date_fin)            || "-";
+  const dureeMois       = esc(vars.duree_mois)          || "-";
+  const mensuel         = esc(vars.redevance_mensuelle) || "-";
+  const annuel          = esc(vars.redevance_annuelle)  || "-";
+  const villeSig        = esc(vars.ville_signature)     || "__________________";
+  const dateSig         = esc(vars.date_signature)      || "__________________";
 
   return `
     <div style="font-family:'Times New Roman',serif;color:#111;background:#fff;
@@ -515,22 +536,22 @@ const contractPreviewHtml = computed((): string => {
         Contrat de Domiciliation
       </h1>
       <p style="text-align:center;font-size:11px;color:#555;margin:0 0 14px">
-        ${f.astNom || "-"} — RC : ${f.astRC || "-"} — IF : ${f.astIF || "-"}
+        ${astNom} — RC : ${astRC} — IF : ${astIF}
       </p>
       <hr style="border:none;border-top:1.5px solid #c8a96e;margin:12px 0 16px"/>
 
       <p style="margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888">Parties</p>
       <p style="margin:0 0 5px"><b>Domiciliataire :</b> ${domiciliataire}</p>
-      <p style="margin:0 0 5px"><b>Représenté par :</b> ${f.astRepresentant || "-"}, CIN ${f.astCIN || "-"}</p>
-      <p style="margin:0 0 5px"><b>Adresse siège :</b> ${f.astAdresse || "-"}</p>
+      <p style="margin:0 0 5px"><b>Représenté par :</b> ${astRepresentant}, CIN ${astCIN}</p>
+      <p style="margin:0 0 5px"><b>Adresse siège :</b> ${astAdresse}</p>
       <p style="margin:0 0 5px"><b>Domicilié :</b> ${domicilie}</p>
-      <p style="margin:0 0 5px"><b>Gérant :</b> ${vars.gerant_nom || "-"}, CIN ${vars.gerant_cin || "-"}</p>
-      <p style="margin:0 0 14px"><b>Contact :</b> ${vars.gerant_telephone || "-"} · ${vars.gerant_email || "-"}</p>
+      <p style="margin:0 0 5px"><b>Gérant :</b> ${gerantNom}, CIN ${gerantCin}</p>
+      <p style="margin:0 0 14px"><b>Contact :</b> ${gerantTel} · ${gerantEmail}</p>
 
       <hr style="border:none;border-top:1px solid #ddd;margin:10px 0 14px"/>
 
       <p style="margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888">Durée &amp; Redevance</p>
-      <p style="margin:0 0 5px"><b>Période :</b> ${dateDebut} → ${dateFin} (${vars.duree_mois || "-"} mois)</p>
+      <p style="margin:0 0 5px"><b>Période :</b> ${dateDebut} → ${dateFin} (${dureeMois} mois)</p>
       <p style="margin:0 0 16px"><b>Redevance mensuelle :</b> ${mensuel} &nbsp;|&nbsp; <b>Annuelle :</b> ${annuel}</p>
 
       <hr style="border:none;border-top:1px solid #ddd;margin:10px 0 14px"/>
@@ -542,12 +563,12 @@ const contractPreviewHtml = computed((): string => {
 
       <div style="display:table;width:100%;margin-top:40px">
         <div style="display:table-cell;width:50%">
-          <p style="margin:0 0 50px">Fait à ${vars.ville_signature || "__________________"}</p>
+          <p style="margin:0 0 50px">Fait à ${villeSig}</p>
           <p style="margin:0;font-weight:bold">Signature du domiciliataire</p>
           <p style="margin:4px 0 0;font-size:11px;color:#555">${domiciliataire}</p>
         </div>
         <div style="display:table-cell;width:50%;text-align:right">
-          <p style="margin:0 0 50px">Le ${vars.date_signature || "__________________"}</p>
+          <p style="margin:0 0 50px">Le ${dateSig}</p>
           <p style="margin:0;font-weight:bold">Lu et approuvé, bon pour accord</p>
           <p style="margin:4px 0 0;font-size:11px;color:#555">${domicilie}</p>
         </div>

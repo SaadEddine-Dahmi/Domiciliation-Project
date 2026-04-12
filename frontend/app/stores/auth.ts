@@ -1,6 +1,14 @@
 // app/stores/auth.ts
-// Auth store with 3 roles: admin, domiciliataire, client
-// Added: pending status handling on register
+// SECURITY NOTE on localStorage token storage:
+// Storing tokens in localStorage is accessible to JavaScript (XSS risk).
+// Full mitigation requires HttpOnly cookie + Sanctum stateful auth.
+// Current hardening:
+//   1. Short expiry check (7 days — already in place)
+//   2. Token never logged or exposed in responses
+//   3. XSS risk mitigated by CSP headers (SecurityHeaders middleware)
+//   4. All v-html interpolation now escaped (contrat.vue)
+// Residual risk documented below.
+
 import { defineStore } from 'pinia'
 
 export type Role = 'admin' | 'domiciliataire' | 'client'
@@ -17,25 +25,23 @@ export interface AuthUser {
     color: string
 }
 
+const STORAGE_KEY = 'astfisc_auth'
+const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
+
 export const useAuthStore = defineStore('auth', () => {
 
-    // ── State ──────────────────────────────────────────────
     const user = ref<AuthUser | null>(null)
     const token = ref<string>('')
     const loading = ref<boolean>(false)
     const error = ref<string>('')
-
-    // Set to true after register when account is pending approval
     const isPendingApproval = ref<boolean>(false)
 
-    // ── Getters ────────────────────────────────────────────
     const isAuthenticated = computed(() => !!user.value && !!token.value)
     const isAdmin = computed(() => user.value?.role === 'admin')
     const isDomiciliataire = computed(() => user.value?.role === 'domiciliataire')
     const isClient = computed(() => user.value?.role === 'client')
     const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
-    // ── Helpers ────────────────────────────────────────────
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
@@ -44,6 +50,7 @@ export const useAuthStore = defineStore('auth', () => {
     function buildUser(u: any): AuthUser {
         return {
             id: u.id,
+            // SECURITY: never store raw token in user object
             name: `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
             email: u.email,
             role: u.role ?? 'client',
@@ -58,14 +65,16 @@ export const useAuthStore = defineStore('auth', () => {
 
     function saveToStorage(): void {
         if (!import.meta.client) return
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        // SECURITY: store minimum required — no sensitive profile data
+        localStorage.setItem(STORAGE_KEY, JSON.stringify({
             user: user.value,
+            // Token stored here is the residual risk.
+            // Mitigated by: CSP headers, escaped v-html, no eval/innerHTML elsewhere.
+            // Full fix: migrate to HttpOnly cookie + sanctum stateful.
             token: token.value,
             savedAt: Date.now(),
         }))
     }
-
-    // ── Actions ────────────────────────────────────────────
 
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
@@ -80,7 +89,6 @@ export const useAuthStore = defineStore('auth', () => {
             saveToStorage()
             return true
         } catch (e: any) {
-            // Backend returns 403 with message for pending/approved/rejected
             error.value =
                 e?.data?.message ??
                 e?.data?.errors?.email?.[0] ??
@@ -110,13 +118,10 @@ export const useAuthStore = defineStore('auth', () => {
                 `${getApiBase()}/api/auth/register`,
                 { method: 'POST', body: { ...payload, role: 'domiciliataire' } }
             )
-
-            // Backend returns no token when account is pending
             if (!res.data?.token) {
                 isPendingApproval.value = true
                 return true
             }
-
             user.value = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
@@ -136,25 +141,30 @@ export const useAuthStore = defineStore('auth', () => {
         token.value = ''
         error.value = ''
         isPendingApproval.value = false
-        if (import.meta.client) localStorage.removeItem('astfisc_auth')
+        // SECURITY: clear all auth data on logout
+        if (import.meta.client) {
+            localStorage.removeItem(STORAGE_KEY)
+        }
     }
 
     function restoreSession(): void {
         if (!import.meta.client) return
         if (user.value && token.value) return
         try {
-            const raw = localStorage.getItem('astfisc_auth')
+            const raw = localStorage.getItem(STORAGE_KEY)
             if (!raw) return
             const parsed = JSON.parse(raw)
             const ageMs = Date.now() - (parsed.savedAt ?? 0)
-            if (ageMs > 7 * 24 * 60 * 60 * 1000) {
-                localStorage.removeItem('astfisc_auth')
+            // SECURITY: enforce 7-day expiry — expired sessions are cleared
+            if (ageMs > MAX_AGE_MS) {
+                localStorage.removeItem(STORAGE_KEY)
                 return
             }
             user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
         } catch {
-            localStorage.removeItem('astfisc_auth')
+            // SECURITY: clear corrupted/tampered storage
+            localStorage.removeItem(STORAGE_KEY)
         }
     }
 
