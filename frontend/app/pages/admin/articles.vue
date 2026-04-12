@@ -203,7 +203,7 @@ onMounted(() => articlesStore.fetchAll())
           </div>
         </div>
         <div class="flex gap-4 text-xs text-app-text/30 border-t border-white/5 pt-2">
-          <span>ID : {{ article.id }}</span>
+          <!-- <span>ID : {{ article.id }}</span> -->
           <span v-if="article.created_at">
             Créé le {{ new Date(article.created_at).toLocaleDateString('fr-MA') }}
           </span>
