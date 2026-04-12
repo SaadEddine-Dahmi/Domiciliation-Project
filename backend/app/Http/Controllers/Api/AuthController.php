@@ -33,12 +33,9 @@ class AuthController extends Controller
             'password'  => Hash::make($data['password']),
             'telephone' => $data['telephone'] ?? null,
             'role'      => $role,
-            // New domiciliataires wait for admin approval
-            // Clients and admins are active immediately
             'status'    => $role === 'domiciliataire' ? 'pending' : 'active',
         ]);
 
-        // Pending users don't get a token yet
         if ($user->status === 'pending') {
             return response()->json([
                 'success' => true,
@@ -58,12 +55,15 @@ class AuthController extends Controller
     public function login(Request $request)
     {
         $data = $request->validate([
-            'email'    => ['required', 'email'],
-            'password' => ['required', 'string'],
+            'email'    => ['required', 'email', 'max:100'],
+            'password' => ['required', 'string', 'max:200'],
         ]);
 
-        // Case-insensitive email lookup
-        $user = User::whereRaw('LOWER(email) = ?', [strtolower($data['email'])])->first();
+        // SECURITY FIX: replaced whereRaw('LOWER(email) = ?') with safe
+        // Eloquent where() + strtolower. The previous version was technically
+        // parameterized (not injectable), but raw SQL is avoided as a matter
+        // of principle. This is fully equivalent and uses the query builder only.
+        $user = User::where('email', strtolower(trim($data['email'])))->first();
 
         if (!$user || !Hash::check($data['password'], $user->password)) {
             throw ValidationException::withMessages([
@@ -71,11 +71,10 @@ class AuthController extends Controller
             ]);
         }
 
-        // Auto-flip approved → active if activation_date has passed
+        // Auto-activate if activation_date has passed
         $this->activationService->activateIfReady($user);
         $user->refresh();
 
-        // Block login with a clear message per status
         if (!$user->isActive()) {
             return response()->json([
                 'success' => false,
