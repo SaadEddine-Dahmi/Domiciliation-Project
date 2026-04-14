@@ -20,8 +20,8 @@ class EntrepriseController extends Controller
         if ($search = $request->string('search')->toString()) {
             $query->where(function ($q) use ($search) {
                 $q->where('raison_sociale', 'ilike', "%{$search}%")
-                  ->orWhere('ville', 'ilike', "%{$search}%")
-                  ->orWhere('statut', 'ilike', "%{$search}%");
+                    ->orWhere('ville', 'ilike', "%{$search}%")
+                    ->orWhere('statut', 'ilike', "%{$search}%");
             });
         }
 
@@ -33,11 +33,16 @@ class EntrepriseController extends Controller
 
     public function store(EntrepriseStoreRequest $request)
     {
+        // SECURITY: only domiciliataires can create entreprises
+        if (auth()->user()->role !== 'domiciliataire') {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
         $data = $request->validated();
 
         $row = Entreprise::create([
             ...$data,
-            'domiciliataire_id' => auth()->id(), // force tenant
+            'domiciliataire_id' => auth()->id(),
         ]);
 
         return (new EntrepriseResource($row))
@@ -53,6 +58,11 @@ class EntrepriseController extends Controller
 
     public function update(EntrepriseUpdateRequest $request, int $id)
     {
+        // SECURITY: only domiciliataires can update entreprises
+        if (auth()->user()->role !== 'domiciliataire') {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
         $row = Entreprise::forTenant(auth()->id())->findOrFail($id);
         $row->update($request->validated());
 
@@ -61,6 +71,11 @@ class EntrepriseController extends Controller
 
     public function destroy(int $id)
     {
+        // SECURITY: only domiciliataires can delete entreprises
+        if (auth()->user()->role !== 'domiciliataire') {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
         $row = Entreprise::forTenant(auth()->id())->findOrFail($id);
         $row->delete();
 

@@ -1,21 +1,24 @@
 <?php
+// app/Models/Article.php
 
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
+use Illuminate\Database\Eloquent\Factories\HasFactory; // ← ADD THIS
 use Illuminate\Database\Eloquent\Builder;
 
 class Article extends Model
 {
     use HasUuids;
+    use HasFactory; // ← ADD THIS
 
-    protected $keyType    = 'string';
-    public    $incrementing = false;
+    protected $keyType = 'string';
+    public $incrementing = false;
 
     protected $fillable = [
         'id',
-        'domiciliataire_id', // tenant owner
+        'domiciliataire_id',
         'title',
         'body',
         'is_active',
@@ -25,19 +28,11 @@ class Article extends Model
         'is_active' => 'boolean',
     ];
 
-    // ── Relations ──────────────────────────────────────────
-
     public function domiciliataire()
     {
         return $this->belongsTo(User::class, 'domiciliataire_id');
     }
 
-    // ── Scopes ─────────────────────────────────────────────
-
-    /**
-     * Filter articles by tenant (domiciliataire).
-     * Usage: Article::forTenant(auth()->id())->get()
-     */
     public function scopeForTenant(Builder $query, int $tenantId): Builder
     {
         return $query->where('domiciliataire_id', $tenantId);

@@ -405,7 +405,7 @@ class TestSuite implements IteratorAggregate, Reorderable, Test
     }
 
     /**
-     * @return Iterator<non-negative-int, Test>
+     * Returns an iterator for this test suite.
      */
     public function getIterator(): Iterator
     {
@@ -511,7 +511,7 @@ class TestSuite implements IteratorAggregate, Reorderable, Test
                 new TestMethod(
                     $className,
                     $methodName,
-                    $method->getFileName(),
+                    $class->getFileName(),
                     $method->getStartLine(),
                     Event\Code\TestDoxBuilder::fromClassNameAndMethodName(
                         $className,

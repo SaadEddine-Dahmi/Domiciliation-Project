@@ -1,9 +1,5 @@
 <?php
-// ============================================================
-// FICHIER 2: add_notification_preferences_to_users.php
-// Ajoute notification_preferences JSON à la table users
-// ============================================================
-// Nom du fichier : 2026_03_28_000003_add_notification_preferences_to_users.php
+// database/migrations/2026_03_29_181716_create_user_prefs_table.php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -12,8 +8,13 @@ use Illuminate\Support\Facades\Schema;
 return new class extends Migration {
     public function up(): void
     {
+        // FIX: guard against duplicate column — base users migration
+        // already includes notification_preferences in some environments
+        if (Schema::hasColumn('users', 'notification_preferences')) {
+            return;
+        }
+
         Schema::table('users', function (Blueprint $table) {
-            // Préférences JSON : {"delays": [1, 3, 6]}
             $table->text('notification_preferences')
                 ->nullable()
                 ->default('{"delays":[1]}')
@@ -23,6 +24,12 @@ return new class extends Migration {
 
     public function down(): void
     {
+        // Only drop if it was added by this migration
+        // (i.e. it's not in the base create_users_table)
+        if (!Schema::hasColumn('users', 'notification_preferences')) {
+            return;
+        }
+
         Schema::table('users', function (Blueprint $table) {
             $table->dropColumn('notification_preferences');
         });
