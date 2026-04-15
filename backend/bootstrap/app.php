@@ -1,10 +1,5 @@
 <?php
-<<<<<<< Updated upstream
-
-use Illuminate\Foundation\Application;
-=======
 /* 
->>>>>>> Stashed changes
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
 use App\Http\Middleware\SecurityHeaders;
