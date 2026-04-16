@@ -28,6 +28,10 @@ export interface AuthUser {
 const STORAGE_KEY = 'astfisc_auth'
 const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
 
+// SSR-safe guard: import.meta.client is always undefined in Vitest (jsdom).
+// typeof window !== 'undefined' works in both Nuxt SSR and Vitest environments.
+const isBrowser = () => typeof window !== 'undefined'
+
 export const useAuthStore = defineStore('auth', () => {
 
     const user = ref<AuthUser | null>(null)
@@ -64,7 +68,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     function saveToStorage(): void {
-        if (!import.meta.client) return
+        if (!isBrowser()) return
         // SECURITY: store minimum required — no sensitive profile data
         localStorage.setItem(STORAGE_KEY, JSON.stringify({
             user: user.value,
@@ -142,13 +146,13 @@ export const useAuthStore = defineStore('auth', () => {
         error.value = ''
         isPendingApproval.value = false
         // SECURITY: clear all auth data on logout
-        if (import.meta.client) {
+        if (isBrowser()) {
             localStorage.removeItem(STORAGE_KEY)
         }
     }
 
     function restoreSession(): void {
-        if (!import.meta.client) return
+        if (!isBrowser()) return
         if (user.value && token.value) return
         try {
             const raw = localStorage.getItem(STORAGE_KEY)

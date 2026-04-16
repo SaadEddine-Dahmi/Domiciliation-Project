@@ -14,9 +14,13 @@ interface ApiSuccess<T> {
     message?: string
 }
 
+// SSR-safe guard: import.meta.client is always undefined in Vitest (jsdom).
+// typeof window !== 'undefined' works in both Nuxt SSR and Vitest environments.
+const isBrowser = () => typeof window !== 'undefined'
+
 // Read token from localStorage — same pattern as other services
 function authHeaders(): Record<string, string> {
-    if (!import.meta.client) return {}
+    if (!isBrowser()) return {}
     try {
         const raw = localStorage.getItem('astfisc_auth')
         if (!raw) return {}
