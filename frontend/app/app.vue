@@ -34,7 +34,7 @@ const adminNav = computed(() => [
   { label: 'Domiciliataires', to: '/admin/domiciliataires' },
   { section: 'Compte' },
   { label: 'Notifications',   to: '/admin/notifs' },
-  { label: 'Paramètres',      to: '/admin/parametres' },
+  { label: 'Paramètres',      to: '/admin/settings' },
 ])
 
 const clientNav = computed(() => [

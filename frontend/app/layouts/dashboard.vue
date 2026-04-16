@@ -28,7 +28,6 @@ const pageTitle = computed(() => ({
   '/admin/articles':        'Articles',
   '/admin/messages':        'Messages clients',
   '/admin/notifs':          'Notifications',
-  '/admin/parametres':      'Paramètres',
   '/admin/settings':        'Paramètres',
   '/admin/domiciliataires': 'Domiciliataires',
   '/client/dashboard':      'Tableau de bord',
