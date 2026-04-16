@@ -29,24 +29,35 @@
   --shadow-card:        0 1px 3px rgba(0,0,0,0.07), 0 0 0 1px rgba(0,0,0,0.05);
 }
 
-/* ── Gray ── */
+/* ── Gray (Enhanced Mid-Tone) ── */
 html.gray {
-  --app-bg:             #e8eaed;
-  --app-surface:        #f2f3f5;
-  --app-surface-2:      #e2e4e8;
-  --app-border:         rgba(0, 0, 0, 0.10);
-  --app-border-2:       rgba(0, 0, 0, 0.07);
-  --app-text:           #2c2f3a;
-  --app-text-muted:     rgba(44, 47, 58, 0.58);
-  --app-text-faint:     rgba(44, 47, 58, 0.35);
-  --gold:               #c8a96e;
-  --gold-2:             #b89558;
-  --topbar-bg:          rgba(232, 234, 237, 0.94);
-  --nav-active-bg:      rgba(200, 169, 110, 0.14);
-  --nav-active-color:   #9a7438;
-  --nav-inactive-color: rgba(44, 47, 58, 0.60);
-  --nav-hover-bg:       rgba(0, 0, 0, 0.05);
-  --shadow-card:        0 1px 4px rgba(0,0,0,0.09), 0 0 0 1px rgba(0,0,0,0.06);
+  /* Backgrounds: Shifted to a medium-deep slate */
+  --app-bg:             #32363d; 
+  --app-surface:        #3d424a;
+  --app-surface-2:      #2a2d33;
+  
+  /* Borders: Switched to light-transparent for better contrast on dark gray */
+  --app-border:         rgba(255, 255, 255, 0.10);
+  --app-border-2:       rgba(255, 255, 255, 0.07);
+  
+  /* Text: Switched to light text for readability */
+  --app-text:           #e8eaed;
+  --app-text-muted:     rgba(232, 234, 237, 0.65);
+  --app-text-faint:     rgba(232, 234, 237, 0.40);
+  
+  /* Brand Colors */
+  --gold:               #d4b982; /* Slightly brightened for better contrast */
+  --gold-2:             #c8a96e;
+  
+  /* UI Elements */
+  --topbar-bg:          rgba(50, 54, 61, 0.94);
+  --nav-active-bg:      rgba(212, 185, 130, 0.15);
+  --nav-active-color:   #d4b982;
+  --nav-inactive-color: rgba(232, 234, 237, 0.60);
+  --nav-hover-bg:       rgba(255, 255, 255, 0.05);
+  
+  /* Shadow: Subtle lift without being too harsh */
+  --shadow-card:        0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
 
 /* ── Dark ── */
