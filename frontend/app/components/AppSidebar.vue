@@ -5,14 +5,10 @@
     style="background: var(--app-surface); border-right: 1px solid var(--app-border-2);"
   >
     <!-- Logo -->
-    <div
-      class="flex items-center gap-2.5 px-4 py-5 shrink-0"
-      style="border-bottom: 1px solid var(--app-border-2);"
-    >
-      <div
-        class="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0 text-sm"
-        style="background: #c8a96e"
-      >🏢</div>
+    <div class="flex items-center gap-2.5 px-4 py-5 shrink-0"
+         style="border-bottom: 1px solid var(--app-border-2);">
+      <div class="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0 text-sm"
+           style="background: #c8a96e">🏢</div>
       <div class="font-serif text-sm leading-tight" style="color: var(--app-text)">
         AST-FISC
         <span class="block text-[11px] italic" style="color: #c8a96e">Domiciliation</span>
@@ -28,9 +24,7 @@
       <div
         class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
         :style="`background:${auth.user.color}22;color:${auth.user.color}`"
-      >
-        {{ auth.user.avatar }}
-      </div>
+      >{{ auth.user.avatar }}</div>
       <div class="min-w-0">
         <div class="text-xs font-bold truncate" style="color: var(--app-text)">
           {{ auth.user.name }}
@@ -41,20 +35,16 @@
       </div>
     </div>
 
-    <!-- Navigation -->
+    <!-- Nav -->
     <nav class="flex-1 overflow-y-auto px-2.5 pb-3">
       <template v-for="(item, index) in props.nav" :key="index">
 
-        <!-- Section header -->
-        <div
-          v-if="item.section"
-          class="px-2 pt-3 pb-1.5 text-[9px] font-bold uppercase tracking-[.1em]"
-          style="color: var(--app-text-faint)"
-        >
+        <div v-if="item.section"
+             class="px-2 pt-3 pb-1.5 text-[9px] font-bold uppercase tracking-[.1em]"
+             style="color: var(--app-text-faint)">
           {{ item.section }}
         </div>
 
-        <!-- NuxtLink -->
         <NuxtLink
           v-else-if="item.to && !item.action"
           :to="item.to"
@@ -66,35 +56,26 @@
             v-if="item.badge"
             class="min-w-[18px] h-[18px] rounded-md text-[10px] font-black flex items-center justify-center px-1"
             style="background: #c8a96e; color: #13161f"
-          >
-            {{ item.badge }}
-          </span>
+          >{{ item.badge }}</span>
         </NuxtLink>
 
-        <!-- Action button -->
         <button
           v-else-if="item.action"
           class="flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl mb-0.5 text-[13px] font-medium w-full text-left transition-all duration-150 nav-inactive"
           :style="item.highlight ? 'color:#c8a96e;font-weight:700' : ''"
           @click="item.action"
-        >
-          {{ item.label }}
-        </button>
+        >{{ item.label }}</button>
 
       </template>
     </nav>
 
     <!-- Logout -->
-    <div
-      class="px-2.5 pb-4 pt-2 flex-shrink-0"
-      style="border-top: 1px solid var(--app-border-2);"
-    >
+    <div class="px-2.5 pb-4 pt-2 flex-shrink-0"
+         style="border-top: 1px solid var(--app-border-2);">
       <button
         class="flex items-center gap-2.5 px-2.5 py-2.5 rounded-xl w-full text-[13px] font-medium nav-inactive"
         @click="handleLogout"
-      >
-        Déconnexion
-      </button>
+      >Déconnexion</button>
     </div>
   </aside>
 </template>
@@ -102,19 +83,18 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
 
-const props = defineProps<{ nav: any[] }>()
-
+const props  = defineProps<{ nav: any[] }>()
 const auth   = useAuthStore()
 const router = useRouter()
 const route  = useRoute()
 
 const roleLabel = computed(() => {
-  switch (auth.user?.role) {
-    case 'admin':          return 'Super Admin'
-    case 'domiciliataire': return 'Domiciliataire'
-    case 'client':         return 'Client'
-    default:               return ''
+  const roles: Record<string, string> = {
+    admin:          'Super Admin',
+    domiciliataire: 'Domiciliataire',
+    client:         'Client',
   }
+  return roles[auth.user?.role ?? ''] ?? ''
 })
 
 function isActive(to: string): boolean {

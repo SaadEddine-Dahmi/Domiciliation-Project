@@ -1,22 +1,16 @@
 <template>
   <header
     class="sticky top-0 z-20 h-14 flex items-center gap-4 px-6 transition-colors"
-    style="
-      background: var(--topbar-bg);
-      backdrop-filter: blur(12px);
-      border-bottom: 1px solid var(--app-border-2);
-    "
+    style="background: var(--topbar-bg); backdrop-filter: blur(12px);
+           border-bottom: 1px solid var(--app-border-2);"
   >
-    <h1
-      class="font-serif text-[17px] font-normal"
-      style="color: var(--app-text)"
-    >
+    <h1 class="font-serif text-[17px] font-normal" style="color: var(--app-text)">
       {{ title }}
     </h1>
 
     <div class="ml-auto flex items-center gap-2">
 
-      <!-- Theme toggle -->
+      <!-- 3-way theme toggle -->
       <ThemeToggle />
 
       <!-- Notifications -->
