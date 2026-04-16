@@ -1,20 +1,16 @@
-<!-- ============================================================
-  pages/admin/clients.vue
-  Gestion des clients (entreprises) et représentants
-  FIXES :
-  - Mot de passe mis à jour via PUT /api/clients/{id}/password
-    séparément de la mise à jour des infos entreprise
-  - Validation côté front avant envoi
-============================================================ -->
+<!-- app/pages/admin/clients.vue -->
+<!-- Manages entreprises + their single representant (1-to-1) -->
 <script setup lang="ts">
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
+import { representantService } from '~/services/representant.service'
+import type { Representant } from '~/types/entreprise'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const clientsStore = useClientsStore()
 const { items: clientItems, loading } = storeToRefs(clientsStore)
-const { success, error: toastError } = useToast()
+const { success, error: toastError }  = useToast()
 
 // ── State modaux ──────────────────────────────────────────
 const showModal    = ref(false)
@@ -24,15 +20,15 @@ const editId       = ref<number | null>(null)
 const saving       = ref(false)
 const savingRep    = ref(false)
 const search       = ref('')
+const serverError  = ref('')
 
-// ── Représentants ─────────────────────────────────────────
-const representants    = ref<any[]>([])
-const loadingReps      = ref(false)
-const selectedClientId = ref<number | null>(null)
-const repModalMode     = ref<'create' | 'edit'>('create')
-const editRepId        = ref<number | null>(null)
+// ── Representant (single per entreprise) ─────────────────
+const selectedClientId  = ref<number | null>(null)
+const representant      = ref<Representant | null>(null)
+const loadingRep        = ref(false)
+const repMode           = ref<'view' | 'edit' | 'create'>('view')
 
-// ── Formulaire entreprise + compte client ─────────────────
+// ── Formulaire entreprise ─────────────────────────────────
 const form = reactive({
   raison_sociale: '', forme_juridique: '', adresse: '',
   ville: '', pays: 'Maroc', capital: undefined as number | undefined,
@@ -47,25 +43,7 @@ const repForm = reactive({
   date_naissance: '', adresse: '', telephone: '', email: '',
 })
 
-const serverError = ref('')
-
-// ── Helpers ───────────────────────────────────────────────
-function getApiBase(): string {
-  const config = useRuntimeConfig()
-  return (config.public.apiBase as string) ?? ''
-}
-
-function authHeaders(): Record<string, string> {
-  if (!import.meta.client) return {}
-  try {
-    const raw = localStorage.getItem('astfisc_auth')
-    if (!raw) return {}
-    const parsed = JSON.parse(raw)
-    return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
-  } catch { return {} }
-}
-
-// ── Recherche filtrée ─────────────────────────────────────
+// ── Recherche ─────────────────────────────────────────────
 const filtered = computed(() => {
   if (!search.value.trim()) return clientItems.value
   const q = search.value.toLowerCase()
@@ -76,10 +54,10 @@ const filtered = computed(() => {
   )
 })
 
-// ── Ouvrir modal création ─────────────────────────────────
+// ── Modal entreprise : ouvrir création ───────────────────
 function openCreate() {
-  modalMode.value = 'create'
-  editId.value    = null
+  modalMode.value   = 'create'
+  editId.value      = null
   serverError.value = ''
   Object.assign(form, {
     raison_sociale: '', forme_juridique: '', adresse: '',
@@ -91,7 +69,7 @@ function openCreate() {
   showModal.value = true
 }
 
-// ── Ouvrir modal édition ──────────────────────────────────
+// ── Modal entreprise : ouvrir édition ────────────────────
 function openEdit(client: any) {
   modalMode.value   = 'edit'
   editId.value      = client.id
@@ -108,7 +86,7 @@ function openEdit(client: any) {
     client_nom:       client.client_user?.nom       ?? '',
     client_prenom:    client.client_user?.prenom    ?? '',
     client_email:     client.client_user?.email     ?? '',
-    client_password:  '',   // toujours vide à l'ouverture
+    client_password:  '',
     client_telephone: client.client_user?.telephone ?? '',
   })
   showModal.value = true
@@ -120,12 +98,9 @@ async function submitEntreprise(): Promise<void> {
   saving.value      = true
   try {
     if (modalMode.value === 'create') {
-      // Création : entreprise + compte client en une fois
       await clientsStore.create({ ...form })
       success('Client créé avec succès')
-
     } else if (editId.value) {
-      // 1. Mise à jour des infos entreprise + user (sans mot de passe)
       await clientsStore.update(editId.value, {
         raison_sociale:  form.raison_sociale,
         forme_juridique: form.forme_juridique,
@@ -143,26 +118,20 @@ async function submitEntreprise(): Promise<void> {
         },
       })
 
-      // 2. Si un nouveau mot de passe est saisi → endpoint dédié
+      // Update password separately only if filled
       if (form.client_password.trim().length >= 8) {
-        await $fetch(
-          `${getApiBase()}/api/clients/${editId.value}/password`,
-          {
-            method:  'PUT',
-            headers: authHeaders(),
-            body: {
-              password:              form.client_password,
-              password_confirmation: form.client_password,
-            },
-          }
+        await clientsStore.updatePassword(
+          editId.value,
+          form.client_password,
+          form.client_password
         )
         success('Client et mot de passe mis à jour')
       } else {
         success('Client mis à jour')
       }
     }
-
     showModal.value = false
+    await clientsStore.fetchAll()
   } catch (e: any) {
     serverError.value = e?.data?.errors
       ? Object.values(e.data.errors).flat().join(' · ')
@@ -173,73 +142,69 @@ async function submitEntreprise(): Promise<void> {
   }
 }
 
-// ── Représentants : ouvrir modal ──────────────────────────
-async function openReps(clientId: number): Promise<void> {
+// ── Representant modal : ouvrir ───────────────────────────
+async function openRepModal(clientId: number): Promise<void> {
   selectedClientId.value = clientId
-  loadingReps.value      = true
+  loadingRep.value       = true
+  representant.value     = null
+  repMode.value          = 'view'
   showRepModal.value     = true
+
   try {
-    const res = await $fetch<{ success: boolean; data: any[] }>(
-      `${getApiBase()}/api/entreprises/${clientId}/representants`,
-      { headers: authHeaders() }
-    )
-    representants.value = res.data ?? []
+    const res = await representantService.get(clientId)
+    representant.value = res.data ?? null
+
+    // If no representant yet, go straight to create form
+    if (!representant.value) {
+      openRepCreate()
+    }
   } catch (e: any) {
-    toastError?.(e?.data?.message ?? 'Erreur chargement représentants')
+    toastError?.(e?.data?.message ?? 'Erreur chargement représentant')
   } finally {
-    loadingReps.value = false
+    loadingRep.value = false
   }
 }
 
-// ── Représentants : reset form ────────────────────────────
-function openAddRep(): void {
-  repModalMode.value = 'create'
-  editRepId.value    = null
+// ── Représentant : passer en mode création ────────────────
+function openRepCreate(): void {
+  repMode.value = 'create'
   Object.assign(repForm, {
     nom: '', prenom: '', cin: '', nationalite: 'Marocaine',
     date_naissance: '', adresse: '', telephone: '', email: '',
   })
 }
 
-// ── Représentants : édition ───────────────────────────────
-function openEditRep(rep: any): void {
-  repModalMode.value = 'edit'
-  editRepId.value    = rep.id
+// ── Représentant : passer en mode édition ─────────────────
+function openRepEdit(): void {
+  if (!representant.value) return
+  repMode.value = 'edit'
   Object.assign(repForm, {
-    nom:            rep.nom            ?? '',
-    prenom:         rep.prenom         ?? '',
-    cin:            rep.cin            ?? '',
-    nationalite:    rep.nationalite    ?? 'Marocaine',
-    date_naissance: rep.date_naissance ?? '',
-    adresse:        rep.adresse        ?? '',
-    telephone:      rep.telephone      ?? '',
-    email:          rep.email          ?? '',
+    nom:            representant.value.nom            ?? '',
+    prenom:         representant.value.prenom         ?? '',
+    cin:            representant.value.cin            ?? '',
+    nationalite:    representant.value.nationalite    ?? 'Marocaine',
+    date_naissance: representant.value.date_naissance ?? '',
+    adresse:        representant.value.adresse        ?? '',
+    telephone:      representant.value.telephone      ?? '',
+    email:          representant.value.email          ?? '',
   })
 }
 
-// ── Représentants : soumettre ─────────────────────────────
+// ── Représentant : soumettre create / update ──────────────
 async function submitRep(): Promise<void> {
   if (!selectedClientId.value) return
   savingRep.value = true
   try {
-    if (repModalMode.value === 'create') {
-      const res = await $fetch<{ success: boolean; data: any }>(
-        `${getApiBase()}/api/entreprises/${selectedClientId.value}/representants`,
-        { method: 'POST', headers: authHeaders(), body: { ...repForm } }
-      )
-      representants.value.push(res.data)
-      await clientsStore.fetchAll()
+    if (repMode.value === 'create') {
+      const res = await representantService.create(selectedClientId.value, { ...repForm })
+      representant.value = res.data
       success('Représentant ajouté')
-    } else if (editRepId.value) {
-      const res = await $fetch<{ success: boolean; data: any }>(
-        `${getApiBase()}/api/entreprises/${selectedClientId.value}/representants/${editRepId.value}`,
-        { method: 'PUT', headers: authHeaders(), body: { ...repForm } }
-      )
-      const idx = representants.value.findIndex(r => r.id === editRepId.value)
-      if (idx !== -1) representants.value[idx] = res.data
+    } else {
+      const res = await representantService.update(selectedClientId.value, { ...repForm })
+      representant.value = res.data
       success('Représentant mis à jour')
     }
-    openAddRep()
+    repMode.value = 'view'
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur sauvegarde représentant')
   } finally {
@@ -247,22 +212,20 @@ async function submitRep(): Promise<void> {
   }
 }
 
-// ── Représentants : suppression ───────────────────────────
-async function deleteRep(repId: number): Promise<void> {
-  if (!selectedClientId.value || !confirm('Supprimer ce représentant ?')) return
+// ── Représentant : supprimer ──────────────────────────────
+async function deleteRep(): Promise<void> {
+  if (!selectedClientId.value || !confirm('Supprimer le représentant ?')) return
   try {
-    await $fetch(
-      `${getApiBase()}/api/entreprises/${selectedClientId.value}/representants/${repId}`,
-      { method: 'DELETE', headers: authHeaders() }
-    )
-    representants.value = representants.value.filter(r => r.id !== repId)
+    await representantService.remove(selectedClientId.value)
+    representant.value = null
+    repMode.value      = 'create'
     success('Représentant supprimé')
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur suppression')
   }
 }
 
-// ── Couleurs statuts ──────────────────────────────────────
+// ── Statut couleurs ───────────────────────────────────────
 const statutColor: Record<string, string> = {
   actif:    'text-green-400 bg-green-400/10',
   inactif:  'text-red-400 bg-red-400/10',
@@ -278,19 +241,31 @@ onMounted(() => clientsStore.fetchAll())
     <!-- Header -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
-        <h1 class="font-serif text-2xl">Clients <em class="text-gold italic">&amp; Entreprises</em></h1>
-        <p class="text-app-text/50 text-sm mt-1">{{ clientItems.length }} entreprise(s) enregistrée(s)</p>
+        <h1 class="font-serif text-2xl">
+          Clients <em class="text-gold italic">&amp; Entreprises</em>
+        </h1>
+        <p class="text-app-text/50 text-sm mt-1">
+          {{ clientItems.length }} entreprise(s) enregistrée(s)
+        </p>
       </div>
-      <button class="btn btn-gold btn-md" @click="openCreate">+ Nouveau client</button>
+      <button class="btn btn-gold btn-md" @click="openCreate">
+        + Nouveau client
+      </button>
     </div>
 
     <!-- Recherche -->
     <div class="card p-3">
-      <input v-model="search" class="f-input" placeholder="Rechercher par raison sociale, ville, email..." />
+      <input
+        v-model="search"
+        class="f-input"
+        placeholder="Rechercher par raison sociale, ville, email..."
+      />
     </div>
 
     <!-- Chargement -->
-    <div v-if="loading" class="text-center py-12 text-app-text/40">Chargement...</div>
+    <div v-if="loading" class="text-center py-12 text-app-text/40">
+      Chargement...
+    </div>
 
     <!-- Liste clients -->
     <div v-else-if="filtered.length" class="space-y-3">
@@ -324,8 +299,12 @@ onMounted(() => clientsStore.fetchAll())
             class="text-xs px-2 py-0.5 rounded-full font-medium"
             :class="statutColor[client.statut] ?? 'text-app-text/50 bg-white/5'"
           >{{ client.statut }}</span>
-          <button class="btn btn-outline btn-sm" @click="openReps(client.id)">👤 Représentants</button>
-          <button class="btn btn-outline btn-sm" @click="openEdit(client)">Modifier</button>
+          <button class="btn btn-outline btn-sm" @click="openRepModal(client.id)">
+            👤 Représentant
+          </button>
+          <button class="btn btn-outline btn-sm" @click="openEdit(client)">
+            Modifier
+          </button>
         </div>
       </div>
     </div>
@@ -334,7 +313,9 @@ onMounted(() => clientsStore.fetchAll())
     <div v-else class="card p-10 text-center text-app-text/40">
       <p class="text-4xl mb-3">🏢</p>
       <p>Aucun client trouvé.</p>
-      <button class="btn btn-gold btn-md mt-4" @click="openCreate">Créer le premier client</button>
+      <button class="btn btn-gold btn-md mt-4" @click="openCreate">
+        Créer le premier client
+      </button>
     </div>
 
     <!-- ════ Modal Créer / Modifier Entreprise ════════════ -->
@@ -352,8 +333,6 @@ onMounted(() => clientsStore.fetchAll())
         </div>
 
         <form class="space-y-4" @submit.prevent="submitEntreprise">
-
-          <!-- Section Entreprise -->
           <p class="text-xs uppercase text-gold tracking-widest font-bold">Entreprise</p>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div class="md:col-span-2">
@@ -394,7 +373,6 @@ onMounted(() => clientsStore.fetchAll())
             </div>
           </div>
 
-          <!-- Section Compte client -->
           <p class="text-xs uppercase text-gold tracking-widest font-bold pt-2">Compte accès portail client</p>
           <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
             <div>
@@ -415,7 +393,7 @@ onMounted(() => clientsStore.fetchAll())
             </div>
             <div class="md:col-span-2">
               <label class="f-label">
-                {{ modalMode === 'create' ? 'Mot de passe *' : 'Nouveau mot de passe (min. 8 car.) — laisser vide pour ne pas changer' }}
+                {{ modalMode === 'create' ? 'Mot de passe *' : 'Nouveau mot de passe — laisser vide pour ne pas changer' }}
               </label>
               <input
                 v-model="form.client_password"
@@ -424,19 +402,14 @@ onMounted(() => clientsStore.fetchAll())
                 :required="modalMode === 'create'"
                 placeholder="Min. 8 caractères"
               />
-              <!-- Indicateur visuel en mode édition -->
               <p
                 v-if="modalMode === 'edit' && form.client_password.length > 0 && form.client_password.length < 8"
                 class="text-xs text-yellow-400 mt-1"
-              >
-                ⚠ Minimum 8 caractères pour changer le mot de passe
-              </p>
+              >⚠ Minimum 8 caractères pour changer le mot de passe</p>
               <p
                 v-else-if="modalMode === 'edit' && form.client_password.length >= 8"
                 class="text-xs text-green-400 mt-1"
-              >
-                ✓ Le mot de passe sera mis à jour
-              </p>
+              >✓ Le mot de passe sera mis à jour</p>
             </div>
           </div>
 
@@ -452,65 +425,108 @@ onMounted(() => clientsStore.fetchAll())
       </div>
     </div>
 
-    <!-- ════ Modal Représentants ══════════════════════════ -->
+    <!-- ════ Modal Représentant (1-to-1) ══════════════════ -->
     <div
       v-if="showRepModal"
       class="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4"
       @click.self="showRepModal = false"
     >
-      <div class="card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
+      <div class="card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
+
         <div class="flex items-center justify-between">
-          <h2 class="font-serif text-xl">Représentants</h2>
+          <h2 class="font-serif text-xl">Représentant légal</h2>
           <button class="text-app-text/40 hover:text-white text-xl" @click="showRepModal = false">✕</button>
         </div>
 
-        <!-- Liste -->
-        <div v-if="loadingReps" class="text-center py-6 text-app-text/40">Chargement...</div>
-        <div v-else-if="representants.length" class="space-y-2">
-          <div
-            v-for="r in representants" :key="r.id"
-            class="rounded-xl border border-white/10 p-3 flex items-center justify-between gap-3"
-          >
-            <div>
-              <p class="font-semibold text-sm">{{ r.nom }} {{ r.prenom }}</p>
-              <p class="text-xs text-app-text/50">
-                CIN: {{ r.cin }} · {{ r.telephone ?? '-' }} · {{ r.email ?? '-' }}
-              </p>
-            </div>
-            <div class="flex gap-2 flex-shrink-0">
-              <button class="btn btn-outline btn-sm" @click="openEditRep(r)">Éditer</button>
-              <button class="btn btn-danger btn-sm" @click="deleteRep(r.id)">✕</button>
-            </div>
-          </div>
+        <!-- Loading -->
+        <div v-if="loadingRep" class="text-center py-8 text-app-text/40">
+          Chargement...
         </div>
-        <p v-else class="text-sm text-app-text/40 text-center py-4">Aucun représentant.</p>
 
-        <!-- Formulaire ajout / édition -->
-        <div class="border-t border-white/10 pt-4 space-y-3">
-          <p class="text-xs uppercase text-gold tracking-widest font-bold">
-            {{ repModalMode === 'create' ? 'Ajouter un représentant' : 'Modifier le représentant' }}
-          </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div><label class="f-label">Nom *</label><input v-model="repForm.nom" class="f-input" required placeholder="Dahmi" /></div>
-            <div><label class="f-label">Prénom</label><input v-model="repForm.prenom" class="f-input" placeholder="Saad" /></div>
-            <div><label class="f-label">CIN *</label><input v-model="repForm.cin" class="f-input" required placeholder="BE123456" /></div>
-            <div><label class="f-label">Nationalité</label><input v-model="repForm.nationalite" class="f-input" placeholder="Marocaine" /></div>
-            <div><label class="f-label">Date de naissance</label><input v-model="repForm.date_naissance" class="f-input" type="date" /></div>
-            <div><label class="f-label">Téléphone</label><input v-model="repForm.telephone" class="f-input" placeholder="+212 6XX" /></div>
-            <div><label class="f-label">Email</label><input v-model="repForm.email" class="f-input" type="email" /></div>
-            <div><label class="f-label">Adresse</label><input v-model="repForm.adresse" class="f-input" /></div>
+        <!-- View mode — representant exists -->
+        <div v-else-if="representant && repMode === 'view'" class="space-y-4">
+          <div class="rounded-xl border border-white/10 p-4 space-y-2">
+            <p class="font-semibold text-lg">
+              {{ representant.prenom }} {{ representant.nom }}
+            </p>
+            <p class="text-sm text-app-text/60">CIN : {{ representant.cin }}</p>
+            <p v-if="representant.nationalite" class="text-sm text-app-text/60">
+              Nationalité : {{ representant.nationalite }}
+            </p>
+            <p v-if="representant.date_naissance" class="text-sm text-app-text/60">
+              Né(e) le : {{ representant.date_naissance }}
+            </p>
+            <p v-if="representant.adresse" class="text-sm text-app-text/60">
+              Adresse : {{ representant.adresse }}
+            </p>
+            <p v-if="representant.telephone" class="text-sm text-app-text/60">
+              Tél : {{ representant.telephone }}
+            </p>
+            <p v-if="representant.email" class="text-sm text-app-text/60">
+              Email : {{ representant.email }}
+            </p>
           </div>
           <div class="flex gap-2 justify-end">
-            <button v-if="repModalMode === 'edit'" class="btn btn-outline btn-sm" @click="openAddRep">Annuler</button>
+            <button class="btn btn-danger btn-sm" @click="deleteRep">Supprimer</button>
+            <button class="btn btn-gold btn-md" @click="openRepEdit">Modifier</button>
+          </div>
+        </div>
+
+        <!-- Create / Edit form -->
+        <div v-else-if="repMode === 'create' || repMode === 'edit'" class="space-y-4">
+          <p class="text-xs uppercase text-gold tracking-widest font-bold">
+            {{ repMode === 'create' ? 'Ajouter le représentant' : 'Modifier le représentant' }}
+          </p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div>
+              <label class="f-label">Nom *</label>
+              <input v-model="repForm.nom" class="f-input" required placeholder="El Jadiani" />
+            </div>
+            <div>
+              <label class="f-label">Prénom</label>
+              <input v-model="repForm.prenom" class="f-input" placeholder="Youssef" />
+            </div>
+            <div>
+              <label class="f-label">CIN *</label>
+              <input v-model="repForm.cin" class="f-input" required placeholder="BJ422176" />
+            </div>
+            <div>
+              <label class="f-label">Nationalité</label>
+              <input v-model="repForm.nationalite" class="f-input" placeholder="Marocaine" />
+            </div>
+            <div>
+              <label class="f-label">Date de naissance</label>
+              <input v-model="repForm.date_naissance" class="f-input" type="date" />
+            </div>
+            <div>
+              <label class="f-label">Téléphone</label>
+              <input v-model="repForm.telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
+            </div>
+            <div>
+              <label class="f-label">Email</label>
+              <input v-model="repForm.email" class="f-input" type="email" />
+            </div>
+            <div>
+              <label class="f-label">Adresse</label>
+              <input v-model="repForm.adresse" class="f-input" />
+            </div>
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button
+              v-if="repMode === 'edit'"
+              class="btn btn-outline btn-sm"
+              @click="repMode = 'view'"
+            >Annuler</button>
             <button
               class="btn btn-gold btn-md"
               :disabled="savingRep || !repForm.nom || !repForm.cin"
               @click="submitRep"
             >
-              {{ savingRep ? 'Enregistrement...' : repModalMode === 'create' ? '+ Ajouter' : 'Sauvegarder' }}
+              {{ savingRep ? 'Enregistrement...' : repMode === 'create' ? '+ Ajouter' : 'Sauvegarder' }}
             </button>
           </div>
         </div>
+
       </div>
     </div>
 
