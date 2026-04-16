@@ -1,5 +1,5 @@
 <!-- ============================================================
-  pages/admin/parametres.vue
+  pages/admin/settings.vue
   Paramètres du compte domiciliataire :
   - Préférences de notifications (délais d'alerte)
   - Informations du compte

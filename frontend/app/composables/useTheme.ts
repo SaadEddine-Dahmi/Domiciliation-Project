@@ -1,48 +1,54 @@
 // app/composables/useTheme.ts
-// Manages light/dark theme toggle.
-// Persists preference to localStorage.
-// Applies 'dark' class to <html> element.
-// Default: light
+
+export type Theme = 'light' | 'gray' | 'dark'
 
 const STORAGE_KEY = 'astfisc_theme'
 
+// Shared reactive state across all useTheme() calls
+const current = ref<Theme>('light')
+
 export function useTheme() {
-  // Reactive state — true = dark, false = light
-  const isDark = ref(false)
 
-  // Apply theme to <html> element
-  function applyTheme(dark: boolean): void {
+  // Apply theme class to <html>
+  function applyTheme(theme: Theme): void {
     if (!import.meta.client) return
-    document.documentElement.classList.toggle('dark', dark)
+    const html = document.documentElement
+    html.classList.remove('gray', 'dark')
+    if (theme === 'gray') html.classList.add('gray')
+    if (theme === 'dark') html.classList.add('dark')
   }
 
-  // Toggle between light and dark
+  // Set a specific theme
+  function setTheme(theme: Theme): void {
+    current.value = theme
+    applyTheme(theme)
+    if (import.meta.client) {
+      localStorage.setItem(STORAGE_KEY, theme)
+    }
+  }
+
+  // Cycle: light → gray → dark → light
   function toggle(): void {
-    isDark.value = !isDark.value
-    applyTheme(isDark.value)
-    if (import.meta.client) {
-      localStorage.setItem(STORAGE_KEY, isDark.value ? 'dark' : 'light')
+    const next: Record<Theme, Theme> = {
+      light: 'gray',
+      gray: 'dark',
+      dark: 'light',
     }
+    setTheme(next[current.value])
   }
 
-  // Set explicit mode
-  function setDark(dark: boolean): void {
-    isDark.value = dark
-    applyTheme(dark)
-    if (import.meta.client) {
-      localStorage.setItem(STORAGE_KEY, dark ? 'dark' : 'light')
-    }
-  }
-
-  // Restore saved preference on app load
-  // Default is light — only go dark if explicitly saved
+  // Restore saved preference on app load — default is light
   function init(): void {
     if (!import.meta.client) return
-    const saved = localStorage.getItem(STORAGE_KEY)
-    const prefersDark = saved === 'dark'
-    isDark.value = prefersDark
-    applyTheme(prefersDark)
+    const saved = localStorage.getItem(STORAGE_KEY) as Theme | null
+    const theme: Theme = saved === 'gray' || saved === 'dark' ? saved : 'light'
+    current.value = theme
+    applyTheme(theme)
   }
 
-  return { isDark, toggle, setDark, init }
+  const isDark = computed(() => current.value === 'dark')
+  const isGray = computed(() => current.value === 'gray')
+  const isLight = computed(() => current.value === 'light')
+
+  return { current, isDark, isGray, isLight, setTheme, toggle, init }
 }
