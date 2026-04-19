@@ -2,18 +2,27 @@
 <template>
   <div class="flex min-h-screen transition-colors" style="background: var(--app-bg)">
     <AppSidebar :nav="nav" />
-    <div class="flex flex-col flex-1" style="margin-left: 230px; min-height: 100vh">
+
+    <!-- Content shifts smoothly with sidebar width (52px collapsed / 230px expanded) -->
+    <div
+      class="flex flex-col flex-1 min-h-screen transition-[margin-left] duration-[220ms] ease-[cubic-bezier(0.4,0,0.2,1)]"
+      :style="sidebar.isOpen.value ? 'margin-left:230px' : 'margin-left:52px'"
+    >
       <AppTopbar :title="pageTitle" />
       <main class="flex-1 p-6"><slot /></main>
     </div>
+
     <AppToast />
   </div>
 </template>
 
 <script setup lang="ts">
-const props = defineProps<{ nav?: any[] }>()
-const nav   = computed(() => props.nav ?? [])
-const route = useRoute()
+import { useSidebar } from '~/composables/useSidebar'
+
+const props   = defineProps<{ nav?: any[] }>()
+const nav     = computed(() => props.nav ?? [])
+const route   = useRoute()
+const sidebar = useSidebar()
 
 const pageTitle = computed(() => ({
   '/admin/dashboard':       'Tableau de bord',
