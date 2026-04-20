@@ -66,29 +66,32 @@ class RepresentantController extends Controller
      * PUT /entreprises/{entreprise}/representant
      * Updates the single representant — no {id} needed.
      */
-    public function update(Request $request, int $entrepriseId)
-    {
-        Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
+public function update(Request $request, int $entrepriseId)
+{
+    Entreprise::where('domiciliataire_id', auth()->id())
+        ->findOrFail($entrepriseId);
 
-        $rep = Representant::where('entreprise_id', $entrepriseId)
-            ->firstOrFail();
+    $rep = Representant::where('entreprise_id', $entrepriseId)
+        ->firstOrFail();
 
-        $data = $request->validate([
-            'nom'            => ['required', 'string', 'max:100'],
-            'prenom'         => ['nullable', 'string', 'max:100'],
-            'cin'            => ['required', 'string', 'max:50'],
-            'nationalite'    => ['nullable', 'string', 'max:100'],
-            'date_naissance' => ['nullable', 'date'],
-            'adresse'        => ['nullable', 'string'],
-            'telephone'      => ['nullable', 'string', 'max:50'],
-            'email'          => ['nullable', 'email', 'max:150'],
-        ]);
+    // FIX: use 'sometimes' instead of 'required' so frontend can send
+    // partial payloads (Partial<Representant>) without triggering 422s.
+    // Fields not present in the request are simply not updated.
+    $data = $request->validate([
+        'nom'            => ['sometimes', 'string', 'max:100'],
+        'prenom'         => ['nullable', 'string', 'max:100'],
+        'cin'            => ['sometimes', 'string', 'max:50'],
+        'nationalite'    => ['nullable', 'string', 'max:100'],
+        'date_naissance' => ['nullable', 'date'],
+        'adresse'        => ['nullable', 'string'],
+        'telephone'      => ['nullable', 'string', 'max:50'],
+        'email'          => ['nullable', 'email', 'max:150'],
+    ]);
 
-        $rep->update($data);
+    $rep->update($data);
 
-        return response()->json(['success' => true, 'data' => $rep->fresh()]);
-    }
+    return response()->json(['success' => true, 'data' => $rep->fresh()]);
+}
 
     /**
      * DELETE /entreprises/{entreprise}/representant
