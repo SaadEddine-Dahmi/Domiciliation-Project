@@ -1,7 +1,5 @@
-<!-- ============================================================
-  pages/client/dashboard.vue — avec widget Messages reçus
-============================================================ -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth' 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
