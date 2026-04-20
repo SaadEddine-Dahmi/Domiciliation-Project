@@ -1,14 +1,4 @@
 // app/stores/auth.ts
-// SECURITY NOTE on localStorage token storage:
-// Storing tokens in localStorage is accessible to JavaScript (XSS risk).
-// Full mitigation requires HttpOnly cookie + Sanctum stateful auth.
-// Current hardening:
-//   1. Short expiry check (7 days — already in place)
-//   2. Token never logged or exposed in responses
-//   3. XSS risk mitigated by CSP headers (SecurityHeaders middleware)
-//   4. All v-html interpolation now escaped (contrat.vue)
-// Residual risk documented below.
-
 import { defineStore } from 'pinia'
 
 export type Role = 'admin' | 'domiciliataire' | 'client'
@@ -25,13 +15,6 @@ export interface AuthUser {
     color: string
 }
 
-const STORAGE_KEY = 'astfisc_auth'
-const MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000 // 7 days
-
-// SSR-safe guard: import.meta.client is always undefined in Vitest (jsdom).
-// typeof window !== 'undefined' works in both Nuxt SSR and Vitest environments.
-const isBrowser = () => typeof window !== 'undefined'
-
 export const useAuthStore = defineStore('auth', () => {
 
     const user = ref<AuthUser | null>(null)
@@ -46,15 +29,27 @@ export const useAuthStore = defineStore('auth', () => {
     const isClient = computed(() => user.value?.role === 'client')
     const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
+    // ── Config helpers — read from runtimeConfig, never hardcode ──
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
+    function getStorageKey(): string {
+        const config = useRuntimeConfig()
+        return (config.public.authStorageKey as string) ?? 'astfisc_auth'
+    }
+
+    function getMaxAgeMs(): number {
+        const config = useRuntimeConfig()
+        const days = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
+        return days * 24 * 60 * 60 * 1000
+    }
+
+    // ── buildUser ──────────────────────────────────────────────
     function buildUser(u: any): AuthUser {
         return {
             id: u.id,
-            // SECURITY: never store raw token in user object
             name: `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
             email: u.email,
             role: u.role ?? 'client',
@@ -67,19 +62,17 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    // ── saveToStorage ──────────────────────────────────────────
     function saveToStorage(): void {
-        if (!isBrowser()) return
-        // SECURITY: store minimum required — no sensitive profile data
-        localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        if (!import.meta.client) return
+        localStorage.setItem(getStorageKey(), JSON.stringify({
             user: user.value,
-            // Token stored here is the residual risk.
-            // Mitigated by: CSP headers, escaped v-html, no eval/innerHTML elsewhere.
-            // Full fix: migrate to HttpOnly cookie + sanctum stateful.
             token: token.value,
             savedAt: Date.now(),
         }))
     }
 
+    // ── login ──────────────────────────────────────────────────
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
         error.value = ''
@@ -103,20 +96,17 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    // ── register ───────────────────────────────────────────────
     async function register(payload: {
-        nom: string
-        prenom?: string
-        email: string
-        password: string
-        telephone?: string
+        nom: string; prenom?: string; email: string
+        password: string; telephone?: string
     }): Promise<boolean> {
         loading.value = true
         error.value = ''
         isPendingApproval.value = false
         try {
             const res = await $fetch<{
-                success: boolean
-                message?: string
+                success: boolean; message?: string
                 data: { user: any; token?: string }
             }>(
                 `${getApiBase()}/api/auth/register`,
@@ -140,35 +130,34 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
+    // ── logout ─────────────────────────────────────────────────
     function logout(): void {
         user.value = null
         token.value = ''
         error.value = ''
         isPendingApproval.value = false
-        // SECURITY: clear all auth data on logout
-        if (isBrowser()) {
-            localStorage.removeItem(STORAGE_KEY)
+        if (import.meta.client) {
+            localStorage.removeItem(getStorageKey())
         }
     }
 
+    // ── restoreSession ─────────────────────────────────────────
     function restoreSession(): void {
-        if (!isBrowser()) return
+        if (!import.meta.client) return
         if (user.value && token.value) return
         try {
-            const raw = localStorage.getItem(STORAGE_KEY)
+            const raw = localStorage.getItem(getStorageKey())
             if (!raw) return
             const parsed = JSON.parse(raw)
             const ageMs = Date.now() - (parsed.savedAt ?? 0)
-            // SECURITY: enforce 7-day expiry — expired sessions are cleared
-            if (ageMs > MAX_AGE_MS) {
-                localStorage.removeItem(STORAGE_KEY)
+            if (ageMs > getMaxAgeMs()) {
+                localStorage.removeItem(getStorageKey())
                 return
             }
             user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
         } catch {
-            // SECURITY: clear corrupted/tampered storage
-            localStorage.removeItem(STORAGE_KEY)
+            localStorage.removeItem(getStorageKey())
         }
     }
 
