@@ -1,6 +1,6 @@
 <!-- app/pages/admin/clients.vue -->
-<!-- Manages entreprises + their single representant (1-to-1) -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
 import { representantService } from '~/services/representant.service'
@@ -50,7 +50,9 @@ const filtered = computed(() => {
   return clientItems.value.filter(c =>
     c.raison_sociale?.toLowerCase().includes(q) ||
     c.ville?.toLowerCase().includes(q) ||
-    c.client_user?.email?.toLowerCase().includes(q)
+    c.client_user?.email?.toLowerCase().includes(q) ||
+    c.client_user?.nom?.toLowerCase().includes(q) ||
+    c.forme_juridique?.toLowerCase().includes(q)
   )
 })
 
@@ -117,14 +119,8 @@ async function submitEntreprise(): Promise<void> {
           telephone: form.client_telephone,
         },
       })
-
-      // Update password separately only if filled
       if (form.client_password.trim().length >= 8) {
-        await clientsStore.updatePassword(
-          editId.value,
-          form.client_password,
-          form.client_password
-        )
+        await clientsStore.updatePassword(editId.value, form.client_password, form.client_password)
         success('Client et mot de passe mis à jour')
       } else {
         success('Client mis à jour')
@@ -142,22 +138,17 @@ async function submitEntreprise(): Promise<void> {
   }
 }
 
-// ── Representant modal : ouvrir ───────────────────────────
+// ── Representant modal ────────────────────────────────────
 async function openRepModal(clientId: number): Promise<void> {
   selectedClientId.value = clientId
   loadingRep.value       = true
   representant.value     = null
   repMode.value          = 'view'
   showRepModal.value     = true
-
   try {
     const res = await representantService.get(clientId)
     representant.value = res.data ?? null
-
-    // If no representant yet, go straight to create form
-    if (!representant.value) {
-      openRepCreate()
-    }
+    if (!representant.value) openRepCreate()
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur chargement représentant')
   } finally {
@@ -165,7 +156,6 @@ async function openRepModal(clientId: number): Promise<void> {
   }
 }
 
-// ── Représentant : passer en mode création ────────────────
 function openRepCreate(): void {
   repMode.value = 'create'
   Object.assign(repForm, {
@@ -174,7 +164,6 @@ function openRepCreate(): void {
   })
 }
 
-// ── Représentant : passer en mode édition ─────────────────
 function openRepEdit(): void {
   if (!representant.value) return
   repMode.value = 'edit'
@@ -190,7 +179,6 @@ function openRepEdit(): void {
   })
 }
 
-// ── Représentant : soumettre create / update ──────────────
 async function submitRep(): Promise<void> {
   if (!selectedClientId.value) return
   savingRep.value = true
@@ -212,7 +200,6 @@ async function submitRep(): Promise<void> {
   }
 }
 
-// ── Représentant : supprimer ──────────────────────────────
 async function deleteRep(): Promise<void> {
   if (!selectedClientId.value || !confirm('Supprimer le représentant ?')) return
   try {
@@ -225,7 +212,6 @@ async function deleteRep(): Promise<void> {
   }
 }
 
-// ── Statut couleurs ───────────────────────────────────────
 const statutColor: Record<string, string> = {
   actif:    'text-green-400 bg-green-400/10',
   inactif:  'text-red-400 bg-red-400/10',
@@ -244,7 +230,7 @@ onMounted(() => clientsStore.fetchAll())
         <h1 class="font-serif text-2xl">
           Clients <em class="text-gold italic">&amp; Entreprises</em>
         </h1>
-        <p class="text-app-text/50 text-sm mt-1">
+        <p class="text-sm mt-1" style="color: var(--app-text-muted)">
           {{ clientItems.length }} entreprise(s) enregistrée(s)
         </p>
       </div>
@@ -253,54 +239,63 @@ onMounted(() => clientsStore.fetchAll())
       </button>
     </div>
 
-    <!-- Recherche -->
-    <div class="card p-3">
+    <!-- Search bar — always visible -->
+    <div class="relative">
+      <svg
+        class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+        width="15" height="15" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
+        style="color: var(--app-text-faint)"
+      >
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
       <input
         v-model="search"
-        class="f-input"
-        placeholder="Rechercher par raison sociale, ville, email..."
+        class="f-input pl-9"
+        placeholder="Rechercher par raison sociale, ville, email, gérant..."
       />
     </div>
 
-    <!-- Chargement -->
-    <div v-if="loading" class="text-center py-12 text-app-text/40">
+    <!-- Loading -->
+    <div v-if="loading" class="text-center py-12" style="color: var(--app-text-faint)">
       Chargement...
     </div>
 
-    <!-- Liste clients -->
+    <!-- Client list -->
     <div v-else-if="filtered.length" class="space-y-3">
       <div
         v-for="client in filtered" :key="client.id"
         class="card p-4 flex items-center justify-between gap-4 flex-wrap"
       >
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-4 min-w-0">
           <div
             class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
             style="background:rgba(200,169,110,0.15);color:#c8a96e"
           >
             {{ (client.raison_sociale ?? '?').slice(0, 2).toUpperCase() }}
           </div>
-          <div>
-            <p class="font-semibold">{{ client.raison_sociale }}</p>
-            <p class="text-xs text-app-text/50">
+          <div class="min-w-0">
+            <p class="font-semibold truncate">{{ client.raison_sociale }}</p>
+            <p class="text-xs truncate" style="color: var(--app-text-muted)">
               {{ client.forme_juridique ?? '' }}
               <span v-if="client.ville"> · {{ client.ville }}</span>
             </p>
-            <p v-if="client.client_user" class="text-xs text-app-text/40 mt-0.5">
+            <p v-if="client.client_user" class="text-xs mt-0.5 truncate" style="color: var(--app-text-faint)">
               {{ client.client_user.nom }} {{ client.client_user.prenom }}
               · {{ client.client_user.email }}
             </p>
           </div>
         </div>
 
-        <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex items-center gap-2 flex-wrap flex-shrink-0">
           <span
             v-if="client.statut"
             class="text-xs px-2 py-0.5 rounded-full font-medium"
-            :class="statutColor[client.statut] ?? 'text-app-text/50 bg-white/5'"
+            :class="statutColor[client.statut] ?? 'bg-white/5'"
           >{{ client.statut }}</span>
           <button class="btn btn-outline btn-sm" @click="openRepModal(client.id)">
-            👤 Représentant
+            Représentant
           </button>
           <button class="btn btn-outline btn-sm" @click="openEdit(client)">
             Modifier
@@ -309,226 +304,255 @@ onMounted(() => clientsStore.fetchAll())
       </div>
     </div>
 
-    <!-- État vide -->
-    <div v-else class="card p-10 text-center text-app-text/40">
+    <!-- Empty state -->
+    <div v-else class="card p-10 text-center" style="color: var(--app-text-faint)">
       <p class="text-4xl mb-3">🏢</p>
-      <p>Aucun client trouvé.</p>
-      <button class="btn btn-gold btn-md mt-4" @click="openCreate">
+      <p>{{ search ? 'Aucun résultat pour "' + search + '"' : 'Aucun client trouvé.' }}</p>
+      <button v-if="!search" class="btn btn-gold btn-md mt-4" @click="openCreate">
         Créer le premier client
       </button>
     </div>
 
-    <!-- ════ Modal Créer / Modifier Entreprise ════════════ -->
-    <div
-      v-if="showModal"
-      class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
-      @click.self="showModal = false"
-    >
-      <div class="card w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-xl">
-            {{ modalMode === 'create' ? 'Nouveau client' : 'Modifier le client' }}
-          </h2>
-          <button class="text-app-text/40 hover:text-white text-xl" @click="showModal = false">✕</button>
-        </div>
 
-        <form class="space-y-4" @submit.prevent="submitEntreprise">
-          <p class="text-xs uppercase text-gold tracking-widest font-bold">Entreprise</p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div class="md:col-span-2">
-              <label class="f-label">Raison sociale *</label>
-              <input v-model="form.raison_sociale" class="f-input" required placeholder="BRONX IMMOBILIER SARL" />
-            </div>
-            <div>
-              <label class="f-label">Forme juridique</label>
-              <input v-model="form.forme_juridique" class="f-input" placeholder="SARL, SA..." />
-            </div>
-            <div>
-              <label class="f-label">Statut</label>
-              <select v-model="form.statut" class="f-input">
-                <option value="actif">Actif</option>
-                <option value="inactif">Inactif</option>
-                <option value="suspendu">Suspendu</option>
-              </select>
-            </div>
-            <div>
-              <label class="f-label">Adresse</label>
-              <input v-model="form.adresse" class="f-input" placeholder="123 Rue Hassan II" />
-            </div>
-            <div>
-              <label class="f-label">Ville</label>
-              <input v-model="form.ville" class="f-input" placeholder="Casablanca" />
-            </div>
-            <div>
-              <label class="f-label">Pays</label>
-              <input v-model="form.pays" class="f-input" placeholder="Maroc" />
-            </div>
-            <div>
-              <label class="f-label">Capital (DH)</label>
-              <input v-model.number="form.capital" class="f-input" type="number" placeholder="100000" />
-            </div>
-            <div>
-              <label class="f-label">Date de création</label>
-              <input v-model="form.date_creation" class="f-input" type="date" />
-            </div>
-          </div>
-
-          <p class="text-xs uppercase text-gold tracking-widest font-bold pt-2">Compte accès portail client</p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="f-label">Nom *</label>
-              <input v-model="form.client_nom" class="f-input" :required="modalMode === 'create'" placeholder="El Jadiani" />
-            </div>
-            <div>
-              <label class="f-label">Prénom</label>
-              <input v-model="form.client_prenom" class="f-input" placeholder="Youssef" />
-            </div>
-            <div>
-              <label class="f-label">Email *</label>
-              <input v-model="form.client_email" class="f-input" type="email" :required="modalMode === 'create'" placeholder="client@exemple.ma" />
-            </div>
-            <div>
-              <label class="f-label">Téléphone</label>
-              <input v-model="form.client_telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
-            </div>
-            <div class="md:col-span-2">
-              <label class="f-label">
-                {{ modalMode === 'create' ? 'Mot de passe *' : 'Nouveau mot de passe — laisser vide pour ne pas changer' }}
-              </label>
-              <input
-                v-model="form.client_password"
-                class="f-input"
-                type="password"
-                :required="modalMode === 'create'"
-                placeholder="Min. 8 caractères"
-              />
-              <p
-                v-if="modalMode === 'edit' && form.client_password.length > 0 && form.client_password.length < 8"
-                class="text-xs text-yellow-400 mt-1"
-              >⚠ Minimum 8 caractères pour changer le mot de passe</p>
-              <p
-                v-else-if="modalMode === 'edit' && form.client_password.length >= 8"
-                class="text-xs text-green-400 mt-1"
-              >✓ Le mot de passe sera mis à jour</p>
-            </div>
-          </div>
-
-          <p v-if="serverError" class="text-red-400 text-sm">{{ serverError }}</p>
-
-          <div class="flex gap-3 justify-end pt-2">
-            <button type="button" class="btn btn-outline btn-md" @click="showModal = false">Annuler</button>
-            <button type="submit" class="btn btn-gold btn-md" :disabled="saving">
-              {{ saving ? 'Enregistrement...' : modalMode === 'create' ? 'Créer le client' : 'Sauvegarder' }}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-
-    <!-- ════ Modal Représentant (1-to-1) ══════════════════ -->
-    <div
-      v-if="showRepModal"
-      class="fixed inset-0 z-[110] bg-black/70 flex items-center justify-center p-4"
-      @click.self="showRepModal = false"
-    >
-      <div class="card w-full max-w-xl max-h-[90vh] overflow-y-auto p-6 space-y-5">
-
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-xl">Représentant légal</h2>
-          <button class="text-app-text/40 hover:text-white text-xl" @click="showRepModal = false">✕</button>
-        </div>
-
-        <!-- Loading -->
-        <div v-if="loadingRep" class="text-center py-8 text-app-text/40">
-          Chargement...
-        </div>
-
-        <!-- View mode — representant exists -->
-        <div v-else-if="representant && repMode === 'view'" class="space-y-4">
-          <div class="rounded-xl border border-white/10 p-4 space-y-2">
-            <p class="font-semibold text-lg">
-              {{ representant.prenom }} {{ representant.nom }}
-            </p>
-            <p class="text-sm text-app-text/60">CIN : {{ representant.cin }}</p>
-            <p v-if="representant.nationalite" class="text-sm text-app-text/60">
-              Nationalité : {{ representant.nationalite }}
-            </p>
-            <p v-if="representant.date_naissance" class="text-sm text-app-text/60">
-              Né(e) le : {{ representant.date_naissance }}
-            </p>
-            <p v-if="representant.adresse" class="text-sm text-app-text/60">
-              Adresse : {{ representant.adresse }}
-            </p>
-            <p v-if="representant.telephone" class="text-sm text-app-text/60">
-              Tél : {{ representant.telephone }}
-            </p>
-            <p v-if="representant.email" class="text-sm text-app-text/60">
-              Email : {{ representant.email }}
-            </p>
-          </div>
-          <div class="flex gap-2 justify-end">
-            <button class="btn btn-danger btn-sm" @click="deleteRep">Supprimer</button>
-            <button class="btn btn-gold btn-md" @click="openRepEdit">Modifier</button>
-          </div>
-        </div>
-
-        <!-- Create / Edit form -->
-        <div v-else-if="repMode === 'create' || repMode === 'edit'" class="space-y-4">
-          <p class="text-xs uppercase text-gold tracking-widest font-bold">
-            {{ repMode === 'create' ? 'Ajouter le représentant' : 'Modifier le représentant' }}
-          </p>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div>
-              <label class="f-label">Nom *</label>
-              <input v-model="repForm.nom" class="f-input" required placeholder="El Jadiani" />
-            </div>
-            <div>
-              <label class="f-label">Prénom</label>
-              <input v-model="repForm.prenom" class="f-input" placeholder="Youssef" />
-            </div>
-            <div>
-              <label class="f-label">CIN *</label>
-              <input v-model="repForm.cin" class="f-input" required placeholder="BJ422176" />
-            </div>
-            <div>
-              <label class="f-label">Nationalité</label>
-              <input v-model="repForm.nationalite" class="f-input" placeholder="Marocaine" />
-            </div>
-            <div>
-              <label class="f-label">Date de naissance</label>
-              <input v-model="repForm.date_naissance" class="f-input" type="date" />
-            </div>
-            <div>
-              <label class="f-label">Téléphone</label>
-              <input v-model="repForm.telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
-            </div>
-            <div>
-              <label class="f-label">Email</label>
-              <input v-model="repForm.email" class="f-input" type="email" />
-            </div>
-            <div>
-              <label class="f-label">Adresse</label>
-              <input v-model="repForm.adresse" class="f-input" />
-            </div>
-          </div>
-          <div class="flex gap-2 justify-end">
+    <!-- ════════════════════════════════════════════════════
+         Modal Créer / Modifier Entreprise
+         FIX: z-[200] so it appears above sidebar (z-50) and backdrop (z-40)
+         items-start + overflow-y-auto on wrapper so tall modals scroll
+         on small screens without being clipped
+    ════════════════════════════════════════════════════ -->
+    <Teleport to="body">
+      <div
+        v-if="showModal"
+        class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+        style="background: rgba(0,0,0,0.75);"
+        @click.self="showModal = false"
+      >
+        <div
+          class="card w-full max-w-2xl max-h-[90vh] flex flex-col"
+          @click.stop
+        >
+          <!-- Modal header — fixed -->
+          <div class="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0" style="border-bottom: 1px solid var(--app-border-2)">
+            <h2 class="font-serif text-xl">
+              {{ modalMode === 'create' ? 'Nouveau client' : 'Modifier le client' }}
+            </h2>
             <button
-              v-if="repMode === 'edit'"
-              class="btn btn-outline btn-sm"
-              @click="repMode = 'view'"
-            >Annuler</button>
-            <button
-              class="btn btn-gold btn-md"
-              :disabled="savingRep || !repForm.nom || !repForm.cin"
-              @click="submitRep"
+              class="w-8 h-8 rounded-lg flex items-center justify-center nav-inactive transition-colors"
+              @click="showModal = false"
             >
-              {{ savingRep ? 'Enregistrement...' : repMode === 'create' ? '+ Ajouter' : 'Sauvegarder' }}
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
             </button>
           </div>
-        </div>
 
+          <!-- Modal body — scrollable -->
+          <div class="flex-1 overflow-y-auto px-6 py-5">
+            <form class="space-y-5" @submit.prevent="submitEntreprise">
+
+              <p class="text-xs uppercase tracking-widest font-bold" style="color: #c8a96e">Entreprise</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="sm:col-span-2">
+                  <label class="f-label">Raison sociale *</label>
+                  <input v-model="form.raison_sociale" class="f-input" required placeholder="BRONX IMMOBILIER SARL" />
+                </div>
+                <div>
+                  <label class="f-label">Forme juridique</label>
+                  <input v-model="form.forme_juridique" class="f-input" placeholder="SARL, SA..." />
+                </div>
+                <div>
+                  <label class="f-label">Statut</label>
+                  <select v-model="form.statut" class="f-input">
+                    <option value="actif">Actif</option>
+                    <option value="inactif">Inactif</option>
+                    <option value="suspendu">Suspendu</option>
+                  </select>
+                </div>
+                <div>
+                  <label class="f-label">Adresse</label>
+                  <input v-model="form.adresse" class="f-input" placeholder="123 Rue Hassan II" />
+                </div>
+                <div>
+                  <label class="f-label">Ville</label>
+                  <input v-model="form.ville" class="f-input" placeholder="Casablanca" />
+                </div>
+                <div>
+                  <label class="f-label">Pays</label>
+                  <input v-model="form.pays" class="f-input" placeholder="Maroc" />
+                </div>
+                <div>
+                  <label class="f-label">Capital (DH)</label>
+                  <input v-model.number="form.capital" class="f-input" type="number" placeholder="100000" />
+                </div>
+                <div>
+                  <label class="f-label">Date de création</label>
+                  <input v-model="form.date_creation" class="f-input" type="date" />
+                </div>
+              </div>
+
+              <p class="text-xs uppercase tracking-widest font-bold pt-2" style="color: #c8a96e">Compte accès portail client</p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="f-label">Nom *</label>
+                  <input v-model="form.client_nom" class="f-input" :required="modalMode === 'create'" placeholder="El Jadiani" />
+                </div>
+                <div>
+                  <label class="f-label">Prénom</label>
+                  <input v-model="form.client_prenom" class="f-input" placeholder="Youssef" />
+                </div>
+                <div>
+                  <label class="f-label">Email *</label>
+                  <input v-model="form.client_email" class="f-input" type="email" :required="modalMode === 'create'" placeholder="client@exemple.ma" />
+                </div>
+                <div>
+                  <label class="f-label">Téléphone</label>
+                  <input v-model="form.client_telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
+                </div>
+                <div class="sm:col-span-2">
+                  <label class="f-label">
+                    {{ modalMode === 'create' ? 'Mot de passe *' : 'Nouveau mot de passe (laisser vide pour ne pas changer)' }}
+                  </label>
+                  <input
+                    v-model="form.client_password"
+                    class="f-input"
+                    type="password"
+                    :required="modalMode === 'create'"
+                    placeholder="Min. 8 caractères"
+                  />
+                  <p v-if="modalMode === 'edit' && form.client_password.length > 0 && form.client_password.length < 8"
+                     class="text-xs text-yellow-400 mt-1">
+                    ⚠ Minimum 8 caractères pour changer le mot de passe
+                  </p>
+                  <p v-else-if="modalMode === 'edit' && form.client_password.length >= 8"
+                     class="text-xs text-green-400 mt-1">
+                    ✓ Le mot de passe sera mis à jour
+                  </p>
+                </div>
+              </div>
+
+              <p v-if="serverError" class="text-red-400 text-sm px-0">{{ serverError }}</p>
+
+              <div class="flex gap-3 justify-end pt-1">
+                <button type="button" class="btn btn-outline btn-md" @click="showModal = false">Annuler</button>
+                <button type="submit" class="btn btn-gold btn-md" :disabled="saving">
+                  {{ saving ? 'Enregistrement...' : modalMode === 'create' ? 'Créer le client' : 'Sauvegarder' }}
+                </button>
+              </div>
+
+            </form>
+          </div>
+        </div>
       </div>
-    </div>
+    </Teleport>
+
+
+    <!-- ════════════════════════════════════════════════════
+         Modal Représentant
+         FIX: z-[210] (above the client modal), Teleport to body
+    ════════════════════════════════════════════════════ -->
+    <Teleport to="body">
+      <div
+        v-if="showRepModal"
+        class="fixed inset-0 z-[210] flex items-center justify-center p-4"
+        style="background: rgba(0,0,0,0.75);"
+        @click.self="showRepModal = false"
+      >
+        <div class="card w-full max-w-xl max-h-[90vh] flex flex-col" @click.stop>
+
+          <!-- Header -->
+          <div class="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0" style="border-bottom: 1px solid var(--app-border-2)">
+            <h2 class="font-serif text-xl">Représentant légal</h2>
+            <button
+              class="w-8 h-8 rounded-lg flex items-center justify-center nav-inactive"
+              @click="showRepModal = false"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+
+          <!-- Body -->
+          <div class="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+
+            <div v-if="loadingRep" class="text-center py-8" style="color: var(--app-text-faint)">
+              Chargement...
+            </div>
+
+            <!-- View mode -->
+            <div v-else-if="representant && repMode === 'view'" class="space-y-4">
+              <div class="rounded-xl p-4 space-y-2" style="background: var(--app-surface-2); border: 1px solid var(--app-border)">
+                <p class="font-semibold text-lg">{{ representant.prenom }} {{ representant.nom }}</p>
+                <div class="grid grid-cols-2 gap-2 text-sm" style="color: var(--app-text-muted)">
+                  <p><span class="font-medium" style="color:var(--app-text)">CIN :</span> {{ representant.cin }}</p>
+                  <p v-if="representant.nationalite"><span class="font-medium" style="color:var(--app-text)">Nationalité :</span> {{ representant.nationalite }}</p>
+                  <p v-if="representant.date_naissance"><span class="font-medium" style="color:var(--app-text)">Naissance :</span> {{ representant.date_naissance }}</p>
+                  <p v-if="representant.telephone"><span class="font-medium" style="color:var(--app-text)">Tél :</span> {{ representant.telephone }}</p>
+                  <p v-if="representant.email" class="col-span-2"><span class="font-medium" style="color:var(--app-text)">Email :</span> {{ representant.email }}</p>
+                  <p v-if="representant.adresse" class="col-span-2"><span class="font-medium" style="color:var(--app-text)">Adresse :</span> {{ representant.adresse }}</p>
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button class="btn btn-danger btn-sm" @click="deleteRep">Supprimer</button>
+                <button class="btn btn-gold btn-md" @click="openRepEdit">Modifier</button>
+              </div>
+            </div>
+
+            <!-- Create / Edit form -->
+            <div v-else-if="repMode === 'create' || repMode === 'edit'" class="space-y-4">
+              <p class="text-xs uppercase tracking-widest font-bold" style="color: #c8a96e">
+                {{ repMode === 'create' ? 'Ajouter le représentant' : 'Modifier le représentant' }}
+              </p>
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label class="f-label">Nom *</label>
+                  <input v-model="repForm.nom" class="f-input" required placeholder="El Jadiani" />
+                </div>
+                <div>
+                  <label class="f-label">Prénom</label>
+                  <input v-model="repForm.prenom" class="f-input" placeholder="Youssef" />
+                </div>
+                <div>
+                  <label class="f-label">CIN *</label>
+                  <input v-model="repForm.cin" class="f-input" required placeholder="BJ422176" />
+                </div>
+                <div>
+                  <label class="f-label">Nationalité</label>
+                  <input v-model="repForm.nationalite" class="f-input" placeholder="Marocaine" />
+                </div>
+                <div>
+                  <label class="f-label">Date de naissance</label>
+                  <input v-model="repForm.date_naissance" class="f-input" type="date" />
+                </div>
+                <div>
+                  <label class="f-label">Téléphone</label>
+                  <input v-model="repForm.telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
+                </div>
+                <div>
+                  <label class="f-label">Email</label>
+                  <input v-model="repForm.email" class="f-input" type="email" />
+                </div>
+                <div>
+                  <label class="f-label">Adresse</label>
+                  <input v-model="repForm.adresse" class="f-input" />
+                </div>
+              </div>
+              <div class="flex gap-2 justify-end">
+                <button v-if="repMode === 'edit'" class="btn btn-outline btn-sm" @click="repMode = 'view'">Annuler</button>
+                <button
+                  class="btn btn-gold btn-md"
+                  :disabled="savingRep || !repForm.nom || !repForm.cin"
+                  @click="submitRep"
+                >
+                  {{ savingRep ? 'Enregistrement...' : repMode === 'create' ? '+ Ajouter' : 'Sauvegarder' }}
+                </button>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>
