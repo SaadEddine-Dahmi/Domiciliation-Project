@@ -7,7 +7,7 @@
   >
     <!-- Hamburger — mobile only -->
     <button
-      class="lg:hidden w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 nav-inactive transition-colors"
+      class="lg:hidden w-9 h-9 rounded-xl flex items-center justify-center shrink-0 nav-inactive transition-colors"
       style="background: var(--app-surface-2); border: 1px solid var(--app-border);"
       @click="toggleMobile"
     >

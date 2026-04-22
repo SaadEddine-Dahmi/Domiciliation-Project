@@ -213,7 +213,7 @@ onMounted(loadAll)
         >
           <!-- Color dot -->
           <div
-            class="w-2 h-2 rounded-full flex-shrink-0 mt-1.5"
+            class="w-2 h-2 rounded-full shrink-0 mt-1.5"
             :style="`background: ${notifColor(n)}; opacity: ${n.is_read ? 0.3 : 1}`"
           />
 
@@ -229,7 +229,7 @@ onMounted(loadAll)
           </div>
 
           <!-- Right side: read status + expand chevron -->
-          <div class="flex items-center gap-2 flex-shrink-0">
+          <div class="flex items-center gap-2 shrink-0">
             <button
               v-if="!n.is_read"
               class="text-xs font-medium px-2 py-0.5 rounded-lg transition-colors"
@@ -259,7 +259,7 @@ onMounted(loadAll)
           >
             <div class="rounded-xl p-4 space-y-2 text-sm" style="background: var(--app-surface); border: 1px solid var(--app-border)">
               <div class="flex items-center gap-2 mb-2">
-                <div class="w-2 h-2 rounded-full flex-shrink-0" :style="`background: ${notifColor(n)}`"/>
+                <div class="w-2 h-2 rounded-full shrink-0" :style="`background: ${notifColor(n)}`"/>
                 <p class="font-semibold text-xs uppercase tracking-wide" :style="`color: ${notifColor(n)}`">
                   {{ n.type ?? 'Notification système' }}
                 </p>

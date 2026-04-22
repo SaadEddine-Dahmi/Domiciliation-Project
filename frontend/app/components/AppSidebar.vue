@@ -23,7 +23,7 @@
     >
       <!-- Logo mark -->
       <div
-        class="w-8 h-8 rounded-[9px] flex items-center justify-center flex-shrink-0 text-[11px] font-black select-none"
+        class="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0 text-[11px] font-black select-none"
         style="background: #c8a96e; color: #111; font-family: serif; letter-spacing: -0.5px;"
       >AF</div>
 
@@ -36,9 +36,8 @@
         <div class="text-[10px] italic truncate" style="color: #c8a96e">Domiciliation</div>
       </div>
 
-      <!-- Desktop toggle — Claude-style sidebar panel icon -->
       <button
-        class="hidden lg:flex w-8 h-8 rounded-lg items-center justify-center flex-shrink-0 transition-colors nav-inactive"
+        class="hidden lg:flex w-8 h-8 rounded-lg items-center justify-center shrink-0 transition-colors nav-inactive"
         :title="isOpen ? 'Réduire' : 'Agrandir'"
         @click="toggle"
       >
@@ -53,7 +52,7 @@
 
       <!-- Mobile close button -->
       <button
-        class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 nav-inactive"
+        class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center shrink-0 nav-inactive"
         @click="closeMobile"
       >
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
@@ -66,12 +65,12 @@
     <!-- ── USER CARD ── -->
     <div
       v-if="auth.user"
-      class="mx-2 mt-3 mb-1 rounded-xl flex items-center flex-shrink-0"
+      class="mx-2 mt-3 mb-1 rounded-xl flex items-center shrink-0"
       :class="showLabels ? 'px-3 py-2.5 gap-2.5' : 'justify-center px-0 py-2'"
       style="background: var(--app-surface-2); border: 1px solid var(--app-border); transition: all 0.2s ease;"
     >
       <div
-        class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold flex-shrink-0"
+        class="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
         :style="`background:${auth.user.color}22;color:${auth.user.color}`"
       >{{ auth.user.avatar }}</div>
 
@@ -123,19 +122,19 @@
           ]"
           @click="closeMobile"
         >
-          <span class="flex-shrink-0 flex items-center justify-center w-5 h-5">
+          <span class="shrink-0 flex items-center justify-center w-5 h-5">
             <component :is="item.icon" />
           </span>
           <span v-if="showLabels" class="flex-1 truncate leading-none">{{ item.label }}</span>
           <span
             v-if="item.badge && showLabels"
-            class="flex-shrink-0 min-w-[18px] h-[18px] rounded-md text-[10px] font-black flex items-center justify-center px-1"
+            class="shrink-0 min-w-4.5 h-4.5 rounded-md text-[10px] font-black flex items-center justify-center px-1"
             style="background: #c8a96e; color: #13161f"
           >{{ item.badge }}</span>
           <!-- Tooltip for icon-only mode -->
           <span
             v-if="!showLabels"
-            class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-[60] hidden lg:block"
+            class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
             style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
           >{{ item.label }}</span>
         </NuxtLink>
@@ -148,13 +147,13 @@
           :style="item.highlight ? 'color:#c8a96e;font-weight:700' : ''"
           @click="() => { item.action(); closeMobile() }"
         >
-          <span class="flex-shrink-0 flex items-center justify-center w-5 h-5">
+          <span class="shrink-0 flex items-center justify-center w-5 h-5">
             <component :is="item.icon" />
           </span>
           <span v-if="showLabels" class="flex-1 truncate leading-none">{{ item.label }}</span>
           <span
             v-if="!showLabels"
-            class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-[60] hidden lg:block"
+            class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
             style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
           >{{ item.label }}</span>
         </button>
@@ -164,7 +163,7 @@
 
     <!-- ── LOGOUT ── -->
     <div
-      class="flex-shrink-0 pt-1 pb-3"
+      class="shrink-0 pt-1 pb-3"
       :class="showLabels ? 'px-2' : 'px-1.5'"
       style="border-top: 1px solid var(--app-border-2);"
     >
@@ -173,7 +172,7 @@
         :class="showLabels ? 'gap-3 px-2.5 py-2' : 'justify-center px-0 py-2.5'"
         @click="handleLogout"
       >
-        <span class="flex-shrink-0 flex items-center justify-center w-5 h-5">
+        <span class="shrink-0 flex items-center justify-center w-5 h-5">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
@@ -184,7 +183,7 @@
         <span v-if="showLabels" class="flex-1 truncate leading-none">Déconnexion</span>
         <span
           v-if="!showLabels"
-          class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-[60] hidden lg:block"
+          class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
           style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
         >Déconnexion</span>
       </button>
@@ -237,11 +236,14 @@ const asideStyle = computed(() => {
   }
 })
 
-const roleLabel = computed(() => ({
-  admin:          'Super Admin',
-  domiciliataire: 'Domiciliataire',
-  client:         'Client',
-}[auth.user?.role ?? ''] ?? ''))
+const roleLabel = computed(() => {
+  const roles: Record<string, string> = {
+    admin: "Super Admin",
+    domiciliataire: "Domiciliataire",
+    client: "Client",
+  };
+  return roles[auth.user?.role ?? ""] ?? "";
+});
 
 function isActive(to: string): boolean {
   const path = to.split('?')[0]

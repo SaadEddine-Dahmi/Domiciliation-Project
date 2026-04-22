@@ -12,7 +12,7 @@
       class="flex flex-col flex-1 min-w-0 transition-[margin,filter] duration-300 ease-in-out"
       :class="[
         'ml-0',
-        isOpen ? 'lg:ml-[230px]' : 'lg:ml-[64px]',
+        isOpen ? 'lg:ml-57.5' : 'lg:ml-16',
       ]"
       :style="isMobileOpen ? 'filter: blur(2px) brightness(0.75);' : 'filter: none;'"
     >
