@@ -8,6 +8,7 @@ function getApiBase() {
   const config = useRuntimeConfig()
   return (config.public.apiBase as string) ?? ''
 }
+
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
@@ -15,12 +16,51 @@ function authHeaders(): Record<string, string> {
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
-  } catch { return {} }
+  } catch {
+    return {}
+  }
+}
+
+function getRawToken(): string {
+  if (!import.meta.client) return ''
+  try {
+    const raw = localStorage.getItem('astfisc_auth')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    return parsed?.token ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function withToken(url: string): string {
+  const token = getRawToken()
+  if (!token) throw new Error('Missing token')
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}token=${encodeURIComponent(token)}`
+}
+
+function guessExtFromMime(mime: string): string {
+  if (mime.includes('pdf')) return 'pdf'
+  if (mime.includes('png')) return 'png'
+  if (mime.includes('jpeg') || mime.includes('jpg')) return 'jpg'
+  if (mime.includes('msword')) return 'doc'
+  if (mime.includes('officedocument.wordprocessingml.document')) return 'docx'
+  return 'bin'
+}
+
+function filenameFromContentDisposition(cd: string | null): string {
+  if (!cd) return ''
+  const utf = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (utf?.[1]) return decodeURIComponent(utf[1])
+  const ascii = cd.match(/filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i)
+  return (ascii?.[1] || ascii?.[2] || '').trim().replace(/^"|"$/g, '')
 }
 
 const documents = ref<any[]>([])
-const loading   = ref(true)
-const search    = ref('')
+const loading = ref(true)
+const search = ref('')
+const downloadingId = ref<number | null>(null)
 
 async function fetchDocuments() {
   loading.value = true
@@ -54,10 +94,68 @@ function fmt(d: string | null): string {
 function expiryInfo(d: string | null): { label: string; cls: string } {
   if (!d) return { label: '—', cls: '' }
   const days = Math.ceil((new Date(d).getTime() - Date.now()) / 86400000)
-  if (days < 0)   return { label: `Expiré il y a ${Math.abs(days)}j`, cls: 'text-red-400' }
+  if (days < 0) return { label: `Expiré il y a ${Math.abs(days)}j`, cls: 'text-red-400' }
   if (days === 0) return { label: "Expire aujourd'hui", cls: 'text-yellow-400' }
-  if (days < 30)  return { label: `Expire dans ${days} jour(s)`, cls: 'text-yellow-400' }
+  if (days < 30) return { label: `Expire dans ${days} jour(s)`, cls: 'text-yellow-400' }
   return { label: fmt(d), cls: 'text-green-400' }
+}
+
+async function downloadDoc(doc: any) {
+  downloadingId.value = doc.id
+  try {
+    const baseUrl = doc?.download_url || `${getApiBase()}/api/documents/${doc.id}/download`
+    const url = withToken(baseUrl)
+
+    const res = await fetch(url, { method: 'GET' })
+    if (!res.ok) {
+      const txt = await res.text()
+      try {
+        const j = JSON.parse(txt)
+        toastError?.(j?.message || 'Erreur de téléchargement')
+      } catch {
+        toastError?.('Erreur de téléchargement')
+      }
+      return
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase()
+    if (
+      contentType.includes('application/json') ||
+      contentType.includes('text/plain') ||
+      contentType.includes('text/html')
+    ) {
+      const txt = await res.text()
+      try {
+        const j = JSON.parse(txt)
+        toastError?.(j?.message || 'Erreur de téléchargement')
+      } catch {
+        toastError?.('Erreur de téléchargement (réponse non fichier)')
+      }
+      return
+    }
+
+    const blob = await res.blob()
+
+    let filename = filenameFromContentDisposition(res.headers.get('content-disposition'))
+    if (!filename) {
+      const ext = String(doc?.extension || '').toLowerCase() || guessExtFromMime(contentType)
+      const base = String(doc?.name || `document-${doc.id}`).replace(/[\\/:*?"<>|]/g, '-')
+      filename = base.includes('.') ? base : `${base}.${ext}`
+    }
+
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(blobUrl)
+  } catch {
+    toastError?.('Erreur de téléchargement')
+  } finally {
+    downloadingId.value = null
+  }
 }
 
 onMounted(fetchDocuments)
@@ -65,7 +163,6 @@ onMounted(fetchDocuments)
 
 <template>
   <div class="space-y-5 animate-fade-up">
-
     <!-- Header -->
     <div>
       <h1 class="font-serif text-2xl">Mes <em class="italic" style="color:#c8a96e">Documents</em></h1>
@@ -133,11 +230,11 @@ onMounted(fetchDocuments)
           </div>
         </div>
 
-        <!-- Download button -->
-        <a
-          :href="doc.download_url"
-          target="_blank"
+        <!-- Download button (fixed: no direct href) -->
+        <button
           class="btn btn-gold btn-sm shrink-0"
+          :disabled="downloadingId === doc.id"
+          @click="downloadDoc(doc)"
         >
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -145,8 +242,8 @@ onMounted(fetchDocuments)
             <polyline points="7 10 12 15 17 10"/>
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
-          Télécharger
-        </a>
+          {{ downloadingId === doc.id ? 'Téléchargement...' : 'Télécharger' }}
+        </button>
       </div>
     </div>
 
@@ -166,6 +263,5 @@ onMounted(fetchDocuments)
         {{ search ? 'Modifiez votre recherche' : 'Vos documents apparaîtront ici une fois importés par votre domiciliataire.' }}
       </p>
     </div>
-
   </div>
 </template>

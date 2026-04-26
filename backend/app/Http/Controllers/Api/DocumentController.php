@@ -1,5 +1,4 @@
 <?php
-// app/Http/Controllers/Api/DocumentController.php
 
 namespace App\Http\Controllers\Api;
 
@@ -8,75 +7,88 @@ use App\Models\Document;
 use App\Models\Entreprise;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DocumentController extends Controller
 {
-    // ── Disk helper ────────────────────────────────────────
-    // Uses 'private' disk if configured, falls back to 'local'.
-    // This prevents 500 errors when filesystems.php doesn't define 'private'.
     private function disk(): string
     {
         $disks = array_keys(config('filesystems.disks', []));
-        return in_array('private', $disks) ? 'private' : 'local';
+        return in_array('private', $disks, true) ? 'private' : 'local';
     }
 
-    // ── Index ──────────────────────────────────────────────
+    private function authenticateViaToken(Request $request): ?\App\Models\User
+    {
+        $tokenValue = $request->query('token');
+        if (!$tokenValue)
+            return null;
+
+        $token = PersonalAccessToken::findToken($tokenValue);
+        if (!$token)
+            return null;
+
+        if ($token->expires_at && $token->expires_at->isPast())
+            return null;
+
+        return $token->tokenable;
+    }
+
     public function index(Request $request)
     {
         $user = auth()->user();
         $role = $user->role;
 
-        // ── Client: own documents ──────────────────────────
         if ($role === 'client') {
             $entreprise = Entreprise::where('client_user_id', $user->id)->first();
-            if (!$entreprise) {
+            if (!$entreprise)
                 return response()->json(['success' => true, 'data' => []]);
-            }
 
             $docs = Document::query()
                 ->with(['documentType'])
                 ->where('entreprise_id', $entreprise->id)
                 ->orderByDesc('created_at')
                 ->get()
-                ->map(fn($d) => $this->formatDoc($d));
+                ->map(fn($d) => $this->formatDoc($d, $user));
 
             return response()->json(['success' => true, 'data' => $docs]);
         }
 
-        // ── Domiciliataire: all their clients' documents ───
         if ($role === 'domiciliataire') {
             $query = Document::query()
                 ->with(['entreprise:id,raison_sociale', 'documentType'])
                 ->whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
                 ->orderByDesc('created_at');
 
-            // Optional filter by client
             if ($request->filled('entreprise_id')) {
                 $query->where('entreprise_id', (int) $request->entreprise_id);
             }
 
             return response()->json([
                 'success' => true,
-                'data' => $query->get()->map(fn($d) => $this->formatDoc($d, withEntreprise: true)),
+                'data' => $query->get()->map(fn($d) => $this->formatDoc($d, $user, withEntreprise: true)),
             ]);
         }
 
-        // ── Admin: metadata only ───────────────────────────
         $query = Document::query()
             ->with(['entreprise:id,raison_sociale', 'documentType:id,name'])
-            ->select('id', 'entreprise_id', 'document_type_id', 'date_expiration', 'created_at')
             ->orderByDesc('created_at');
 
-        return response()->json(['success' => true, 'data' => $query->get()]);
+        if ($request->filled('entreprise_id')) {
+            $query->where('entreprise_id', (int) $request->entreprise_id);
+        }
+
+        return response()->json([
+            'success' => true,
+            'data' => $query->get()->map(fn($d) => $this->formatDoc($d, $user, withEntreprise: true)),
+        ]);
     }
 
-    // ── Store ──────────────────────────────────────────────
     public function store(Request $request)
     {
         $user = auth()->user();
 
-        if (!in_array($user->role, ['domiciliataire', 'admin'])) {
+        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
             return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
         }
 
@@ -88,15 +100,13 @@ class DocumentController extends Controller
             'file' => ['required', 'file', 'max:10240', 'mimes:pdf,jpg,jpeg,png,doc,docx'],
         ]);
 
-        // Verify the entreprise belongs to this domiciliataire
-        $entreprise = Entreprise::where('domiciliataire_id', $user->id)
-            ->findOrFail($data['entreprise_id']);
+        if ($user->role === 'domiciliataire') {
+            $entreprise = Entreprise::where('domiciliataire_id', $user->id)->findOrFail($data['entreprise_id']);
+        } else {
+            $entreprise = Entreprise::findOrFail($data['entreprise_id']);
+        }
 
-        // Store file on configured disk
-        $path = $request->file('file')->store(
-            'documents/' . $entreprise->id,
-            $this->disk()
-        );
+        $path = $request->file('file')->store('documents/' . $entreprise->id, $this->disk());
 
         $doc = Document::create([
             'entreprise_id' => $entreprise->id,
@@ -111,20 +121,19 @@ class DocumentController extends Controller
             'success' => true,
             'data' => $this->formatDoc(
                 $doc->load(['entreprise:id,raison_sociale', 'documentType']),
+                $user,
                 withEntreprise: true
             ),
         ], 201);
     }
 
-    // ── Update ─────────────────────────────────────────────
     public function update(Request $request, int $id)
     {
         $user = auth()->user();
 
-        $doc = Document::whereHas(
-            'entreprise',
-            fn($q) => $q->where('domiciliataire_id', $user->id)
-        )->findOrFail($id);
+        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
+            return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
+        }
 
         $data = $request->validate([
             'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
@@ -133,19 +142,28 @@ class DocumentController extends Controller
             'previous_version_id' => ['nullable', 'integer', 'exists:documents,id'],
         ]);
 
-        Entreprise::where('domiciliataire_id', $user->id)->findOrFail($data['entreprise_id']);
+        if ($user->role === 'domiciliataire') {
+            $doc = Document::whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
+                ->findOrFail($id);
+
+            Entreprise::where('domiciliataire_id', $user->id)->findOrFail($data['entreprise_id']);
+        } else {
+            $doc = Document::findOrFail($id);
+            Entreprise::findOrFail($data['entreprise_id']);
+        }
+
         $doc->update($data);
 
         return response()->json([
             'success' => true,
             'data' => $this->formatDoc(
                 $doc->fresh(['entreprise:id,raison_sociale', 'documentType']),
+                $user,
                 withEntreprise: true
             ),
         ]);
     }
 
-    // ── Destroy ────────────────────────────────────────────
     public function destroy(int $id)
     {
         $user = auth()->user();
@@ -154,10 +172,12 @@ class DocumentController extends Controller
             return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
         }
 
-        $doc = Document::whereHas(
-            'entreprise',
-            fn($q) => $q->where('domiciliataire_id', $user->id)
-        )->findOrFail($id);
+        if ($user->role === 'domiciliataire') {
+            $doc = Document::whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
+                ->findOrFail($id);
+        } else {
+            $doc = Document::findOrFail($id);
+        }
 
         if (Storage::disk($this->disk())->exists($doc->file_path)) {
             Storage::disk($this->disk())->delete($doc->file_path);
@@ -168,50 +188,114 @@ class DocumentController extends Controller
         return response()->json(['success' => true, 'message' => 'Document supprimé.']);
     }
 
-    // ── Download ───────────────────────────────────────────
-    // Authenticated, role-checked file streaming.
-    // File never directly accessible via URL.
-    public function download(int $id): StreamedResponse
+    public function download(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
-        $user = auth()->user();
-        $query = Document::query();
+        $user = $this->authenticateViaToken($request);
+        if (!$user)
+            return response()->json(['message' => 'Non authentifié.'], 401);
 
-        if ($user->role === 'client') {
-            $entreprise = Entreprise::where('client_user_id', $user->id)->firstOrFail();
-            $query->where('entreprise_id', $entreprise->id);
-        } elseif ($user->role === 'domiciliataire') {
-            $query->whereHas(
-                'entreprise',
-                fn($q) => $q->where('domiciliataire_id', $user->id)
-            );
-        }
-        // admin: no filter — can access all
-
-        $doc = $query->findOrFail($id);
+        $doc = $this->resolveDocForUser($id, $user);
+        if (!$doc)
+            return response()->json(['message' => 'Document introuvable.'], 404);
 
         abort_unless(Storage::disk($this->disk())->exists($doc->file_path), 404);
 
-        return Storage::disk($this->disk())->download(
-            $doc->file_path,
-            basename($doc->file_path)
-        );
+        $originalName = $doc->documentType?->name
+            ? $doc->documentType->name . '.' . pathinfo($doc->file_path, PATHINFO_EXTENSION)
+            : basename($doc->file_path);
+
+        $mime = $this->mimeType($doc->file_path);
+
+        return response()->streamDownload(function () use ($doc) {
+            $stream = Storage::disk($this->disk())->readStream($doc->file_path);
+            fpassthru($stream);
+            if (is_resource($stream))
+                fclose($stream);
+        }, $originalName, [
+            'Content-Type' => $mime,
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
     }
 
-    // ── Format helper ──────────────────────────────────────
-    private function formatDoc(Document $doc, bool $withEntreprise = false): array
+    public function preview(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
+        $user = $this->authenticateViaToken($request);
+        if (!$user)
+            return response()->json(['message' => 'Non authentifié.'], 401);
+
+        $doc = $this->resolveDocForUser($id, $user);
+        if (!$doc)
+            return response()->json(['message' => 'Document introuvable.'], 404);
+
+        abort_unless(Storage::disk($this->disk())->exists($doc->file_path), 404);
+
+        $mime = $this->mimeType($doc->file_path);
+        $size = Storage::disk($this->disk())->size($doc->file_path);
+
+        return response()->stream(function () use ($doc) {
+            $stream = Storage::disk($this->disk())->readStream($doc->file_path);
+            fpassthru($stream);
+            if (is_resource($stream))
+                fclose($stream);
+        }, 200, [
+            'Content-Type' => $mime,
+            'Content-Length' => $size,
+            'Content-Disposition' => 'inline; filename="' . basename($doc->file_path) . '"',
+            'Cache-Control' => 'no-store, no-cache',
+            'X-Content-Type-Options' => 'nosniff',
+        ]);
+    }
+
+    private function resolveDocForUser(int $id, \App\Models\User $user): ?Document
+    {
+        $query = Document::with(['documentType', 'entreprise:id,raison_sociale']);
+
+        if ($user->role === 'client') {
+            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+            if (!$entreprise)
+                return null;
+            $query->where('entreprise_id', $entreprise->id);
+        } elseif ($user->role === 'domiciliataire') {
+            $query->whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id));
+        }
+
+        return $query->find($id);
+    }
+
+    private function mimeType(string $path): string
+    {
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+
+        return match ($ext) {
+            'pdf' => 'application/pdf',
+            'jpg',
+            'jpeg' => 'image/jpeg',
+            'png' => 'image/png',
+            'doc' => 'application/msword',
+            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            default => 'application/octet-stream',
+        };
+    }
+
+    private function formatDoc(Document $doc, \App\Models\User $user, bool $withEntreprise = false): array
+    {
+        $ext = strtolower(pathinfo($doc->file_path ?? '', PATHINFO_EXTENSION));
+
         $base = [
             'id' => $doc->id,
             'document_type_id' => $doc->document_type_id,
             'name' => $doc->documentType?->name ?? 'Document',
+            'extension' => $ext,
+            'is_pdf' => $ext === 'pdf',
             'document_type' => $doc->documentType ? [
                 'id' => $doc->documentType->id,
                 'name' => $doc->documentType->name,
             ] : null,
             'date_expiration' => $doc->date_expiration?->format('Y-m-d'),
             'created_at' => $doc->created_at,
-            'download_url' => route('documents.download', $doc->id),
-            'file_path' => null, // never expose raw path
+            'download_url' => url("/api/documents/{$doc->id}/download"),
+            'preview_url' => url("/api/documents/{$doc->id}/preview"),
+            'file_path' => null,
         ];
 
         if ($withEntreprise && $doc->relationLoaded('entreprise')) {
