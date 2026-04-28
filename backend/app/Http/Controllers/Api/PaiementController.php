@@ -4,6 +4,7 @@
 // Gestion des paiements liés aux contrats
 // ============================================================
 
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -16,7 +17,9 @@ use Illuminate\Support\Facades\DB;
 
 class PaiementController extends Controller
 {
-    /** Liste les paiements d'un contrat */
+    /** * Liste les paiements d'un contrat 
+     * UPDATED: Added 'numero_facture' to the select constraints
+     */
     public function index(int $contratId)
     {
         $tenantId = auth()->id();
@@ -24,7 +27,8 @@ class PaiementController extends Controller
 
         $paiements = Paiement::query()
             ->whereHas('facture', fn($q) => $q->where('contrat_id', $contrat->id))
-            ->with('facture:id,montant_total,statut,date_facture')
+            // Important: 'numero_facture' must be in this list to show in Nuxt
+            ->with('facture:id,numero_facture,montant_total,statut,date_facture')
             ->latest('date_paiement')
             ->get();
 
@@ -40,14 +44,14 @@ class PaiementController extends Controller
             ->findOrFail($contratId);
 
         $data = $request->validate([
-            'montant'        => ['required', 'numeric', 'min:0'],
-            'date_paiement'  => ['required', 'date'],
-            'mode_paiement'  => ['required', 'string', 'max:100'],
-            'note'           => ['nullable', 'string', 'max:500'],
+            'montant'       => ['required', 'numeric', 'min:0'],
+            'date_paiement' => ['required', 'date'],
+            'mode_paiement' => ['required', 'string', 'max:100'],
+            'note'          => ['nullable', 'string', 'max:500'],
         ]);
 
         $paiement = DB::transaction(function () use ($data, $contrat, $tenantId) {
-            // Créer une facture liée
+            // Créer une facture liée (Le numero_facture est généré par le Model)
             $facture = Facture::create([
                 'contrat_id'    => $contrat->id,
                 'entreprise_id' => $contrat->entreprise_id,

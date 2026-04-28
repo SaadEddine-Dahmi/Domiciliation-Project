@@ -4,7 +4,7 @@
 
 namespace Composer\Autoload;
 
-class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
+class ComposerStaticInit2b203a2d984b8d76940501dff9c2f6c0
 {
     public static $files = array (
         '6e3fae29631ef280660b3cdad06f25a8' => __DIR__ . '/..' . '/symfony/deprecation-contracts/function.php',
@@ -442,8 +442,8 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
         ),
         'Psr\\Http\\Message\\' => 
         array (
-            0 => __DIR__ . '/..' . '/psr/http-factory/src',
-            1 => __DIR__ . '/..' . '/psr/http-message/src',
+            0 => __DIR__ . '/..' . '/psr/http-message/src',
+            1 => __DIR__ . '/..' . '/psr/http-factory/src',
         ),
         'Psr\\Http\\Client\\' => 
         array (
@@ -475,8 +475,8 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
         ),
         'Nette\\' => 
         array (
-            0 => __DIR__ . '/..' . '/nette/schema/src',
-            1 => __DIR__ . '/..' . '/nette/utils/src',
+            0 => __DIR__ . '/..' . '/nette/utils/src',
+            1 => __DIR__ . '/..' . '/nette/schema/src',
         ),
         'Monolog\\' => 
         array (
@@ -492,8 +492,8 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
         ),
         'League\\Uri\\' => 
         array (
-            0 => __DIR__ . '/..' . '/league/uri',
-            1 => __DIR__ . '/..' . '/league/uri-interfaces',
+            0 => __DIR__ . '/..' . '/league/uri-interfaces',
+            1 => __DIR__ . '/..' . '/league/uri',
         ),
         'League\\MimeTypeDetection\\' => 
         array (
@@ -648,15 +648,23 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
     );
 
     public static $classMap = array (
+        'App\\Http\\Controllers\\Api\\ActivationController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ActivationController.php',
+        'App\\Http\\Controllers\\Api\\AdminController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/AdminController.php',
         'App\\Http\\Controllers\\Api\\ArticleController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ArticleController.php',
         'App\\Http\\Controllers\\Api\\AuthController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/AuthController.php',
         'App\\Http\\Controllers\\Api\\ClientController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ClientController.php',
         'App\\Http\\Controllers\\Api\\ContratController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/ContratController.php',
         'App\\Http\\Controllers\\Api\\DashboardController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DashboardController.php',
         'App\\Http\\Controllers\\Api\\DocumentController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DocumentController.php',
+        'App\\Http\\Controllers\\Api\\DocumentTypeController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/DocumentTypeController.php',
         'App\\Http\\Controllers\\Api\\EntrepriseController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/EntrepriseController.php',
+        'App\\Http\\Controllers\\Api\\FactureController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/FactureController.php',
+        'App\\Http\\Controllers\\Api\\MessageController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/MessageController.php',
         'App\\Http\\Controllers\\Api\\NotificationController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/NotificationController.php',
+        'App\\Http\\Controllers\\Api\\PaiementController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/PaiementController.php',
+        'App\\Http\\Controllers\\Api\\RepresentantController' => __DIR__ . '/../..' . '/app/Http/Controllers/Api/RepresentantController.php',
         'App\\Http\\Controllers\\Controller' => __DIR__ . '/../..' . '/app/Http/Controllers/Controller.php',
+        'App\\Http\\Middleware\\SecurityHeaders' => __DIR__ . '/../..' . '/app/Http/Middleware/SecurityHeaders.php',
         'App\\Http\\Requests\\EntrepriseStoreRequest' => __DIR__ . '/../..' . '/app/Http/Requests/EntrepriseStoreRequest.php',
         'App\\Http\\Requests\\EntrepriseUpdateRequest' => __DIR__ . '/../..' . '/app/Http/Requests/EntrepriseUpdateRequest.php',
         'App\\Http\\Resources\\EntrepriseCollection' => __DIR__ . '/../..' . '/app/Http/Resources/EntrepriseCollection.php',
@@ -671,12 +679,18 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
         'App\\Models\\Document' => __DIR__ . '/../..' . '/app/Models/Document.php',
         'App\\Models\\DocumentType' => __DIR__ . '/../..' . '/app/Models/DocumentType.php',
         'App\\Models\\Entreprise' => __DIR__ . '/../..' . '/app/Models/Entreprise.php',
+        'App\\Models\\EntrepriseHistory' => __DIR__ . '/../..' . '/app/Models/EntrepriseHistory.php',
         'App\\Models\\Facture' => __DIR__ . '/../..' . '/app/Models/Facture.php',
         'App\\Models\\Paiement' => __DIR__ . '/../..' . '/app/Models/Paiement.php',
         'App\\Models\\Representant' => __DIR__ . '/../..' . '/app/Models/Representant.php',
+        'App\\Models\\RepresentantHistory' => __DIR__ . '/../..' . '/app/Models/RepresentantHistory.php',
         'App\\Models\\Template' => __DIR__ . '/../..' . '/app/Models/Template.php',
         'App\\Models\\User' => __DIR__ . '/../..' . '/app/Models/User.php',
+        'App\\Observers\\EntrepriseObserver' => __DIR__ . '/../..' . '/app/Observers/EntrepriseObserver.php',
+        'App\\Observers\\RepresentantObserver' => __DIR__ . '/../..' . '/app/Observers/RepresentantObserver.php',
         'App\\Providers\\AppServiceProvider' => __DIR__ . '/../..' . '/app/Providers/AppServiceProvider.php',
+        'App\\Services\\ActivationService' => __DIR__ . '/../..' . '/app/Services/ActivationService.php',
+        'App\\Services\\TemplateService' => __DIR__ . '/../..' . '/app/Services/TemplateService.php',
         'Attribute' => __DIR__ . '/..' . '/symfony/polyfill-php80/Resources/stubs/Attribute.php',
         'Barryvdh\\DomPDF\\Facade\\Pdf' => __DIR__ . '/..' . '/barryvdh/laravel-dompdf/src/Facade/Pdf.php',
         'Barryvdh\\DomPDF\\PDF' => __DIR__ . '/..' . '/barryvdh/laravel-dompdf/src/PDF.php',
@@ -803,6 +817,7 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
         'Cron\\MinutesField' => __DIR__ . '/..' . '/dragonmantank/cron-expression/src/Cron/MinutesField.php',
         'Cron\\MonthField' => __DIR__ . '/..' . '/dragonmantank/cron-expression/src/Cron/MonthField.php',
         'Database\\Factories\\UserFactory' => __DIR__ . '/../..' . '/database/factories/UserFactory.php',
+        'Database\\Seeders\\ArticleSeeder' => __DIR__ . '/../..' . '/database/seeders/ArticleSeeder.php',
         'Database\\Seeders\\DatabaseSeeder' => __DIR__ . '/../..' . '/database/seeders/DatabaseSeeder.php',
         'DateError' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateError.php',
         'DateException' => __DIR__ . '/..' . '/symfony/polyfill-php83/Resources/stubs/DateException.php',
@@ -7412,9 +7427,9 @@ class ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c
     public static function getInitializer(ClassLoader $loader)
     {
         return \Closure::bind(function () use ($loader) {
-            $loader->prefixLengthsPsr4 = ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c::$prefixLengthsPsr4;
-            $loader->prefixDirsPsr4 = ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c::$prefixDirsPsr4;
-            $loader->classMap = ComposerStaticInit53b5d56b3b7e3cbac1713e68c8850f6c::$classMap;
+            $loader->prefixLengthsPsr4 = ComposerStaticInit2b203a2d984b8d76940501dff9c2f6c0::$prefixLengthsPsr4;
+            $loader->prefixDirsPsr4 = ComposerStaticInit2b203a2d984b8d76940501dff9c2f6c0::$prefixDirsPsr4;
+            $loader->classMap = ComposerStaticInit2b203a2d984b8d76940501dff9c2f6c0::$classMap;
 
         }, null, ClassLoader::class);
     }

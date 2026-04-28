@@ -1,8 +1,4 @@
 <?php
-// ============================================================
-// app/Models/Contrat.php
-// State machine : draft → active → expired / terminated
-// ============================================================
 
 namespace App\Models;
 
@@ -16,7 +12,9 @@ class Contrat extends Model
     protected $fillable = [
         'domiciliataire_id',
         'entreprise_id',
+        'instruction_no',
         'date_signature',
+        'ville_signature',
         'date_debut',
         'date_fin',
         'duree_mois',
@@ -32,28 +30,32 @@ class Contrat extends Model
     ];
 
     protected $casts = [
-        'date_signature' => 'date',
-        'date_debut' => 'date',
-        'date_fin' => 'date',
+        'date_signature'  => 'date',
+        'date_debut'      => 'date',
+        'date_fin'        => 'date',
         'next_alert_date' => 'date',
-        'prix_mensuel' => 'decimal:2',
-        'prix_total' => 'decimal:2',
-        'caution' => 'decimal:2',
+        'prix_mensuel'    => 'decimal:2',
+        'prix_total'      => 'decimal:2',
+        'caution'         => 'decimal:2',
     ];
 
-    // ── Relations ─────────────────────────────────────────
+    // ── Relations ──────────────────────────────────────────
+
     public function domiciliataire()
     {
         return $this->belongsTo(User::class, 'domiciliataire_id');
     }
+
     public function entreprise()
     {
         return $this->belongsTo(Entreprise::class);
     }
+
     public function alertes()
     {
         return $this->hasMany(Alerte::class);
     }
+
     public function factures()
     {
         return $this->hasMany(Facture::class);
@@ -66,43 +68,54 @@ class Contrat extends Model
             ->withTimestamps();
     }
 
-    // ── State machine helpers ─────────────────────────────
+    // ── State machine ──────────────────────────────────────
 
-    /** Passe le contrat en actif + calcule next_alert_date */
+    /**
+     * Transition draft → active.
+     * Calculates next_alert_date based on notification_delay_months.
+     * Creates an alerte record for the cron job.
+     */
     public function activate(): void
     {
         $delayMonths = $this->notification_delay_months ?? 1;
-        $alertDate = $this->date_fin
+        $alertDate   = $this->date_fin
             ? $this->date_fin->copy()->subMonths($delayMonths)
             : null;
 
         $this->update([
-            'statut' => 'active',
+            'statut'          => 'active',
             'next_alert_date' => $alertDate,
         ]);
 
-        // Créer l'alerte en DB pour le cron
         if ($alertDate) {
             $this->alertes()->create([
                 'date_alerte' => $alertDate,
-                'envoye' => false,
+                'envoye'      => false,
             ]);
         }
     }
 
-    /** Expire le contrat (appelé par le cron) */
+    /**
+     * Transition active → expired.
+     * Called by the daily cron job.
+     */
     public function expire(): void
     {
         $this->update(['statut' => 'expired']);
     }
 
-    /** Résilie le contrat manuellement */
+    /**
+     * Transition active → terminated.
+     * Called manually by the domiciliataire.
+     */
     public function terminate(): void
     {
         $this->update(['statut' => 'terminated']);
     }
 
-    /** Vérifie si le contrat est visible par le client */
+    /**
+     * Only active contrats are visible to clients.
+     */
     public function isVisibleToClient(): bool
     {
         return $this->statut === 'active';

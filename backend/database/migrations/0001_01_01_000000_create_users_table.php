@@ -15,16 +15,17 @@ return new class extends Migration {
             $table->string('password');
             $table->string('telephone', 13)->nullable();
             $table->enum('role', ['domiciliataire', 'client', 'admin'])->default('domiciliataire');
+            // Préférences de délai d'alerte : JSON ex: {"delays":[1,3,6]}
+            $table->string('notification_preferences', 255)
+    ->nullable()
+    ->default('{"delays":[1]}');
             $table->rememberToken();
             $table->timestamps();
         });
     }
+
     public function down(): void
     {
         Schema::dropIfExists('users');
     }
 };
-
-
-
-

@@ -1,19 +1,15 @@
-// ============================================================
-// stores/auth.ts
-// Store d'authentification avec 3 rôles :
-//   - admin        : voit tous les domiciliataires et clients
-//   - domiciliataire : gère ses propres clients et contrats
-//   - client       : voit uniquement ses documents et contrat
-// ============================================================
+// app/stores/auth.ts
 import { defineStore } from 'pinia'
 
 export type Role = 'admin' | 'domiciliataire' | 'client'
+export type Status = 'pending' | 'approved' | 'active' | 'rejected'
 
 export interface AuthUser {
     id: number
     name: string
     email: string
     role: Role
+    status: Status
     company: string
     avatar: string
     color: string
@@ -21,67 +17,62 @@ export interface AuthUser {
 
 export const useAuthStore = defineStore('auth', () => {
 
-    // ── State ────────────────────────────────────────────────
     const user = ref<AuthUser | null>(null)
     const token = ref<string>('')
     const loading = ref<boolean>(false)
     const error = ref<string>('')
+    const isPendingApproval = ref<boolean>(false)
 
-    // ── Getters ──────────────────────────────────────────────
-
-    /** Authentifié si user ET token présents */
     const isAuthenticated = computed(() => !!user.value && !!token.value)
-
-    /** Super admin — voit tout, sans données sensibles */
     const isAdmin = computed(() => user.value?.role === 'admin')
-
-    /** Domiciliataire — gère ses clients, contrats, documents */
     const isDomiciliataire = computed(() => user.value?.role === 'domiciliataire')
-
-    /** Client — voit uniquement ses propres documents et contrat */
     const isClient = computed(() => user.value?.role === 'client')
-
-    /** Admin OU domiciliataire — accès au dashboard /admin */
     const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
-    // Alias pour compatibilité avec les pages existantes
-    const isAdmin2 = computed(() => isInternal.value)
-
-    // ── Helpers ──────────────────────────────────────────────
+    // ── Config helpers — read from runtimeConfig, never hardcode ──
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
+    function getStorageKey(): string {
+        const config = useRuntimeConfig()
+        return (config.public.authStorageKey as string) ?? 'astfisc_auth'
+    }
+
+    function getMaxAgeMs(): number {
+        const config = useRuntimeConfig()
+        const days = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
+        return days * 24 * 60 * 60 * 1000
+    }
+
+    // ── buildUser ──────────────────────────────────────────────
     function buildUser(u: any): AuthUser {
         return {
             id: u.id,
             name: `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
             email: u.email,
             role: u.role ?? 'client',
+            status: u.status ?? 'active',
             company: u.company ?? '',
             avatar: (u.nom ?? u.email ?? 'U').slice(0, 2).toUpperCase(),
-            color: u.role === 'admin'
-                ? '#ef4444'
-                : u.role === 'domiciliataire'
-                    ? '#c8a96e'
-                    : '#60a5fa',
+            color:
+                u.role === 'admin' ? '#ef4444' :
+                    u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
         }
     }
 
-    /** Persiste la session dans localStorage avec timestamp */
+    // ── saveToStorage ──────────────────────────────────────────
     function saveToStorage(): void {
         if (!import.meta.client) return
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem(getStorageKey(), JSON.stringify({
             user: user.value,
             token: token.value,
             savedAt: Date.now(),
         }))
     }
 
-    // ── Actions ──────────────────────────────────────────────
-
-    /** Login via POST /api/auth/login */
+    // ── login ──────────────────────────────────────────────────
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
         error.value = ''
@@ -95,24 +86,36 @@ export const useAuthStore = defineStore('auth', () => {
             saveToStorage()
             return true
         } catch (e: any) {
-            error.value = e?.data?.errors?.email?.[0] ?? e?.data?.message ?? 'Identifiants invalides'
+            error.value =
+                e?.data?.message ??
+                e?.data?.errors?.email?.[0] ??
+                'Identifiants invalides'
             return false
         } finally {
             loading.value = false
         }
     }
 
-    /** Register domiciliataire via POST /api/auth/register */
+    // ── register ───────────────────────────────────────────────
     async function register(payload: {
-        nom: string; prenom?: string; email: string; password: string; telephone?: string
+        nom: string; prenom?: string; email: string
+        password: string; telephone?: string
     }): Promise<boolean> {
         loading.value = true
         error.value = ''
+        isPendingApproval.value = false
         try {
-            const res = await $fetch<{ success: boolean; data: { user: any; token: string } }>(
+            const res = await $fetch<{
+                success: boolean; message?: string
+                data: { user: any; token?: string }
+            }>(
                 `${getApiBase()}/api/auth/register`,
                 { method: 'POST', body: { ...payload, role: 'domiciliataire' } }
             )
+            if (!res.data?.token) {
+                isPendingApproval.value = true
+                return true
+            }
             user.value = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
@@ -127,44 +130,40 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    /** Déconnexion — vide state et localStorage */
+    // ── logout ─────────────────────────────────────────────────
     function logout(): void {
         user.value = null
         token.value = ''
         error.value = ''
-        if (import.meta.client) localStorage.removeItem('astfisc_auth')
+        isPendingApproval.value = false
+        if (import.meta.client) {
+            localStorage.removeItem(getStorageKey())
+        }
     }
 
-    /**
-     * Restaure la session depuis localStorage
-     * - SSR-safe (import.meta.client guard)
-     * - Expiration 7 jours
-     */
+    // ── restoreSession ─────────────────────────────────────────
     function restoreSession(): void {
         if (!import.meta.client) return
-        if (user.value && token.value) return  // déjà restauré
+        if (user.value && token.value) return
         try {
-            const raw = localStorage.getItem('astfisc_auth')
+            const raw = localStorage.getItem(getStorageKey())
             if (!raw) return
             const parsed = JSON.parse(raw)
             const ageMs = Date.now() - (parsed.savedAt ?? 0)
-            if (ageMs > 7 * 24 * 60 * 60 * 1000) {
-                localStorage.removeItem('astfisc_auth')
+            if (ageMs > getMaxAgeMs()) {
+                localStorage.removeItem(getStorageKey())
                 return
             }
             user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
         } catch {
-            localStorage.removeItem('astfisc_auth')
+            localStorage.removeItem(getStorageKey())
         }
     }
 
     return {
-        // state
-        user, token, loading, error,
-        // getters
+        user, token, loading, error, isPendingApproval,
         isAuthenticated, isAdmin, isDomiciliataire, isClient, isInternal,
-        // actions
         login, register, logout, restoreSession, saveToStorage,
     }
 })

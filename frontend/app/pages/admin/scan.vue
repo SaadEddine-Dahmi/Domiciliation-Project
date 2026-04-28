@@ -1,5 +1,5 @@
 <!-- ============================================================
-  pages/admin/scanner.vue
+  pages/admin/scan.vue
   Import de documents avec :
   - Aperçu du fichier (image ou PDF)
   - Sélection du client (dropdown DB)

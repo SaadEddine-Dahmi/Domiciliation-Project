@@ -10,11 +10,42 @@ class Representant extends Model
     use HasFactory;
 
     protected $fillable = [
-        'entreprise_id','nom','prenom','cin','nationalite','date_naissance',
-        'adresse','telephone','email',
+        'entreprise_id',
+        'nom',
+        'prenom',
+        'cin',
+        'nationalite',
+        'date_naissance',
+        'adresse',
+        'telephone',
+        'email',
     ];
 
-    protected $casts = ['date_naissance' => 'date'];
+    protected $casts = [
+        'date_naissance' => 'date',
+    ];
 
-    public function entreprise() { return $this->belongsTo(Entreprise::class); }
+    // ── Relations ──────────────────────────────────────────
+
+    public function entreprise()
+    {
+        return $this->belongsTo(Entreprise::class);
+    }
+
+    public function history()
+    {
+        return $this->hasMany(RepresentantHistory::class, 'representant_id')
+            ->orderByDesc('created_at');
+    }
+
+    // ── Accessors ──────────────────────────────────────────
+
+    /**
+     * Full name used in PDF template rendering.
+     * e.g. "YOUSSEF EL JADIANI"
+     */
+    public function getNomCompletAttribute(): string
+    {
+        return trim($this->prenom . ' ' . $this->nom);
+    }
 }

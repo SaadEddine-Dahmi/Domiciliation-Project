@@ -17,7 +17,7 @@ export interface Client {
     adresse: string | null
     ville: string | null
     pays: string | null
-    capital: string | null
+    capital: string | number | null
     date_creation: string | null
     statut: string | null
     client_user: ClientUser | null
