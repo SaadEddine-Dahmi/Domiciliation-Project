@@ -2,6 +2,7 @@
 <!-- Super admin only — manage domiciliataire accounts -->
 <!-- Tabs: Active accounts | Pending approval -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
 import { activationService } from '~/services/activation.service'
 import type { PendingUser } from '~/types/user'
 

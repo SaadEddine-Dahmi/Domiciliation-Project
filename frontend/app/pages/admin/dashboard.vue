@@ -2,6 +2,7 @@
   pages/admin/dashboard.vue — avec widget Messages récents
 ============================================================ -->
 <script setup lang="ts">
+
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
@@ -128,7 +129,7 @@ onMounted(loadDashboard)
       <div class="card p-4 space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="font-semibold text-sm">Derniers contrats</h3>
-          <NuxtLink to="/admin/contrat" class="text-xs text-gold underline">Voir tout</NuxtLink>
+          <NuxtLink to="/admin/contrats" class="text-xs text-gold underline">Voir tout</NuxtLink>
         </div>
         <div v-if="loading" class="space-y-2"><div v-for="i in 3" :key="i" class="h-8 bg-white/5 rounded animate-pulse" /></div>
         <div v-else-if="recentContrats.length" class="space-y-1">

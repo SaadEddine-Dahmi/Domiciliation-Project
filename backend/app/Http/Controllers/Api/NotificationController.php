@@ -60,27 +60,38 @@ class NotificationController extends Controller
      * Crée la colonne si elle n'existe pas encore (fallback silencieux)
      */
     public function updatePreferences(Request $request)
-    {
-        $data = $request->validate([
-            'delays'   => ['required', 'array', 'min:1'],
-            'delays.*' => ['integer', 'in:1,3,6'],
+{
+    $data = $request->validate([
+        'delays'   => ['required', 'array'],
+        'delays.*' => ['integer', 'min:1', 'max:24'],
+    ]);
+
+    $delays = array_values(array_unique($data['delays']));
+    sort($delays);
+
+    try {
+        auth()->user()->update([
+            'notification_preferences' => json_encode(['delays' => $delays]),
         ]);
+    } catch (\Throwable $e) {
+        // FIX: only swallow the specific "unknown column" error that occurs
+        // when the migration hasn't run yet. All other DB errors are real
+        // failures and must be returned to the client.
+        $isUnknownColumn = str_contains($e->getMessage(), 'notification_preferences')
+            && str_contains($e->getMessage(), 'Unknown column');
 
-        $delays = array_values(array_unique($data['delays']));
-        sort($delays);
-
-        try {
-            auth()->user()->update([
-                'notification_preferences' => json_encode(['delays' => $delays]),
-            ]);
-        } catch (\Throwable $e) {
-            // Colonne pas encore migrée — on ignore l'erreur DB
-            // Les préférences sont quand même sauvegardées côté client via localStorage
+        if (!$isUnknownColumn) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la sauvegarde des préférences.',
+            ], 500);
         }
 
-        return response()->json([
-            'success' => true,
-            'data'    => ['delays' => $delays],
-        ]);
     }
+
+    return response()->json([
+        'success' => true,
+        'data'    => ['delays' => $delays],
+    ]);
+}
 }

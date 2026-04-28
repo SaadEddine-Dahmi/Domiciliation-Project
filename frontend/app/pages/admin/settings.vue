@@ -5,6 +5,7 @@
   - Informations du compte
 ============================================================ -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()

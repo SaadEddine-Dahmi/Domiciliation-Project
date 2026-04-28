@@ -26,7 +26,7 @@ return new class extends Migration {
             $table->enum('statut', ['pending', 'paid', 'cancelled'])->default('pending');
             $table->timestamps();
 
-            $table->unique('numero_facture');
+            $table->string('numero_facture', 20)->unique()->nullable();
             $table->index('contrat_id');
             $table->index('entreprise_id');
             $table->index('statut');
