@@ -269,7 +269,7 @@ onMounted(() => clientsStore.fetchAll())
           class="flex items-center gap-4 min-w-0 flex-1 group"
         >
           <div
-            class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0 transition-transform group-hover:scale-105"
+            class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm shrink-0 transition-transform group-hover:scale-105"
             style="background:rgba(200,169,110,0.15);color:#c8a96e"
           >
             {{ (client.raison_sociale ?? '?').slice(0, 2).toUpperCase() }}
@@ -290,7 +290,7 @@ onMounted(() => clientsStore.fetchAll())
         </NuxtLink>
 
         <!-- Right: actions -->
-        <div class="flex items-center gap-2 flex-wrap flex-shrink-0">
+        <div class="flex items-center gap-2 flex-wrap shrink-0">
           <span
             v-if="client.statut"
             class="text-xs px-2 py-0.5 rounded-full font-medium"
@@ -330,13 +330,13 @@ onMounted(() => clientsStore.fetchAll())
     <Teleport to="body">
       <div
         v-if="showModal"
-        class="fixed inset-0 z-[200] flex items-center justify-center p-4"
+        class="fixed inset-0 z-200 flex items-center justify-center p-4"
         style="background:rgba(0,0,0,0.75)"
         @click.self="showModal = false"
       >
         <div class="card w-full max-w-2xl max-h-[90vh] flex flex-col" @click.stop>
 
-          <div class="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0"
+          <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0"
                style="border-bottom:1px solid var(--app-border-2)">
             <h2 class="font-serif text-xl">
               {{ modalMode === 'create' ? 'Nouveau client' : 'Modifier le client' }}
@@ -454,13 +454,13 @@ onMounted(() => clientsStore.fetchAll())
     <Teleport to="body">
       <div
         v-if="showRepModal"
-        class="fixed inset-0 z-[210] flex items-center justify-center p-4"
+        class="fixed inset-0 z-210 flex items-center justify-center p-4"
         style="background:rgba(0,0,0,0.75)"
         @click.self="showRepModal = false"
       >
         <div class="card w-full max-w-xl max-h-[90vh] flex flex-col" @click.stop>
 
-          <div class="flex items-center justify-between px-6 pt-6 pb-4 flex-shrink-0"
+          <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0"
                style="border-bottom:1px solid var(--app-border-2)">
             <h2 class="font-serif text-xl">Représentant légal</h2>
             <button class="w-8 h-8 rounded-lg flex items-center justify-center nav-inactive"
