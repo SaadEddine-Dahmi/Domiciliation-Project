@@ -1,11 +1,3 @@
-import { Client } from '../../stores/clients';
-<!-- ============================================================
-  pages/admin/paiements.vue
-  Gestion des paiements liés aux contrats
-  - Vue par contrat avec résumé (total payé, restant, %)
-  - Enregistrement d'un nouveau paiement
-  - Historique des paiements
-============================================================ -->
 <script setup lang="ts">
 definePageMeta({ layout: "dashboard", middleware: ["auth"] });
 
@@ -15,16 +7,21 @@ function getApiBase() {
   const config = useRuntimeConfig();
   return (config.public.apiBase as string) ?? "";
 }
-function authHeaders(): Record<string, string> {
-  if (!import.meta.client) return {};
+
+// ── Auth & Tokens ─────────────────────────────────────────
+function getToken(): string {
+  if (!import.meta.client) return '';
   try {
-    const raw = localStorage.getItem("astfisc_auth");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {};
-  } catch {
-    return {};
+    const raw = localStorage.getItem('astfisc_auth');
+    return JSON.parse(raw ?? '{}')?.token ?? '';
+  } catch { 
+    return ''; 
   }
+}
+
+function authHeaders(): Record<string, string> {
+  const token = getToken();
+  return token ? { Authorization: `Bearer ${token}` } : {};
 }
 
 // ── State ─────────────────────────────────────────────────
@@ -36,6 +33,11 @@ const loading = ref(true);
 const loadingPayments = ref(false);
 const showModal = ref(false);
 const saving = ref(false);
+
+// PDF Preview State
+const previewFacture  = ref<any>(null);
+const showPdfPreview  = ref(false);
+const pdfPreviewLoading = ref(false);
 
 const form = reactive({
   montant: "",
@@ -141,6 +143,12 @@ function formatDate(d: string | null): string {
   return new Date(d).toLocaleDateString("fr-FR");
 }
 
+function openFacturePreview(facture: any) {
+  previewFacture.value    = facture;
+  showPdfPreview.value    = true;
+  pdfPreviewLoading.value = true;
+}
+
 const statutColor: Record<string, string> = {
   draft: "text-yellow-400 bg-yellow-400/10",
   active: "text-green-400 bg-green-400/10",
@@ -160,9 +168,11 @@ onMounted(loadContrats);
       </p>
     </div>
 
-    <div> <button class="btn btn-gold btn-md" @click="$router.push('/admin/factures')">
-        <- All Factures
-      </button></div>
+    <div>
+      <button class="btn btn-gold btn-md" @click="$router.push('/admin/factures')">
+        &larr; All Factures
+      </button>
+    </div>
 
     <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <!-- Liste contrats (colonne gauche) -->
@@ -278,22 +288,56 @@ onMounted(loadContrats);
               <div
                 v-for="p in paiements"
                 :key="p.id"
-                class="flex items-center justify-between p-3 rounded-xl bg-white/3 border border-white/5">
-                <div>
-                  <p class="text-sm font-semibold text-green-400">
-                    +{{ p.montant }} DH
+                class="flex items-center justify-between p-3 rounded-xl gap-3 flex-wrap"
+                style="background:var(--app-surface-2);border:1px solid var(--app-border)"
+              >
+                <div class="flex-1 min-w-0">
+                  <p class="text-sm font-bold text-green-400">
+                    +{{ Number(p.montant).toLocaleString('fr-MA') }} DH
                   </p>
-                  <p class="text-xs text-app-text/40">
-                    {{ p.mode_paiement }} · {{ formatDate(p.date_paiement) }}
+                  <p class="text-xs mt-0.5" style="color:var(--app-text-muted)">
+                    {{ p.mode_paiement }} &middot; {{ formatDate(p.date_paiement) }}
                   </p>
-                  <p class="text-xs text-app-text/40 mt-1 italic">
-                    Numero de Facture: {{ p.facture?.numero_facture || 'N/A' }}
+                  <p v-if="p.facture?.numero_facture" class="text-xs mt-0.5 font-mono" style="color:#c8a96e">
+                    {{ p.facture.numero_facture }}
                   </p>
                 </div>
-                <span
-                  class="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full"
-                  >Payé</span
-                >
+
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="text-xs text-green-400 bg-green-400/10 px-2 py-0.5 rounded-full font-semibold">
+                    Payé
+                  </span>
+
+                  <!-- Preview PDF of the linked facture -->
+                  <button
+                    v-if="p.facture?.id"
+                    class="btn btn-outline btn-sm"
+                    title="Aperçu facture"
+                    @click="openFacturePreview(p.facture)"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                      <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                      <circle cx="12" cy="12" r="3"/>
+                    </svg>
+                  </button>
+
+                  <!-- Download PDF -->
+                  <a
+                    v-if="p.facture?.id"
+                    :href="`${getApiBase()}/api/factures/${p.facture.id}/pdf?token=${encodeURIComponent(getToken())}&mode=download`"
+                    target="_blank"
+                    class="btn btn-gold btn-sm"
+                    title="Télécharger facture"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                         stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                      <polyline points="7 10 12 15 17 10"/>
+                      <line x1="12" y1="15" x2="12" y2="3"/>
+                    </svg>
+                  </a>
+                </div>
               </div>
             </div>
 
@@ -308,7 +352,7 @@ onMounted(loadContrats);
     <!-- Modal nouveau paiement -->
     <div
       v-if="showModal"
-      class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+      class="fixed inset-0 z-100 bg-black/70 flex items-center justify-center p-4"
       @click.self="showModal = false">
       <div class="card w-full max-w-md p-6 space-y-4">
         <div class="flex items-center justify-between">

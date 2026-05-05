@@ -234,7 +234,7 @@ onMounted(load)
     <!-- Modal Activation (upload PDF signé) -->
     <div
       v-if="showActivate"
-      class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+      class="fixed inset-0 z-100 bg-black/70 flex items-center justify-center p-4"
       @click.self="showActivate = false"
     >
       <div class="card w-full max-w-md p-6 space-y-4">
@@ -262,6 +262,5 @@ onMounted(load)
         </div>
       </div>
     </div>
-
   </div>
 </template>
