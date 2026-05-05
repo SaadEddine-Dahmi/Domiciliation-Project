@@ -116,3 +116,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/messages/{id}/read',   [MessageController::class, 'markRead']);
     Route::get('/messages/{id}/receipt', [MessageController::class, 'receipt']);
 });
+
+// Facture PDF — token via query param, not Authorization header
+Route::get('/factures/{id}/pdf', [FactureController::class, 'pdf'])
+    ->name('factures.pdf');

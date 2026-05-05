@@ -407,7 +407,7 @@ const statutColor: Record<string, string> = {
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
                   <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>
                 </svg>
-                Aperçu
+                
               </button>
               <button @click="downloadDoc(doc)" class="btn btn-outline btn-sm">
                 <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
@@ -426,7 +426,7 @@ const statutColor: Record<string, string> = {
     </template>
 
     <Teleport to="body">
-      <div v-if="isPreviewOpen" class="fixed inset-0 z-[300] flex flex-col p-4 md:p-8" style="background: rgba(0,0,0,0.9)">
+      <div v-if="isPreviewOpen" class="fixed inset-0 z-300 flex flex-col p-4 md:p-8" style="background: rgba(0,0,0,0.9)">
         <div class="flex justify-between items-center mb-4 text-white">
           <h3 class="text-lg font-serif">Aperçu du document</h3>
           <button @click="closePreview" class="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white">✕</button>
@@ -441,7 +441,7 @@ const statutColor: Record<string, string> = {
     </Teleport>
 
     <Teleport to="body">
-      <div v-if="showUpload" class="fixed inset-0 z-[200] flex items-center justify-center p-4" style="background: rgba(0,0,0,0.75)" @click.self="showUpload = false">
+      <div v-if="showUpload" class="fixed inset-0 z-200 flex items-center justify-center p-4" style="background: rgba(0,0,0,0.75)" @click.self="showUpload = false">
         <div class="card w-full max-w-md flex flex-col" @click.stop>
           <div class="px-6 pt-6 pb-4 flex justify-between items-center" style="border-bottom: 1px solid var(--app-border-2)">
             <h2 class="font-serif text-xl">Importer un document</h2>
