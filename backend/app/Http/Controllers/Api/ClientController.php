@@ -1,4 +1,18 @@
 <?php
+// app/Http/Controllers/Api/ClientController.php
+//
+// Manages the client (Entreprise-based) resource for the domiciliataire.
+//
+// FIX: Added 'representant' to eager loads in index() and show().
+// Without this, the contract wizard received Entreprise objects with
+// representant === undefined, so gerantNom/CIN/tel/email/adressePerso
+// could never be auto-filled from the database.
+//
+// Routes (auth:sanctum):
+//   GET    /api/clients          → index
+//   GET    /api/clients/{id}     → show
+//   PUT    /api/clients/{id}     → update
+//   PUT    /api/clients/{id}/password → updatePassword
 
 namespace App\Http\Controllers\Api;
 
@@ -11,7 +25,14 @@ use Illuminate\Support\Facades\Hash;
 class ClientController extends Controller
 {
     /**
-     * Clients list (Entreprise-based), tenant-safe.
+     * GET /api/clients
+     *
+     * Returns all entreprises (clients) belonging to the authenticated
+     * domiciliataire, with their representant, linked user account,
+     * and documents eager-loaded.
+     *
+     * ✅ FIX: 'representant' added to with() so the contract wizard
+     * can auto-fill gerant fields from the database.
      */
     public function index()
     {
@@ -20,6 +41,7 @@ class ClientController extends Controller
         $rows = Entreprise::query()
             ->where('domiciliataire_id', $tenantId)
             ->with([
+                'representant',                                        // ✅ ADDED — hasOne, needed by contract wizard
                 'clientUser:id,nom,prenom,email,telephone,role',
                 'documents.documentType:id,name,is_required,has_expiration',
             ])
@@ -33,13 +55,18 @@ class ClientController extends Controller
     }
 
     /**
-     * Show one client (entreprise).
+     * GET /api/clients/{id}
+     *
+     * Returns a single entreprise by ID, tenant-scoped.
+     *
+     * ✅ FIX: 'representant' added to with() for consistency with index().
      */
     public function show(int $id)
     {
         $row = Entreprise::query()
             ->where('domiciliataire_id', auth()->id())
             ->with([
+                'representant',                                        // ✅ ADDED
                 'clientUser:id,nom,prenom,email,telephone,role',
                 'documents.documentType:id,name,is_required,has_expiration',
             ])
@@ -52,7 +79,10 @@ class ClientController extends Controller
     }
 
     /**
-     * Update entreprise info + optional linked client user data.
+     * PUT /api/clients/{id}
+     *
+     * Update entreprise fields and optionally the linked client user account.
+     * The representant is managed separately via RepresentantController.
      */
     public function update(Request $request, int $id)
     {
@@ -70,6 +100,7 @@ class ClientController extends Controller
             'date_creation' => ['nullable', 'date'],
             'statut' => ['nullable', 'string', 'max:50'],
 
+            // Optional nested client user update
             'client_user.nom' => ['nullable', 'string', 'max:20'],
             'client_user.prenom' => ['nullable', 'string', 'max:20'],
             'client_user.email' => ['nullable', 'email', 'max:50'],
@@ -87,12 +118,14 @@ class ClientController extends Controller
             'statut' => $data['statut'] ?? null,
         ]);
 
+        // Update linked client user account if present
         if ($entreprise->client_user_id && isset($data['client_user'])) {
             $user = User::find($entreprise->client_user_id);
 
             if ($user) {
                 $newEmail = $data['client_user']['email'] ?? $user->email;
 
+                // Guard against email collision
                 if (
                     $newEmail !== $user->email &&
                     User::where('email', $newEmail)->where('id', '!=', $user->id)->exists()
@@ -115,6 +148,7 @@ class ClientController extends Controller
         return response()->json([
             'success' => true,
             'data' => $entreprise->fresh([
+                'representant',
                 'clientUser:id,nom,prenom,email,telephone,role',
                 'documents.documentType:id,name,is_required,has_expiration',
             ]),
@@ -122,7 +156,9 @@ class ClientController extends Controller
     }
 
     /**
-     * Update linked client account password.
+     * PUT /api/clients/{id}/password
+     *
+     * Reset the password for the linked client user account.
      */
     public function updatePassword(Request $request, int $id)
     {

@@ -1,8 +1,5 @@
-<!-- ============================================================
-  pages/admin/dashboard.vue — avec widget Messages récents
-============================================================ -->
+<!-- pages/admin/dashboard.vue -->
 <script setup lang="ts">
-
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
@@ -11,10 +8,11 @@ function getApiBase(): string {
   const config = useRuntimeConfig()
   return (config.public.apiBase as string) ?? ''
 }
+
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
@@ -43,7 +41,7 @@ async function loadDashboard() {
       $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/contrats`, { headers: authHeaders() }),
       $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/messages`, { headers: authHeaders() }),
     ])
-    stats.value         = statsRes.data ?? null
+    stats.value          = statsRes.data ?? null
     recentClients.value  = (Array.isArray(clientsRes.data) ? clientsRes.data : (clientsRes as any)?.data?.data ?? []).slice(0, 4)
     recentContrats.value = (Array.isArray(contratsRes.data) ? contratsRes.data : (contratsRes as any)?.data?.data ?? []).slice(0, 4)
     recentMessages.value = (msgsRes.data ?? []).slice(0, 4)
@@ -57,9 +55,9 @@ async function loadDashboard() {
 const router = useRouter()
 
 const statutContratColor: Record<string, string> = {
-  draft: 'text-yellow-400 bg-yellow-400/10',
-  active: 'text-green-400 bg-green-400/10',
-  expired: 'text-red-400 bg-red-400/10',
+  draft:      'text-yellow-400 bg-yellow-400/10',
+  active:     'text-green-400 bg-green-400/10',
+  expired:    'text-red-400 bg-red-400/10',
   terminated: 'text-gray-400 bg-gray-400/10',
 }
 
@@ -73,7 +71,6 @@ onMounted(loadDashboard)
 <template>
   <div class="space-y-6 animate-fade-up">
 
-    <!-- Titre -->
     <div class="flex items-start justify-between flex-wrap gap-2">
       <div>
         <h2 class="font-serif text-[22px]">
@@ -89,14 +86,12 @@ onMounted(loadDashboard)
 
     <div v-if="loadError" class="card p-4 text-red-400 text-sm">{{ loadError }}</div>
 
-    <!-- Stats skeleton -->
     <div v-if="loading" class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div v-for="i in 4" :key="i" class="card p-5 animate-pulse">
         <div class="h-3 w-20 bg-white/10 rounded mb-3" /><div class="h-8 w-12 bg-white/10 rounded" />
       </div>
     </div>
 
-    <!-- Stats -->
     <div v-else-if="stats" class="grid grid-cols-2 md:grid-cols-4 gap-4">
       <div class="card p-5"><div class="text-[11px] text-app-text/40 uppercase mb-2">Clients</div><div class="font-serif text-3xl text-gold">{{ stats.total_clients ?? 0 }}</div></div>
       <div class="card p-5"><div class="text-[11px] text-app-text/40 uppercase mb-2">Contrats actifs</div><div class="font-serif text-3xl text-gold">{{ stats.contrats_actifs ?? 0 }}</div></div>
@@ -104,7 +99,6 @@ onMounted(loadDashboard)
       <div class="card p-5"><div class="text-[11px] text-app-text/40 uppercase mb-2">CA ce mois</div><div class="font-serif text-2xl text-gold">{{ stats.ca_mensuel ?? '0' }} <span class="text-sm">DH</span></div></div>
     </div>
 
-    <!-- Grille 3 colonnes -->
     <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
 
       <!-- Derniers clients -->
@@ -164,9 +158,10 @@ onMounted(loadDashboard)
           <button class="text-xs text-gold underline mt-1" @click="router.push('/admin/messages')">Envoyer un message →</button>
         </div>
       </div>
+
     </div>
 
-    <!-- Actions rapides (domiciliataire seulement) -->
+    <!-- Actions rapides -->
     <div v-if="auth.isDomiciliataire" class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <NuxtLink to="/admin/clients" class="card p-4 text-center hover:border-gold/30 transition" style="border:1px solid rgba(255,255,255,0.06)">
         <div class="text-2xl mb-2">👥</div><div class="text-xs font-semibold">Nouveau client</div>

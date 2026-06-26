@@ -24,6 +24,13 @@ class User extends Authenticatable
         'approved_at',
         'rejection_reason',
         'notification_preferences',
+        'nom_societe',
+        'representant_legal',
+        'identite_representant',
+        'rc',
+        'if_fiscal',
+        'tp',
+        'adresses',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -31,6 +38,7 @@ class User extends Authenticatable
     protected $casts = [
         'activation_date' => 'date',
         'approved_at'     => 'datetime',
+        'adresses' => 'array',
     ];
 
     // ── Relations ──────────────────────────────────────────
@@ -107,4 +115,25 @@ class User extends Authenticatable
     {
         return $this->role === 'client';
     }
+
+/**
+ * Returns adresses as a flat array of {label, value} objects.
+ * Falls back to empty array if null.
+ * Used in the contract wizard address dropdown.
+ */
+public function getAdressesListAttribute(): array
+{
+    return is_array($this->adresses) ? $this->adresses : [];
+}
+
+/**
+ * Profile completion check — true when all required company fields are set.
+ */
+public function hasCompleteProfile(): bool
+{
+    return !empty($this->nom_societe)
+        && !empty($this->representant_legal)
+        && !empty($this->adresses)
+        && count($this->adresses) > 0;
+}
 }

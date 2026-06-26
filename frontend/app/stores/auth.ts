@@ -1,93 +1,109 @@
-// app/stores/auth.ts
+// stores/auth.ts
+// Central authentication store.
+// Manages login, register, logout, and session restoration.
+//
+// Storage key: read from nuxt.config runtimeConfig.public.authStorageKey.
+// Falls back to the generic 'app_auth' key used across all pages.
+// No brand-specific name is hardcoded anywhere in this file.
+
 import { defineStore } from 'pinia'
 
-export type Role = 'admin' | 'domiciliataire' | 'client'
+export type Role   = 'admin' | 'domiciliataire' | 'client'
 export type Status = 'pending' | 'approved' | 'active' | 'rejected'
 
 export interface AuthUser {
-    id: number
-    name: string
-    email: string
-    role: Role
-    status: Status
+    id:      number
+    name:    string
+    email:   string
+    role:    Role
+    status:  Status
     company: string
-    avatar: string
-    color: string
+    avatar:  string
+    color:   string
 }
 
 export const useAuthStore = defineStore('auth', () => {
 
-    const user = ref<AuthUser | null>(null)
-    const token = ref<string>('')
-    const loading = ref<boolean>(false)
-    const error = ref<string>('')
+    const user              = ref<AuthUser | null>(null)
+    const token             = ref<string>('')
+    const loading           = ref<boolean>(false)
+    const error             = ref<string>('')
     const isPendingApproval = ref<boolean>(false)
 
-    const isAuthenticated = computed(() => !!user.value && !!token.value)
-    const isAdmin = computed(() => user.value?.role === 'admin')
+    const isAuthenticated  = computed(() => !!user.value && !!token.value)
+    const isAdmin          = computed(() => user.value?.role === 'admin')
     const isDomiciliataire = computed(() => user.value?.role === 'domiciliataire')
-    const isClient = computed(() => user.value?.role === 'client')
-    const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
+    const isClient         = computed(() => user.value?.role === 'client')
+    const isInternal       = computed(() => isAdmin.value || isDomiciliataire.value)
 
-    // ── Config helpers — read from runtimeConfig, never hardcode ──
+    // ── Config helpers ─────────────────────────────────────────────────────────
+
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
+    /**
+     * The localStorage key used to persist the session.
+     * Configured via nuxt.config: runtimeConfig.public.authStorageKey.
+     * Defaults to 'app_auth' — no brand name hardcoded here.
+     */
     function getStorageKey(): string {
         const config = useRuntimeConfig()
-        return (config.public.authStorageKey as string) ?? 'astfisc_auth'
+        return (config.public.authStorageKey as string) ?? 'app_auth'
     }
 
     function getMaxAgeMs(): number {
         const config = useRuntimeConfig()
-        const days = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
+        const days   = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
         return days * 24 * 60 * 60 * 1000
     }
 
-    // ── buildUser ──────────────────────────────────────────────
+    // ── buildUser ──────────────────────────────────────────────────────────────
+
     function buildUser(u: any): AuthUser {
         return {
-            id: u.id,
-            name: `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
-            email: u.email,
-            role: u.role ?? 'client',
-            status: u.status ?? 'active',
+            id:      u.id,
+            name:    `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
+            email:   u.email,
+            role:    u.role   ?? 'client',
+            status:  u.status ?? 'active',
             company: u.company ?? '',
-            avatar: (u.nom ?? u.email ?? 'U').slice(0, 2).toUpperCase(),
+            avatar:  (u.nom ?? u.email ?? 'U').slice(0, 2).toUpperCase(),
             color:
-                u.role === 'admin' ? '#ef4444' :
-                    u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
+                u.role === 'admin'          ? '#ef4444' :
+                u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
         }
     }
 
-    // ── saveToStorage ──────────────────────────────────────────
+    // ── saveToStorage ──────────────────────────────────────────────────────────
+
     function saveToStorage(): void {
         if (!import.meta.client) return
         localStorage.setItem(getStorageKey(), JSON.stringify({
-            user: user.value,
-            token: token.value,
+            user:    user.value,
+            token:   token.value,
             savedAt: Date.now(),
         }))
     }
 
-    // ── login ──────────────────────────────────────────────────
+    // ── login ──────────────────────────────────────────────────────────────────
+
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
-        error.value = ''
+        error.value   = ''
         try {
             const res = await $fetch<{ success: boolean; data: { user: any; token: string } }>(
                 `${getApiBase()}/api/auth/login`,
                 { method: 'POST', body: payload }
             )
-            user.value = buildUser(res.data.user)
+            user.value  = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
             return true
         } catch (e: any) {
             error.value =
-                e?.data?.message ??
+                e?.data?.message          ??
                 e?.data?.errors?.email?.[0] ??
                 'Identifiants invalides'
             return false
@@ -96,13 +112,14 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // ── register ───────────────────────────────────────────────
+    // ── register ───────────────────────────────────────────────────────────────
+
     async function register(payload: {
         nom: string; prenom?: string; email: string
         password: string; telephone?: string
     }): Promise<boolean> {
-        loading.value = true
-        error.value = ''
+        loading.value           = true
+        error.value             = ''
         isPendingApproval.value = false
         try {
             const res = await $fetch<{
@@ -116,7 +133,7 @@ export const useAuthStore = defineStore('auth', () => {
                 isPendingApproval.value = true
                 return true
             }
-            user.value = buildUser(res.data.user)
+            user.value  = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
             return true
@@ -130,31 +147,33 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // ── logout ─────────────────────────────────────────────────
+    // ── logout ─────────────────────────────────────────────────────────────────
+
     function logout(): void {
-        user.value = null
-        token.value = ''
-        error.value = ''
+        user.value              = null
+        token.value             = ''
+        error.value             = ''
         isPendingApproval.value = false
         if (import.meta.client) {
             localStorage.removeItem(getStorageKey())
         }
     }
 
-    // ── restoreSession ─────────────────────────────────────────
+    // ── restoreSession ─────────────────────────────────────────────────────────
+
     function restoreSession(): void {
-        if (!import.meta.client) return
+        if (!import.meta.client)       return
         if (user.value && token.value) return
         try {
             const raw = localStorage.getItem(getStorageKey())
             if (!raw) return
             const parsed = JSON.parse(raw)
-            const ageMs = Date.now() - (parsed.savedAt ?? 0)
+            const ageMs  = Date.now() - (parsed.savedAt ?? 0)
             if (ageMs > getMaxAgeMs()) {
                 localStorage.removeItem(getStorageKey())
                 return
             }
-            user.value = parsed.user ?? null
+            user.value  = parsed.user  ?? null
             token.value = parsed.token ?? ''
         } catch {
             localStorage.removeItem(getStorageKey())

@@ -17,6 +17,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware) {
         $middleware->append(SecurityHeaders::class);
         // statefulApi() intentionally removed — Bearer token only, no CSRF
+         $middleware->redirectGuestsTo(fn () => response()->json(['message' => 'Unauthenticated.'], 401));
     })
     ->withExceptions(function (Exceptions $exceptions) {
 
