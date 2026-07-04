@@ -1,23 +1,29 @@
 <?php
 // app/Http/Controllers/Api/ArticleController.php
 //
-// REST controller for the Article resource.
+// REST controller for the Article (contract clause template) resource.
 //
-// Articles are reusable contract clause templates owned by a domiciliataire.
-// Their bodies may contain {{variable}} placeholder tokens resolved at PDF
-// generation time.
+// Routes (all behind auth:sanctum middleware in routes/api.php):
+//   GET    /api/articles       → index   (list clause library)
+//   POST   /api/articles       → store   (create clause)
+//   PUT    /api/articles/{id}  → update  (edit clause)
+//   DELETE /api/articles/{id}  → destroy (permanently delete clause)
 //
-// Routes (all behind auth:sanctum):
-//   GET    /api/articles       → index
-//   POST   /api/articles       → store
-//   PUT    /api/articles/{id}  → update
-//   DELETE /api/articles/{id}  → destroy
+// Tenant isolation:
+//   All queries use Article::forTenant(auth()->id()) to scope results to the
+//   authenticated domiciliataire. A user can never read or modify another
+//   tenant's articles even if they guess the numeric ID.
 //
-// Security:
-//   - Write operations (store, update, destroy) require role === 'domiciliataire'.
-//   - All queries use Article::forTenant() to prevent IDOR attacks.
-//   - Client-role users receive an empty array from index() — they do not
-//     manage article templates.
+// Role guard:
+//   Write operations require role === 'domiciliataire'.
+//   Client-role users receive an empty array from index() because they have
+//   no article library of their own.
+//
+// Delete safety:
+//   destroy() calls $article->contrats()->detach() before deletion.
+//   Without this, the foreign-key constraint on contrat_articles throws a 500
+//   that the frontend catch block silently swallows, giving the illusion that
+//   the article was deleted when it was not.
 
 namespace App\Http\Controllers\Api;
 
@@ -30,15 +36,18 @@ class ArticleController extends Controller
     /**
      * GET /api/articles
      *
-     * Returns all active and inactive articles belonging to the authenticated
+     * Returns all articles (active and inactive) belonging to the authenticated
      * domiciliataire, ordered newest-first.
      *
-     * Client users receive an empty array — they have no article library.
+     * Admin role also receives articles (for oversight); client role receives
+     * an empty array because clients do not manage clause libraries.
      */
     public function index(Request $request)
     {
         $user = auth()->user();
 
+        // Clients have no article library — return empty array, not 403,
+        // so the wizard can call this endpoint without a role check.
         if (!in_array($user->role, ['domiciliataire', 'admin'])) {
             return response()->json(['success' => true, 'data' => []]);
         }
@@ -54,7 +63,8 @@ class ArticleController extends Controller
      * POST /api/articles
      *
      * Create a new article clause template.
-     * The article is automatically linked to the authenticated user's tenant ID.
+     * domiciliataire_id is set from the authenticated user — never from the
+     * request body, preventing tenant injection.
      */
     public function store(Request $request)
     {
@@ -68,6 +78,7 @@ class ArticleController extends Controller
             'is_active' => ['nullable', 'boolean'],
         ]);
 
+        // 'id' is intentionally absent — auto-increment, never mass-assigned.
         $article = Article::create([
             'domiciliataire_id' => auth()->id(),
             'title' => $data['title'],
@@ -82,8 +93,10 @@ class ArticleController extends Controller
      * PUT /api/articles/{id}
      *
      * Update an article's title, body, or active state.
-     * IDOR guard: forTenant() ensures the authenticated user can only
-     * update their own articles, not another tenant's.
+     *
+     * IDOR guard: forTenant() ensures the authenticated user can only update
+     * articles they own. A 404 is returned for articles belonging to other
+     * tenants (deliberately indistinguishable from "not found").
      */
     public function update(Request $request, string $id)
     {
@@ -91,6 +104,7 @@ class ArticleController extends Controller
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
 
+        // findOrFail inside forTenant() scope — returns 404 for cross-tenant IDs.
         $article = Article::forTenant(auth()->id())->findOrFail($id);
 
         $data = $request->validate([
@@ -101,6 +115,8 @@ class ArticleController extends Controller
 
         $article->update($data);
 
+        // fresh() re-reads from the database so the response reflects the
+        // actual stored values rather than the in-memory Eloquent instance.
         return response()->json(['success' => true, 'data' => $article->fresh()]);
     }
 
@@ -108,7 +124,13 @@ class ArticleController extends Controller
      * DELETE /api/articles/{id}
      *
      * Permanently delete an article clause template.
-     * IDOR guard: forTenant() ensures you can only delete your own articles.
+     *
+     * CRITICAL: detach() must run before delete().
+     * contrat_articles has a RESTRICT foreign key on article_id. Calling
+     * delete() without detaching first throws a database integrity exception.
+     * The exception propagates as a 500 response which the frontend catch
+     * block silently swallows, making the delete appear to succeed when it
+     * has actually failed.
      */
     public function destroy(string $id)
     {
@@ -117,6 +139,9 @@ class ArticleController extends Controller
         }
 
         $article = Article::forTenant(auth()->id())->findOrFail($id);
+
+        // Remove pivot rows first, then the article itself.
+        $article->contrats()->detach();
         $article->delete();
 
         return response()->json(['success' => true, 'message' => 'Article supprimé.']);

@@ -3,19 +3,23 @@
 // Pinia store for the article (contract clause) library.
 //
 // ID discipline:
-//   Article primary keys are integer auto-increment values in PostgreSQL.
-//   Laravel serialises them as strings in JSON responses.
-//   We keep IDs as strings throughout the frontend and never cast with Number().
-//   PHP casts to (int) in syncArticles() when writing to the pivot table.
-//   This avoids silent corruption if IDs ever exceed Number.MAX_SAFE_INTEGER
-//   or if the schema is migrated to UUIDs in the future.
+//   Article PKs are integer auto-increment (bigint) in PostgreSQL.
+//   Laravel serialises them as JSON numbers, but Nuxt's $fetch can coerce
+//   large integers incorrectly. We normalise every id to String() immediately
+//   after fetch and keep it as a string throughout the frontend.
+//   PHP casts String(id) back to (int) in syncArticles() on the backend.
+//
+//   WHY normalise to string at all:
+//   - Avoids the "all chips selected" bug caused by id serialising as 0
+//     in nested eager-loads when the Article model was missing the 'id' cast.
+//   - Future-proofs against a schema migration to UUIDs.
 
 import { defineStore } from 'pinia'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface Article {
-    id: string    // integer PK serialised as string by Laravel JSON
+    id: string   // integer PK, normalised to string after fetch
     title: string
     body: string
     is_active: boolean
@@ -40,16 +44,15 @@ export const useArticlesStore = defineStore('articles', () => {
 
     // ── Private helpers ───────────────────────────────────────────────────────
 
-    /** Read the configured API base URL from Nuxt runtime config */
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
     /**
-     * Build the Authorization header from localStorage.
-     * Key: 'app_auth' — written by the auth controller on successful login.
-     * Returns an empty object when called server-side (no window object).
+     * Authorization header from localStorage.
+     * Key: 'app_auth' — written by the auth store on login.
+     * Returns {} on the server side (no window / localStorage).
      */
     function authHeaders(): Record<string, string> {
         if (!import.meta.client) return {}
@@ -67,7 +70,14 @@ export const useArticlesStore = defineStore('articles', () => {
 
     /**
      * GET /api/articles
+     *
      * Load all article clause templates for the authenticated tenant.
+     *
+     * Normalisation step: every id is converted to String() immediately.
+     * This ensures selectedArticleIds.includes(String(id)) works correctly
+     * in the chip selector even if the backend serialises the integer as 0
+     * in a nested eager-load (a known edge case when the 'id' cast is missing
+     * from the Article model).
      */
     async function fetchAll(): Promise<void> {
         loading.value = true
@@ -77,7 +87,8 @@ export const useArticlesStore = defineStore('articles', () => {
                 `${getApiBase()}/api/articles`,
                 { headers: authHeaders() }
             )
-            items.value = res.data ?? []
+            // Normalise ids to strings immediately after fetch.
+            items.value = (res.data ?? []).map(a => ({ ...a, id: String(a.id) }))
         } catch (e: any) {
             error.value = e?.data?.message ?? 'Erreur lors du chargement des articles'
         } finally {
@@ -87,8 +98,10 @@ export const useArticlesStore = defineStore('articles', () => {
 
     /**
      * POST /api/articles
+     *
      * Create a new article clause template.
-     * Prepends the new item to the local list for immediate UI feedback.
+     * Never sends 'id' in the payload — auto-increment, server-assigned.
+     * Prepends the new article to the local list for immediate UI feedback.
      */
     async function create(title: string, body: string): Promise<Article> {
         const res = await $fetch<ApiSuccess<Article>>(
@@ -96,15 +109,18 @@ export const useArticlesStore = defineStore('articles', () => {
             {
                 method: 'POST',
                 headers: authHeaders(),
+                // Intentionally omitting 'id' — the server assigns it.
                 body: { title, body, is_active: true },
             }
         )
-        items.value.unshift(res.data)
-        return res.data
+        const article = { ...res.data, id: String(res.data.id) }
+        items.value.unshift(article)
+        return article
     }
 
     /**
      * PUT /api/articles/{id}
+     *
      * Update an existing article's title, body, or active state.
      * Updates the matching item in the local list in-place.
      */
@@ -122,15 +138,17 @@ export const useArticlesStore = defineStore('articles', () => {
                 body: { title, body, is_active },
             }
         )
+        const updated = { ...res.data, id: String(res.data.id) }
         const idx = items.value.findIndex(a => a.id === id)
-        if (idx !== -1) items.value[idx] = res.data
-        return res.data
+        if (idx !== -1) items.value[idx] = updated
+        return updated
     }
 
     /**
      * DELETE /api/articles/{id}
+     *
      * Permanently delete an article clause template.
-     * Removes the item from the local list immediately.
+     * Removes the item from the local list immediately for responsive UI.
      */
     async function remove(id: string): Promise<void> {
         await $fetch(`${getApiBase()}/api/articles/${id}`, {

@@ -2,79 +2,27 @@
 /**
  * pages/admin/contrat.vue
  *
- * 4-step contract creation wizard.
  *
- * Step 1 — Domiciliataire info (autofilled from profile)
- *           + address chip selector
- *           + dynamic contract title input with live preview
+ * Step 1 — Domiciliataire profile (autofilled) + address chip selector
+ *           + dynamic contract title input with live PDF preview
+ *           ✅ NEW: also shows email and telephone from profile
  * Step 2 — Client: pick existing or create inline
- * Step 3 — Articles: chip library selector, drag-to-reorder, inline body editor
- *           + financial fields (dates, redevance, payment)
- * Step 4 — Confirmation + PDF stream preview + download
+ *           ✅ NEW: date de naissance shown in new-client form and synced to store
+ *           ✅ NEW: date de naissance shown in selected-client summary card
+ * Step 3 — Articles chip library + drag-reorder + financial fields
+ *           (dates, redevance, signature city and date)
+ * Step 4 — Confirmation + PDF preview + download
+ *           ✅ NEW: "Renouveler le contrat" button calls POST /api/contrats/{id}/renew
  *
- * ─────────────────────────────────────────────────────────────────────────────
- * ROOT CAUSE OF THE "ALL CHIPS SELECTED" BUG — AND THE FIX
- * ─────────────────────────────────────────────────────────────────────────────
+ * ── Article chip reactivity ────────────────────────────────────────────────
+ * selectedArticleIds is ref<string[]> (NOT ref<Set<string>>).
+ * Vue 3 tracks .push() and array reassignment but NOT Set.add() / Set.delete().
+ * Using a Set caused chips to appear stuck after every toggle.
  *
- * SYMPTOM: clicking one article chip made ALL chips turn gold simultaneously,
- *          but only the clicked article appeared in the selected list below.
- *
- * ROOT CAUSE (confirmed by tinker output):
- *   Article PKs are integer auto-increment. The backend's Article model was
- *   missing an explicit 'id' cast, causing the id to serialise inconsistently
- *   as 0 or null in some JSON responses (particularly nested eager-loads).
- *   When articlesStore.items contained articles with id = 0 or null, the
- *   expression String(article.id) produced "0" or "null" for EVERY item.
- *   selectedArticleIds.includes("0") then returned true for ALL chips at once.
- *
- * FIXES APPLIED:
- *   1. Article model: added 'id' => 'integer' to $casts — forces consistent
- *      integer serialisation in every JSON response.
- *   2. articles store fetchAll(): maps items through String(a.id) explicitly
- *      so the id is always a non-empty numeric string like "1", "19", etc.
- *   3. This file: selectedArticleIds is ref<string[]> — plain array so Vue
- *      tracks mutations (.push, .filter) and re-renders chips correctly.
- *   4. All chip :style bindings read selectedArticleIds.includes(String(id))
- *      and never read any flag from the article object itself.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * ARTICLE SELECTION MECHANICS
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * selectedArticleIds — ref<string[]>:
- *   The canonical set of selected IDs. Vue 3 tracks array mutations correctly.
- *   A Set would not work because Set.add() / Set.delete() mutate in-place
- *   without reassigning .value, so Vue never schedules a re-render.
- *
- * orderedArticles — ref<any[]>:
- *   Parallel array of shallow-copied article objects with added fields:
- *     ordre:     1-based display position
- *     _expanded: whether the body editor panel is open
- *   Shallow copies prevent edits here from mutating articlesStore.items.
- *
- * toggleArticle():
- *   ADD:    push String(id) into selectedArticleIds + push a copy into orderedArticles
- *   REMOVE: assign filtered arrays to both (reassignment triggers Vue reactivity)
- *           re-number ordre to close gaps
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * CONTRACT TITLE
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * contract.form.titreContrat is typed by the domiciliataire in step 1.
- * It is sent as-is to the backend. The backend stores it and applies the
- * fallback 'Contrat de Domiciliation' only when the field arrives null/empty.
- * No default is hardcoded anywhere on the frontend.
- *
- * ─────────────────────────────────────────────────────────────────────────────
- * SAVE FLOW
- * ─────────────────────────────────────────────────────────────────────────────
- *
- * saveDraft() (step 3 → step 4):
- *   - date_debut / date_fin sent as null when empty (not empty string)
- *     because Laravel's 'nullable|date' validator rejects empty strings.
- *   - Articles sent as [{id: String(a.id), ordre: a.ordre}]
- *   - No isNaN() filtering — the backend validates and skips bad IDs.
+ * ── Contract title ─────────────────────────────────────────────────────────
+ * contract.form.titreContrat is typed freely in step 1.
+ * Sent as-is to the backend. Backend applies 'Contrat de Domiciliation'
+ * only when the field arrives null or empty.
  */
 
 import { useContractStore } from '~/stores/contrat'
@@ -95,11 +43,6 @@ function getApiBase(): string {
     return (config.public.apiBase as string) ?? ''
 }
 
-/**
- * Build the Authorization header from localStorage.
- * Key 'app_auth' is written by the auth controller on login.
- * Returns {} when called server-side or when the token is missing.
- */
 function authHeaders(): Record<string, string> {
     if (!import.meta.client) return {}
     try {
@@ -110,11 +53,6 @@ function authHeaders(): Record<string, string> {
     } catch { return {} }
 }
 
-/**
- * Extract the raw token string for the PDF stream URL query parameter.
- * The iframe cannot send an Authorization header, so the token is appended
- * as ?token= for the backend to optionally verify.
- */
 function getToken(): string {
     if (!import.meta.client) return ''
     try {
@@ -133,23 +71,13 @@ const contratId  = ref<number | null>(null)
 
 const profile       = ref<any>({})
 const profileLoaded = ref(false)
-
-/**
- * Normalised address list built from the profile API response.
- * Handles every shape the backend might return:
- *   string[]         → ["10 rue X", "Quartier Y"]
- *   {label, value}[] → [{label:"Siège", value:"10 rue X"}]
- *   single string    → "10 rue X"
- *   null / undefined → [] (triggers manual input fallback)
- */
-const addresses = ref<{ label: string; value: string }[]>([])
-
-/**
- * The address selected or typed for this contract.
- * Single source of truth for step 1 validation.
- */
+const addresses     = ref<{ label: string; value: string }[]>([])
 const selectedAddress = ref('')
 
+/**
+ * Normalise the addresses array returned by the profile API into a flat
+ * [{label, value}] structure regardless of the shape the backend sends.
+ */
 function normaliseAddresses(raw: any): { label: string; value: string }[] {
     if (!raw) return []
     if (Array.isArray(raw)) {
@@ -171,6 +99,11 @@ function normaliseAddresses(raw: any): { label: string; value: string }[] {
     return []
 }
 
+/**
+ * Load the domiciliataire profile and autofill wizard step 1 fields.
+ * Also loads the address list for the chip selector.
+ * email and telephone are now passed to fillFromProfile() (audit fix).
+ */
 async function loadProfile(): Promise<void> {
     try {
         const res = await $fetch<{ success: boolean; data: any }>(
@@ -178,6 +111,8 @@ async function loadProfile(): Promise<void> {
             { headers: authHeaders() }
         )
         profile.value = res.data ?? {}
+
+        // fillFromProfile now also sets companyEmail and companyTelephone.
         contract.fillFromProfile(res.data ?? {})
 
         const raw = res.data?.adresses
@@ -187,6 +122,7 @@ async function loadProfile(): Promise<void> {
                  ?? null
         addresses.value = normaliseAddresses(raw)
 
+        // Profile is considered "loaded" when the minimum required fields exist.
         profileLoaded.value = !!(res.data?.nom_societe && res.data?.representant_legal)
     } catch {
         profileLoaded.value = false
@@ -194,7 +130,6 @@ async function loadProfile(): Promise<void> {
     }
 }
 
-/** Select an address chip — writes to both the local ref and the store. */
 function pickAddress(addr: { label: string; value: string }): void {
     selectedAddress.value        = addr.value
     contract.form.companyAdresse = addr.value
@@ -212,7 +147,7 @@ const newClientForm = reactive({
     forme_juridique: '',
     gerantNom:       '',
     gerantCIN:       '',
-    dateNaissance:   '',
+    dateNaissance:   '',   // ✅ date de naissance du gérant
     adressePerso:    '',
     tel:             '',
     email:           '',
@@ -230,23 +165,12 @@ const filteredClients = computed(() => {
 })
 
 /**
- * Select an existing client and copy their fields into the store form
- * so they appear pre-filled in the PDF.
+ * Select an existing client and copy their representant fields into the store.
  */
 function selectClient(client: any): void {
     selectedClientId.value = client.id
     selectedClient.value   = client
-
-    contract.form.societe      = client.raison_sociale ?? ''
-    contract.form.gerantNom    = client.representant?.nom_complet
-                                 ?? (client.client_user
-                                     ? `${client.client_user.nom ?? ''} ${client.client_user.prenom ?? ''}`.trim()
-                                     : '')
-    contract.form.gerantCIN    = client.representant?.cin       ?? ''
-    contract.form.tel          = client.representant?.telephone  ?? client.client_user?.telephone ?? ''
-    contract.form.email        = client.representant?.email      ?? client.client_user?.email     ?? ''
-    contract.form.adressePerso = client.representant?.adresse    ?? ''
-
+    contract.fillFromClient(client)
     clientSearchQuery.value = ''
 }
 
@@ -262,12 +186,13 @@ function switchToCreate(): void {
 }
 
 // Keep the store form in sync as the new-client fields are typed.
-watch(() => newClientForm.raison_sociale, v => { contract.form.societe      = v })
-watch(() => newClientForm.gerantNom,      v => { contract.form.gerantNom    = v })
-watch(() => newClientForm.gerantCIN,      v => { contract.form.gerantCIN    = v })
-watch(() => newClientForm.tel,            v => { contract.form.tel          = v })
-watch(() => newClientForm.email,          v => { contract.form.email        = v })
-watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso = v })
+watch(() => newClientForm.raison_sociale, v => { contract.form.societe       = v })
+watch(() => newClientForm.gerantNom,      v => { contract.form.gerantNom     = v })
+watch(() => newClientForm.gerantCIN,      v => { contract.form.gerantCIN     = v })
+watch(() => newClientForm.tel,            v => { contract.form.tel           = v })
+watch(() => newClientForm.email,          v => { contract.form.email         = v })
+watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso  = v })
+watch(() => newClientForm.dateNaissance,  v => { contract.form.dateNaissance = v })  // ✅ NEW
 
 // ── Step 3: article selection ─────────────────────────────────────────────────
 
@@ -275,78 +200,49 @@ watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso = v 
  * SOURCE OF TRUTH for which articles are currently selected.
  *
  * WHY ref<string[]> and NOT ref<Set<string>>:
- *   Vue 3 tracks reactivity on .value reassignment and array mutations
- *   (.push, .filter) but NOT on internal mutations of a Set or Map.
- *   Set.add() and Set.delete() mutate the Set in-place without reassigning
- *   .value, so Vue never schedules a re-render. The result is that chip
- *   :style bindings never update after a toggle — chips appear stuck.
+ *   Vue 3 tracks reactivity on .value reassignment and on array mutations
+ *   (.push, .filter). Set.add() / Set.delete() mutate the Set in-place
+ *   without reassigning .value, so Vue never schedules a re-render.
+ *   Chip :style bindings would never update after a toggle — appearing stuck.
  *
- * All IDs are stored as String() — safe for integer PKs ("19") and UUIDs.
- *
- * CRITICAL:
- *   The chip :style binding reads selectedArticleIds.includes(String(article.id)).
- *   It MUST NOT read any flag from the article object itself.
- *   articlesStore.items is shared across the session; mutating a flag on
- *   the article object would affect every component reading from the store
- *   and cause all chips to appear selected when any property changes.
+ * All IDs are stored as String(). Safe for integer PKs ("19") and future UUIDs.
  */
 const selectedArticleIds = ref<string[]>([])
 
 /**
  * Parallel array of shallow-copied article objects for drag-and-drop.
- *
- * Each entry is a copy of the article from articlesStore.items with:
- *   ordre:     1-based display position
- *   _expanded: whether the inline body editor is open
- *
- * Shallow copies are intentional — editing title/body here must NOT
- * mutate the shared library entry in articlesStore.items.
+ * Each entry has added fields: ordre (1-based position), _expanded (editor open).
+ * Shallow copies prevent edits here from mutating articlesStore.items.
  */
 const orderedArticles = ref<any[]>([])
 
 /**
  * Toggle an article in or out of the selection.
  *
- * ADD path:
- *   1. Push String(id) into selectedArticleIds
- *      → Vue detects the array mutation → chips re-render immediately.
- *   2. Push a shallow copy into orderedArticles with ordre and _expanded.
- *      ordre is computed BEFORE the push (current length + 1).
- *
- * REMOVE path:
- *   1. Assign a new filtered array to selectedArticleIds
- *      → .value reassignment triggers Vue reactivity.
- *   2. Assign a new filtered + re-numbered array to orderedArticles.
- *      Re-numbering closes gaps: removing item 2 of 3 gives [1, 2] not [1, 3].
- *
- * This function never mutates the original article object from the store.
+ * ADD: push String(id) → .value mutation triggers Vue reactivity.
+ * REMOVE: reassign filtered arrays → .value reassignment triggers Vue reactivity.
+ * Re-numbers ordre after remove to close gaps.
+ * Never mutates the original article object in the store.
  */
 function toggleArticle(article: any): void {
     const id = String(article.id)
 
     if (selectedArticleIds.value.includes(id)) {
-        // ── REMOVE ──────────────────────────────────────────────────────────
         selectedArticleIds.value = selectedArticleIds.value.filter(x => x !== id)
         orderedArticles.value    = orderedArticles.value
             .filter(a => String(a.id) !== id)
             .map((a, i) => ({ ...a, ordre: i + 1 }))
     } else {
-        // ── ADD ─────────────────────────────────────────────────────────────
-        const newOrdre = orderedArticles.value.length + 1   // compute BEFORE push
-
+        const newOrdre = orderedArticles.value.length + 1  // compute BEFORE push
         selectedArticleIds.value.push(id)
         orderedArticles.value.push({
-            ...article,          // shallow copy — does not mutate the library
+            ...article,
             ordre:     newOrdre,
             _expanded: false,
         })
     }
 }
 
-/**
- * Revert a selected article's body to the original from the library.
- * Called by the "Réinitialiser depuis la bibliothèque" button.
- */
 function resetArticleBody(article: any): void {
     const original = articlesStore.items.find(a => String(a.id) === String(article.id))
     if (original) article.body = original.body
@@ -366,9 +262,6 @@ function onDragOver(index: number, event: DragEvent): void {
     if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
 }
 
-/**
- * Move the dragged article to the target position and re-number ordre.
- */
 function onDrop(targetIndex: number): void {
     if (dragIndex.value === null || dragIndex.value === targetIndex) return
     const arr = [...orderedArticles.value]
@@ -378,12 +271,9 @@ function onDrop(targetIndex: number): void {
     dragIndex.value = null
 }
 
-function onDragEnd(): void {
-    dragIndex.value = null
-}
+function onDragEnd(): void { dragIndex.value = null }
 
 // ── Wizard navigation ─────────────────────────────────────────────────────────
-
 
 function canProceed(): boolean {
     if (step.value === 1) return selectedAddress.value.trim().length > 0
@@ -405,33 +295,72 @@ async function nextStep(): Promise<void> {
     }
 
     if (step.value === 2 && clientMode.value === 'create') {
-        saving.value = true
-        try {
-            const newClient = await clientsStore.create({
-                raison_sociale:   newClientForm.raison_sociale,
-                forme_juridique:  newClientForm.forme_juridique || undefined,
-                client_nom:       newClientForm.gerantNom,
-                client_email:     newClientForm.email,
-                client_password:  newClientForm.password,
-                client_telephone: newClientForm.tel || undefined,
-                statut:           'actif',
-                pays:             'Maroc',
-            })
-            selectedClientId.value = newClient.id
-            selectedClient.value   = newClient
-            clientMode.value       = 'select'
-            success('Client créé avec succès')
-        } catch (e: any) {
-            const msg = e?.data?.errors
-                ? Object.values(e.data.errors).flat().join(' · ')
-                : e?.data?.message ?? 'Erreur lors de la création du client'
-            toastError?.(msg)
-            saving.value = false
-            return
-        } finally {
-            saving.value = false
+    saving.value = true
+    try {
+        // Step 2a — Create the Entreprise + portal User account.
+        const newClient = await clientsStore.create({
+            raison_sociale:   newClientForm.raison_sociale,
+            forme_juridique:  newClientForm.forme_juridique || undefined,
+            client_nom:       newClientForm.gerantNom,
+            client_email:     newClientForm.email,
+            client_password:  newClientForm.password,
+            client_telephone: newClientForm.tel || undefined,
+            statut:           'actif',
+            pays:             'Maroc',
+        })
+
+        selectedClientId.value = newClient.id
+        selectedClient.value   = newClient
+
+        // Step 2b — Create the Representant (gérant) for this new client.
+        // This is the critical step that was missing before:
+        //   Without it, $entreprise->representant is null in the PDF render,
+        //   so gerant_nom, gerant_cin, tel, email, date_naissance are all empty.
+        // We do this silently — a failure here shows a warning but does NOT
+        // block the wizard. The representant can be added later from the
+        // Clients management page → Représentant modal.
+        if (
+            newClientForm.gerantNom ||
+            newClientForm.gerantCIN ||
+            newClientForm.dateNaissance ||
+            newClientForm.adressePerso
+        ) {
+            try {
+                await clientsStore.createRepresentant(newClient.id, {
+                    nom:             newClientForm.gerantNom   || 'Non renseigné',
+                    cin:             newClientForm.gerantCIN   || 'Non renseigné',
+                    date_naissance:  newClientForm.dateNaissance || undefined,
+                    adresse:         newClientForm.adressePerso  || undefined,
+                    telephone:       newClientForm.tel            || undefined,
+                    email:           newClientForm.email          || undefined,
+                })
+                // Reload the client from the store to get the fresh representant.
+                const updatedClient = clientsStore.items.find(e => e.id === newClient.id)
+                if (updatedClient) {
+                    selectedClient.value = updatedClient
+                    // Re-populate the contract store with the representant data.
+                    contract.fillFromClient(updatedClient)
+                }
+            } catch (repErr: any) {
+                // Non-blocking: show a warning but continue to step 3.
+                toastError?.('Représentant non créé — ' + (repErr?.data?.message ?? 'erreur réseau'))
+            }
         }
+
+        clientMode.value = 'select'
+        success('Client créé avec succès')
+
+    } catch (e: any) {
+        const msg = e?.data?.errors
+            ? Object.values(e.data.errors).flat().join(' · ')
+            : e?.data?.message ?? 'Erreur lors de la création du client'
+        toastError?.(msg)
+        saving.value = false
+        return
+    } finally {
+        saving.value = false
     }
+}
 
     step.value++
 }
@@ -446,12 +375,8 @@ function prevStep(): void {
  * POST /api/contrats
  *
  * Saves all wizard data as a draft and advances to step 4.
- *
- * Key decisions:
- *   - date_debut / date_fin sent as null when empty — NOT as empty string.
- *     Laravel's 'nullable|date' validator accepts null but rejects ''.
- *   - titre_contrat sent as-is or null — backend applies its default.
- *   - Article IDs sent as String(a.id) — no isNaN() filtering.
+ * date_debut / date_fin are sent as null when empty — NOT as empty string.
+ * Laravel's 'nullable|date' validator accepts null but rejects ''.
  */
 async function saveDraft(): Promise<void> {
     if (!selectedClientId.value) {
@@ -463,20 +388,18 @@ async function saveDraft(): Promise<void> {
     try {
         const body = {
             entreprise_id:   selectedClientId.value,
-            titre_contrat:   contract.form.titreContrat  || null,
-            date_debut:      contract.form.dateDebut     || null,
-            date_fin:        contract.form.dateFin       || null,
-            duree_mois:      contract.form.months        || null,
-            prix_mensuel:    contract.monthlyTotal       || null,
-            prix_total:      contract.grandTotal         || null,
-            caution:         contract.form.caution       || null,
+            titre_contrat:   contract.form.titreContrat   || null,
+            date_debut:      contract.form.dateDebut      || null,
+            date_fin:        contract.form.dateFin        || null,
+            duree_mois:      contract.form.months         || null,
+            prix_mensuel:    contract.monthlyTotal        || null,
+            prix_total:      contract.grandTotal          || null,
+            caution:         contract.form.caution        || null,
             mode_paiement:   contract.form.mode_paiement  || null,
             ville_signature: contract.form.ville_signature || null,
             date_signature:  contract.form.date_signature  || null,
             instruction_no:  contract.form.instruction_no  || null,
             statut:          'draft',
-
-            // Articles — string IDs, ordered by drag-and-drop position.
             articles: orderedArticles.value.map(a => ({
                 id:    String(a.id),
                 ordre: a.ordre,
@@ -502,16 +425,40 @@ async function saveDraft(): Promise<void> {
     }
 }
 
+// ── Contract renewal ──────────────────────────────────────────────────────────
+
+const renewing = ref(false)
+
+/**
+ * POST /api/contrats/{id}/renew
+ *
+ * Clones the current contract into a new draft with dates shifted forward.
+ * Navigates to the contracts list after renewal so the domiciliataire can
+ * open the new draft in the wizard to adjust dates if needed.
+ */
+async function renewContract(): Promise<void> {
+    if (!contratId.value) return
+    renewing.value = true
+    try {
+        const res = await $fetch<{ success: boolean; data: any }>(
+            `${getApiBase()}/api/contrats/${contratId.value}/renew`,
+            { method: 'POST', headers: authHeaders() }
+        )
+        success(`Contrat renouvelé — nouveau brouillon #${res.data.id} créé`)
+        await navigateTo('/admin/contrats')
+    } catch (e: any) {
+        toastError?.(e?.data?.message ?? 'Erreur lors du renouvellement')
+    } finally {
+        renewing.value = false
+    }
+}
+
 // ── PDF stream ────────────────────────────────────────────────────────────────
 
 const pdfStreamUrl = ref('')
 const showPreview  = ref(false)
 const pdfLoading   = ref(false)
 
-/**
- * Build the stream URL with token as a query param.
- * The iframe cannot send an Authorization header — the token is in the URL.
- */
 function buildStreamUrl(mode: 'preview' | 'download'): string {
     const token = encodeURIComponent(getToken())
     return `${getApiBase()}/api/contrats/${contratId.value}/pdf/stream?token=${token}&mode=${mode}`
@@ -531,10 +478,6 @@ function closePreview(): void { showPreview.value = false }
 watch(() => contract.form.dateDebut, recalcMonths)
 watch(() => contract.form.dateFin,   recalcMonths)
 
-/**
- * Back-calculate months when the user manually overrides dateFin.
- * The store's setDateDebut() handles the forward direction (start → end).
- */
 function recalcMonths(): void {
     if (!contract.form.dateDebut || !contract.form.dateFin) return
     const start  = new Date(contract.form.dateDebut)
@@ -561,7 +504,7 @@ onMounted(async () => {
 <template>
   <div class="space-y-5 animate-fade-up max-w-3xl mx-auto">
 
-    <!-- ── Page header ──────────────────────────────────────────────────────── -->
+    <!-- Page header -->
     <div>
       <h1 class="font-serif text-2xl" style="color:var(--app-text)">
         Nouveau <em class="italic" style="color:#c8a96e">Contrat</em>
@@ -571,7 +514,7 @@ onMounted(async () => {
       </p>
     </div>
 
-    <!-- ── Progress bar ─────────────────────────────────────────────────────── -->
+    <!-- Progress bar -->
     <div class="flex items-center gap-2">
       <div
         v-for="s in totalSteps" :key="s"
@@ -582,7 +525,7 @@ onMounted(async () => {
 
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         STEP 1 — Domiciliataire info + address selector + contract title
+         STEP 1 — Domiciliataire profile + address + contract title
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-if="step === 1" class="space-y-4">
 
@@ -613,7 +556,7 @@ onMounted(async () => {
         </span>
       </div>
 
-      <!-- Domiciliataire read-only summary -->
+      <!-- Domiciliataire read-only summary — now includes email and telephone -->
       <div class="card p-5">
         <p class="text-xs uppercase tracking-widest font-bold mb-4" style="color:#c8a96e">
           Domiciliataire (depuis votre profil)
@@ -643,15 +586,19 @@ onMounted(async () => {
             <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">TP</p>
             <p style="color:var(--app-text)">{{ contract.form.companyTP || '—' }}</p>
           </div>
+          <!-- ✅ NEW: email and telephone now shown in step 1 summary -->
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Email</p>
+            <p class="truncate" style="color:var(--app-text)">{{ contract.form.companyEmail || '—' }}</p>
+          </div>
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Téléphone</p>
+            <p style="color:var(--app-text)">{{ contract.form.companyTelephone || '—' }}</p>
+          </div>
         </div>
       </div>
 
-      <!-- ── Dynamic contract title ─────────────────────────────────────────── -->
-      <!--
-        The domiciliataire types whatever title they want on the PDF.
-        No value is hardcoded. The backend applies 'Contrat de Domiciliation'
-        only when this field arrives null or empty.
-      -->
+      <!-- Dynamic contract title -->
       <div class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Titre du contrat
@@ -669,7 +616,7 @@ onMounted(async () => {
             le titre par défaut « Contrat de Domiciliation ».
           </p>
         </div>
-        <!-- Live preview — only shown when the user has typed something -->
+        <!-- Live preview -->
         <div
           v-if="contract.form.titreContrat.trim()"
           class="rounded-xl px-4 py-3 text-sm text-center font-semibold tracking-wide"
@@ -686,7 +633,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- ── Address selector ──────────────────────────────────────────────── -->
+      <!-- Address chip selector -->
       <div class="card p-5 space-y-4">
         <div class="flex items-center justify-between flex-wrap gap-2">
           <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
@@ -698,7 +645,6 @@ onMounted(async () => {
           </NuxtLink>
         </div>
 
-        <!-- Case A: profile returned addresses → chip selector -->
         <div v-if="addresses.length > 0" class="space-y-3">
           <p class="text-xs" style="color:var(--app-text-faint)">
             Sélectionnez l'adresse qui apparaîtra sur ce contrat :
@@ -742,7 +688,7 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Case B: no addresses → manual input -->
+        <!-- Fallback: manual input when profile has no addresses -->
         <div v-else class="space-y-3">
           <div class="flex items-start gap-3 rounded-xl px-4 py-3 text-sm"
                style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:#f59e0b">
@@ -762,7 +708,7 @@ onMounted(async () => {
           <div>
             <label class="f-label">Saisir l'adresse manuellement *</label>
             <input v-model="selectedAddress" class="f-input"
-                   placeholder="Ex : Rue Mohammed V, Résidence Atlas, Agadir 80000"
+                   placeholder="Ex : Rue Mohammed V, Résidence Atlas, 80000"
                    @input="contract.form.companyAdresse = selectedAddress" />
           </div>
         </div>
@@ -793,6 +739,7 @@ onMounted(async () => {
         </button>
       </div>
 
+      <!-- Existing client mode -->
       <div v-if="clientMode === 'select'" class="space-y-4">
         <div class="relative">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -842,6 +789,7 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- Selected client summary card — now shows dateNaissance -->
         <div v-if="selectedClient" class="card p-5 space-y-3">
           <p class="text-xs uppercase tracking-widest font-bold" style="color:#22c55e">
             ✓ Client sélectionné
@@ -863,6 +811,10 @@ onMounted(async () => {
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Gérant</p>
               <p style="color:var(--app-text)">{{ contract.form.gerantNom }}</p>
             </div>
+            <div v-if="contract.form.gerantCIN">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">CIN / Passeport</p>
+              <p style="color:var(--app-text)">{{ contract.form.gerantCIN }}</p>
+            </div>
             <div v-if="contract.form.tel">
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Téléphone</p>
               <p style="color:var(--app-text)">{{ contract.form.tel }}</p>
@@ -871,10 +823,20 @@ onMounted(async () => {
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Email</p>
               <p class="truncate" style="color:var(--app-text)">{{ contract.form.email }}</p>
             </div>
+            <div v-if="contract.form.adressePerso">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Adresse personnelle</p>
+              <p style="color:var(--app-text)">{{ contract.form.adressePerso }}</p>
+            </div>
+            <!-- ✅ NEW: date de naissance now shown in existing-client summary -->
+            <div v-if="contract.form.dateNaissance">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Date de naissance</p>
+              <p style="color:var(--app-text)">{{ contract.form.dateNaissance }}</p>
+            </div>
           </div>
         </div>
       </div>
 
+      <!-- New client creation form — includes date de naissance -->
       <div v-else-if="clientMode === 'create'" class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Informations du nouveau client
@@ -887,7 +849,7 @@ onMounted(async () => {
           </div>
           <div>
             <label class="f-label">Forme juridique</label>
-            <input v-model="newClientForm.forme_juridique" class="f-input" placeholder="SARL, SA, SAS..." />
+            <input v-model="newClientForm.forme_juridique" class="f-input" placeholder="SARL, SA..." />
           </div>
           <div>
             <label class="f-label">Nom du gérant *</label>
@@ -897,8 +859,9 @@ onMounted(async () => {
             <label class="f-label">CIN / Passeport</label>
             <input v-model="newClientForm.gerantCIN" class="f-input" placeholder="BJ422176" />
           </div>
+          <!-- ✅ date de naissance — required by certain contract clause tokens -->
           <div>
-            <label class="f-label">Date de naissance</label>
+            <label class="f-label">Date de naissance du gérant</label>
             <input v-model="newClientForm.dateNaissance" type="date" class="f-input" />
           </div>
           <div>
@@ -916,13 +879,13 @@ onMounted(async () => {
                    placeholder="Min. 8 caractères" />
           </div>
           <div class="sm:col-span-2">
-            <label class="f-label">Adresse personnelle</label>
+            <label class="f-label">Adresse personnelle du gérant</label>
             <input v-model="newClientForm.adressePerso" class="f-input"
-                   placeholder="Adresse personnelle du gérant" />
+                   placeholder="Adresse de résidence du gérant" />
           </div>
         </div>
         <p class="text-xs" style="color:var(--app-text-faint)">
-          Un compte client sera créé avec cet email et ce mot de passe.
+          Un compte portail sera créé avec cet email et ce mot de passe.
         </p>
       </div>
 
@@ -934,13 +897,7 @@ onMounted(async () => {
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-else-if="step === 3" class="space-y-5">
 
-      <!-- ── Article chip library ──────────────────────────────────────────── -->
-      <!--
-        CRITICAL: the chip :style reads selectedArticleIds.includes(String(article.id)).
-        It must NEVER read any property on the article object itself.
-        articlesStore.items is shared; mutating a flag on the article object
-        would change all chips that reference that object simultaneously.
-      -->
+      <!-- Article chip library -->
       <div class="card p-5">
         <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
@@ -959,11 +916,10 @@ onMounted(async () => {
 
         <div class="flex flex-wrap gap-2">
           <!--
-            :key="String(article.id)" — forces Vue to re-create the button
-            when the ID changes rather than patching, avoiding stale refs.
-
-            The :style and the prefix both read selectedArticleIds so they
-            are always in sync. One includes() call per render per chip.
+            CRITICAL: :style reads selectedArticleIds.includes(String(article.id))
+            — NEVER any flag from the article object itself.
+            articlesStore.items is shared; a flag on the object would affect
+            all chip renders simultaneously.
           -->
           <button
             v-for="article in articlesStore.items"
@@ -985,7 +941,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- ── Selected articles: draggable + inline body editor ─────────────── -->
+      <!-- Selected articles: drag-to-reorder + inline body editor -->
       <div v-if="orderedArticles.length > 0" class="card p-5">
         <div class="flex items-center justify-between mb-4">
           <div>
@@ -1004,11 +960,9 @@ onMounted(async () => {
             :key="String(article.id)"
             draggable="true"
             class="rounded-xl transition-all"
-            :style="`
-              border: 2px solid ${dragIndex === index ? '#c8a96e' : 'var(--app-border)'};
-              opacity: ${dragIndex === index ? 0.45 : 1};
-              background: var(--app-surface-2);
-            `"
+            :style="`border: 2px solid ${dragIndex === index ? '#c8a96e' : 'var(--app-border)'};
+                     opacity: ${dragIndex === index ? 0.45 : 1};
+                     background: var(--app-surface-2);`"
             @dragstart="onDragStart(index, $event)"
             @dragover="onDragOver(index, $event)"
             @drop="onDrop(index)"
@@ -1034,7 +988,7 @@ onMounted(async () => {
                 @click.stop
               />
               <button type="button"
-                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors nav-inactive"
+                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
                       @click.stop="article._expanded = !article._expanded">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
@@ -1076,6 +1030,7 @@ onMounted(async () => {
           </div>
         </div>
 
+        <!-- PDF order summary -->
         <div class="mt-4 rounded-xl p-4"
              style="background:var(--app-surface);border:1px solid var(--app-border)">
           <p class="text-[10px] uppercase tracking-widest font-bold mb-2"
@@ -1101,10 +1056,10 @@ onMounted(async () => {
           <polyline points="14 2 14 8 20 8"/>
         </svg>
         <p class="font-medium mb-1">Aucun article sélectionné</p>
-        <p class="text-sm">Le PDF sera généré sans articles de contrat.</p>
+        <p class="text-sm">Le PDF sera généré sans clauses contractuelles.</p>
       </div>
 
-      <!-- ── Financial fields ──────────────────────────────────────────────── -->
+      <!-- Financial fields -->
       <div class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Durée et montants
@@ -1170,7 +1125,7 @@ onMounted(async () => {
 
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         STEP 4 — Confirmation + PDF stream preview
+         STEP 4 — Confirmation + PDF preview + renewal
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-else-if="step === 4" class="space-y-4">
       <div class="card p-6 text-center space-y-4">
@@ -1192,6 +1147,8 @@ onMounted(async () => {
             — statut : brouillon
           </p>
         </div>
+
+        <!-- PDF actions -->
         <button class="btn btn-gold btn-lg w-full sm:w-auto" @click="preparePdf">
           Préparer le PDF
         </button>
@@ -1214,14 +1171,31 @@ onMounted(async () => {
             Télécharger PDF
           </a>
         </div>
-        <NuxtLink to="/admin/contrats" class="btn btn-outline btn-md w-full sm:w-auto">
-          Voir tous les contrats →
-        </NuxtLink>
+
+        <!-- Navigation and renewal -->
+        <div class="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+          <NuxtLink to="/admin/contrats" class="btn btn-outline btn-md">
+            Voir tous les contrats →
+          </NuxtLink>
+          <!-- ✅ NEW: Renew contract button -->
+          <button
+            class="btn btn-outline btn-md"
+            :disabled="renewing"
+            @click="renewContract"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
+              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </svg>
+            {{ renewing ? 'Renouvellement...' : 'Renouveler le contrat' }}
+          </button>
+        </div>
       </div>
     </div>
 
 
-    <!-- ── Navigation buttons (steps 1–3) ────────────────────────────────────── -->
+    <!-- Navigation buttons (steps 1–3) -->
     <div v-if="step < 4" class="flex justify-between gap-3 pt-2">
       <button v-if="step > 1" type="button" class="btn btn-outline btn-md" @click="prevStep">
         ← Retour
@@ -1238,7 +1212,7 @@ onMounted(async () => {
     </div>
 
 
-    <!-- ── PDF fullscreen preview modal ─────────────────────────────────────── -->
+    <!-- PDF fullscreen preview modal -->
     <ClientOnly>
       <Teleport to="body">
         <div v-if="showPreview" class="fixed inset-0 z-300 flex flex-col"
@@ -1264,7 +1238,7 @@ onMounted(async () => {
                 <p class="text-sm">Chargement du PDF...</p>
               </div>
             </div>
-            <!-- The iframe loads from the public stream route outside auth:sanctum -->
+            <!-- iframe loads from the public stream route outside auth:sanctum -->
             <iframe :src="pdfStreamUrl" class="w-full h-full"
                     style="border:none;display:block" @load="pdfLoading = false" />
           </div>
@@ -1273,12 +1247,4 @@ onMounted(async () => {
     </ClientOnly>
 
   </div>
-</template>
-
-
-feat(domiciliation): refonte du workflow et mise à jour des fonctionnalités
-
-- Infos Entreprise : ajout date de naissance, champ création optionnel, adresses multiples.
-- Contrats : suppression sélection articles, passage sur modèle prédéfini.
-- Représentant : intégration simplifiée lors de la création du contrat.
-- Client : centralisation de la création dans le tunnel du contrat.
+</template> 

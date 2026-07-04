@@ -125,6 +125,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/clients/{id}', [ClientController::class, 'show']);
     Route::put('/clients/{id}', [ClientController::class, 'update']);
     Route::put('/clients/{id}/password', [ClientController::class, 'updatePassword']);
+    Route::post('/clients', [ClientController::class, 'store']);
 
     // ── Documents ─────────────────────────────────────────────────────────────
     // CRUD requires auth. Download and preview are public (registered above).
