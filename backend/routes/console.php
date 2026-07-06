@@ -1,16 +1,32 @@
 <?php
-// ============================================================
-// routes/console.php — Cron jobs Laravel 11
-// 1. Expiration auto des contrats (minuit)
-// 2. Alertes multi-délais selon préférences user (8h)
-// ============================================================
+// routes/console.php
+//
+// Scheduled jobs for the application.
+//
+//   1. contracts:expire-check — runs daily at 01:00
+//      Transitions active contracts whose date_fin has passed to
+//      'expired' and notifies the domiciliataire. Implemented as a
+//      dedicated Artisan command (app/Console/Commands/
+//      ExpireContractsCommand.php) rather than an inline closure so the
+//      logic has a single, testable source of truth. date_fin is a DATE
+//      column, not a DATETIME, so a contract's expiration status can only
+//      change once every 24 hours — running this more than once a day
+//      gives no additional benefit.
+//
+//   2. Renewal reminder alerts — runs daily at 08:00
+//      For each domiciliataire, reads their configured reminder delays
+//      (1, 3, and/or 6 months — stored per-user in
+//      notification_preferences) and sends a reminder notification for
+//      every active contract whose date_fin falls exactly on one of those
+//      future dates. A same-day duplicate guard prevents sending the same
+//      reminder twice.
 
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
-use App\Models\Contrat;
 use App\Models\Alerte;
 use App\Models\AppNotification;
+use App\Models\Contrat;
 use App\Models\User;
 use Carbon\Carbon;
 
@@ -18,45 +34,27 @@ Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
 })->purpose('Display an inspiring quote');
 
-// ── Cron 1 : Expiration automatique ───────────────────────
-Schedule::call(function () {
-    $expired = Contrat::where('statut', 'active')
-        ->whereNotNull('date_fin')
-        ->where('date_fin', '<', Carbon::today())
-        ->with('entreprise:id,raison_sociale')
-        ->get();
+// ── Cron 1: automatic contract expiration ─────────────────────────────────
+Schedule::command('contracts:expire-check')
+    ->dailyAt('01:00')
+    ->name('contracts:expire-check')
+    ->withoutOverlapping();
 
-    foreach ($expired as $contrat) {
-        $contrat->update(['statut' => 'expired']);
-
-        AppNotification::create([
-            'user_id' => $contrat->domiciliataire_id,
-            'contrat_id' => $contrat->id,
-            'message' => "⚠️ Le contrat de {$contrat->entreprise->raison_sociale} a expiré le {$contrat->date_fin->format('d/m/Y')}.",
-            'is_read' => false,
-        ]);
-    }
-})->daily()->name('contrats:expire')->withoutOverlapping();
-
-// ── Cron 2 : Alertes multi-délais personnalisées ──────────
-// Vérifie chaque domiciliataire et ses préférences
-// Envoie des alertes pour chaque délai configuré
+// ── Cron 2: renewal reminder alerts (multi-delay, per-domiciliataire) ────
 Schedule::call(function () {
     $today = Carbon::today();
 
-    // Récupérer tous les domiciliataires avec leurs préférences
     $domiciliataires = User::where('role', 'domiciliataire')->get();
 
     foreach ($domiciliataires as $user) {
-        // Lire les délais configurés — défaut: [1]
+        // Delays configured by this domiciliataire — defaults to
+        // reminding 1 month before expiration if nothing is configured.
         $prefs = json_decode($user->notification_preferences ?? '{"delays":[1]}', true);
         $delays = $prefs['delays'] ?? [1];
 
         foreach ($delays as $delayMonths) {
-            // Date cible = aujourd'hui + delayMonths
             $targetDate = $today->copy()->addMonths($delayMonths);
 
-            // Contrats actifs dont date_fin = targetDate
             $contrats = Contrat::where('domiciliataire_id', $user->id)
                 ->where('statut', 'active')
                 ->whereDate('date_fin', $targetDate)
@@ -64,24 +62,32 @@ Schedule::call(function () {
                 ->get();
 
             foreach ($contrats as $contrat) {
-                // Éviter les doublons : vérifier si alerte déjà envoyée ce jour
+                // Skip if a reminder for this contract was already sent
+                // today — guards against duplicate notifications if the
+                // scheduler fires more than once, or if a contract
+                // matches more than one configured delay on the same day.
                 $alreadySent = AppNotification::where('user_id', $user->id)
                     ->where('contrat_id', $contrat->id)
                     ->whereDate('created_at', $today)
                     ->whereNull('from_user_id')
                     ->exists();
 
-                if ($alreadySent)
+                if ($alreadySent) {
                     continue;
+                }
 
                 AppNotification::create([
                     'user_id' => $user->id,
                     'contrat_id' => $contrat->id,
-                    'message' => "🔔 Rappel : le contrat de {$contrat->entreprise->raison_sociale} expire dans {$delayMonths} mois (le {$contrat->date_fin->format('d/m/Y')}).",
+                    'message' => sprintf(
+                        '🔔 Rappel : le contrat de %s expire dans %d mois (le %s).',
+                        $contrat->entreprise?->raison_sociale ?? 'un client',
+                        $delayMonths,
+                        $contrat->date_fin->format('d/m/Y')
+                    ),
                     'is_read' => false,
                 ]);
 
-                // Mettre à jour les alertes DB
                 Alerte::updateOrCreate(
                     ['contrat_id' => $contrat->id, 'date_alerte' => $today],
                     ['envoye' => true]
