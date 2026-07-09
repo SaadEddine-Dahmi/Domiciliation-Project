@@ -4,6 +4,13 @@ import { useAuthStore } from '~/stores/auth'
 
 definePageMeta({ layout: 'default' })
 
+/**
+ * Product name shown in the marketing panel.
+ * Replace this one constant once you've decided on a name for the app —
+ * nothing else in this file needs to change.
+ */
+const APP_NAME = 'Domiciliation'
+
 const auth   = useAuthStore()
 const router = useRouter()
 
@@ -29,7 +36,7 @@ async function submit() {
       style="border-right:1px solid rgba(200,169,110,0.2)"
     >
       <div class="font-serif text-2xl">
-        AST-FISC <span class="text-gold">Domiciliation</span>
+        <span class="text-gold">{{ APP_NAME }}</span>
       </div>
       <h2 class="font-serif text-5xl leading-tight">
         Gérez vos contrats<br>
@@ -56,7 +63,7 @@ async function submit() {
             v-model="form.email"
             class="f-input"
             type="email"
-            placeholder="admin@astfisc.ma"
+            placeholder="admin@example.com"
             required
           />
         </div>

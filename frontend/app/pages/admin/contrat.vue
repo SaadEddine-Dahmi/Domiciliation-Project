@@ -2,27 +2,82 @@
 /**
  * pages/admin/contrat.vue
  *
+ * 4-step contract creation wizard.
  *
- * Step 1 — Domiciliataire profile (autofilled) + address chip selector
- *           + dynamic contract title input with live PDF preview
- *           ✅ NEW: also shows email and telephone from profile
+ * Step 1 — Domiciliataire info (autofilled from profile)
+ *           + address chip selector
+ *           + dynamic contract title input with live preview
  * Step 2 — Client: pick existing or create inline
- *           ✅ NEW: date de naissance shown in new-client form and synced to store
- *           ✅ NEW: date de naissance shown in selected-client summary card
- * Step 3 — Articles chip library + drag-reorder + financial fields
- *           (dates, redevance, signature city and date)
- * Step 4 — Confirmation + PDF preview + download
- *           ✅ NEW: "Renouveler le contrat" button calls POST /api/contrats/{id}/renew
+ * Step 3 — Articles: chip library selector, drag-to-reorder, inline body editor
+ *           + financial fields (dates, redevance, payment)
+ * Step 4 — Confirmation + PDF stream preview + download
  *
- * ── Article chip reactivity ────────────────────────────────────────────────
- * selectedArticleIds is ref<string[]> (NOT ref<Set<string>>).
- * Vue 3 tracks .push() and array reassignment but NOT Set.add() / Set.delete().
- * Using a Set caused chips to appear stuck after every toggle.
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ROOT CAUSE OF THE "ALL CHIPS SELECTED" BUG — AND THE FIX
+ * ─────────────────────────────────────────────────────────────────────────────
+ * (unchanged from previous revision — kept for history)
  *
- * ── Contract title ─────────────────────────────────────────────────────────
- * contract.form.titreContrat is typed freely in step 1.
- * Sent as-is to the backend. Backend applies 'Contrat de Domiciliation'
- * only when the field arrives null or empty.
+ * SYMPTOM: clicking one article chip made ALL chips turn gold simultaneously,
+ *          but only the clicked article appeared in the selected list below.
+ * ROOT CAUSE: Article PKs are integer auto-increment; without an explicit
+ *   'id' cast the id serialised inconsistently as 0/null, so String(id)
+ *   produced the same string for every row and .includes() matched them all.
+ * FIX: Article model casts 'id' => 'integer'; the articles store maps ids
+ *   through String(a.id); selectedArticleIds is a plain ref<string[]> (never
+ *   a Set, since Vue doesn't track Set mutations).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * CONTRACT TITLE — DYNAMIC, CHOSEN BY THE CLIENT
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * contract.form.titreContrat is a plain free-text field, fully editable in
+ * step 1 (see the "Titre du contrat" card below). Nothing on the frontend
+ * hardcodes a title. It is sent to the backend exactly as typed; the
+ * backend applies the fallback 'Contrat de Domiciliation' ONLY when the
+ * field arrives null or empty (ContratController::store()/update()).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * PDF PREVIEW/DOWNLOAD — FIX FOR "localhost refused to connect"
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * OLD BEHAVIOUR (buggy):
+ *   The "Aperçu PDF" button pointed an <iframe> straight at the API's
+ *   cross-origin PDF-stream URL. The backend used to send
+ *   'X-Frame-Options: SAMEORIGIN' on that response, which tells the browser
+ *   "only render this inside a frame if the parent page is on the exact same
+ *   origin". Since the Nuxt frontend and the Laravel API run on different
+ *   origins (different port locally, usually a different subdomain in
+ *   production), the browser silently refused to display the PDF in the
+ *   iframe — shown to the user as a connection-refused-style error page —
+ *   while the "Télécharger PDF" link kept working because X-Frame-Options
+ *   only restricts framing, not normal top-level navigation.
+ *
+ * NEW BEHAVIOUR:
+ *   Both the preview and the download now fetch the PDF with fetch() and a
+ *   normal Authorization: Bearer header (openPreview() / downloadPdf()
+ *   below), convert the response to a Blob, and use
+ *   URL.createObjectURL(blob) as the source. blob: URLs are always
+ *   same-origin, so no framing restriction can ever block them again — and
+ *   a failed request now surfaces as a catchable error we can show a real
+ *   message for, instead of a cryptic browser page.
+ *   This also let the backend route move back inside auth:sanctum with
+ *   proper tenant scoping (see ContratController::streamPdf()), since we're
+ *   no longer relying on a bare <iframe src>/<a href> that can't carry
+ *   headers.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LIVE CONTRACT PREVIEW (in-wizard, no save required)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * A separate "Aperçu du contrat" button in the page header opens a second
+ * modal that renders the contract as HTML, computed live from the in-memory
+ * wizard state (livePreviewHtml). Unlike the PDF stream above, this needs no
+ * contrat_id and no network call at all, so it works from step 1 onward,
+ * before the contract has even been saved as a draft. Article bodies go
+ * through the same {{variable}} token resolution as
+ * ContratController::buildTokenMap()/resolveTokens(), so the wording shown
+ * here matches the generated PDF. Every interpolated value passes through
+ * escapeHtml() before being placed in the v-html string.
  */
 
 import { useContractStore } from '~/stores/contrat'
@@ -43,6 +98,11 @@ function getApiBase(): string {
     return (config.public.apiBase as string) ?? ''
 }
 
+/**
+ * Build the Authorization header from localStorage.
+ * Key 'app_auth' is written by the auth controller on login.
+ * Returns {} when called server-side or when the token is missing.
+ */
 function authHeaders(): Record<string, string> {
     if (!import.meta.client) return {}
     try {
@@ -51,13 +111,6 @@ function authHeaders(): Record<string, string> {
         const parsed = JSON.parse(raw)
         return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
     } catch { return {} }
-}
-
-function getToken(): string {
-    if (!import.meta.client) return ''
-    try {
-        return JSON.parse(localStorage.getItem('app_auth') ?? '{}')?.token ?? ''
-    } catch { return '' }
 }
 
 // ── Wizard state ──────────────────────────────────────────────────────────────
@@ -71,13 +124,23 @@ const contratId  = ref<number | null>(null)
 
 const profile       = ref<any>({})
 const profileLoaded = ref(false)
-const addresses     = ref<{ label: string; value: string }[]>([])
-const selectedAddress = ref('')
 
 /**
- * Normalise the addresses array returned by the profile API into a flat
- * [{label, value}] structure regardless of the shape the backend sends.
+ * Normalised address list built from the profile API response.
+ * Handles every shape the backend might return:
+ *   string[]         → ["10 rue X", "Quartier Y"]
+ *   {label, value}[] → [{label:"Siège", value:"10 rue X"}]
+ *   single string    → "10 rue X"
+ *   null / undefined → [] (triggers manual input fallback)
  */
+const addresses = ref<{ label: string; value: string }[]>([])
+
+/**
+ * The address selected or typed for this contract.
+ * Single source of truth for step 1 validation.
+ */
+const selectedAddress = ref('')
+
 function normaliseAddresses(raw: any): { label: string; value: string }[] {
     if (!raw) return []
     if (Array.isArray(raw)) {
@@ -99,11 +162,6 @@ function normaliseAddresses(raw: any): { label: string; value: string }[] {
     return []
 }
 
-/**
- * Load the domiciliataire profile and autofill wizard step 1 fields.
- * Also loads the address list for the chip selector.
- * email and telephone are now passed to fillFromProfile() (audit fix).
- */
 async function loadProfile(): Promise<void> {
     try {
         const res = await $fetch<{ success: boolean; data: any }>(
@@ -111,8 +169,6 @@ async function loadProfile(): Promise<void> {
             { headers: authHeaders() }
         )
         profile.value = res.data ?? {}
-
-        // fillFromProfile now also sets companyEmail and companyTelephone.
         contract.fillFromProfile(res.data ?? {})
 
         const raw = res.data?.adresses
@@ -122,7 +178,6 @@ async function loadProfile(): Promise<void> {
                  ?? null
         addresses.value = normaliseAddresses(raw)
 
-        // Profile is considered "loaded" when the minimum required fields exist.
         profileLoaded.value = !!(res.data?.nom_societe && res.data?.representant_legal)
     } catch {
         profileLoaded.value = false
@@ -130,6 +185,7 @@ async function loadProfile(): Promise<void> {
     }
 }
 
+/** Select an address chip — writes to both the local ref and the store. */
 function pickAddress(addr: { label: string; value: string }): void {
     selectedAddress.value        = addr.value
     contract.form.companyAdresse = addr.value
@@ -147,7 +203,7 @@ const newClientForm = reactive({
     forme_juridique: '',
     gerantNom:       '',
     gerantCIN:       '',
-    dateNaissance:   '',   // ✅ date de naissance du gérant
+    dateNaissance:   '',
     adressePerso:    '',
     tel:             '',
     email:           '',
@@ -165,12 +221,23 @@ const filteredClients = computed(() => {
 })
 
 /**
- * Select an existing client and copy their representant fields into the store.
+ * Select an existing client and copy their fields into the store form
+ * so they appear pre-filled in the PDF.
  */
 function selectClient(client: any): void {
     selectedClientId.value = client.id
     selectedClient.value   = client
-    contract.fillFromClient(client)
+
+    contract.form.societe      = client.raison_sociale ?? ''
+    contract.form.gerantNom    = client.representant?.nom_complet
+                                 ?? (client.client_user
+                                     ? `${client.client_user.nom ?? ''} ${client.client_user.prenom ?? ''}`.trim()
+                                     : '')
+    contract.form.gerantCIN    = client.representant?.cin       ?? ''
+    contract.form.tel          = client.representant?.telephone  ?? client.client_user?.telephone ?? ''
+    contract.form.email        = client.representant?.email      ?? client.client_user?.email     ?? ''
+    contract.form.adressePerso = client.representant?.adresse    ?? ''
+
     clientSearchQuery.value = ''
 }
 
@@ -186,43 +253,33 @@ function switchToCreate(): void {
 }
 
 // Keep the store form in sync as the new-client fields are typed.
-watch(() => newClientForm.raison_sociale, v => { contract.form.societe       = v })
-watch(() => newClientForm.gerantNom,      v => { contract.form.gerantNom     = v })
-watch(() => newClientForm.gerantCIN,      v => { contract.form.gerantCIN     = v })
-watch(() => newClientForm.tel,            v => { contract.form.tel           = v })
-watch(() => newClientForm.email,          v => { contract.form.email         = v })
-watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso  = v })
-watch(() => newClientForm.dateNaissance,  v => { contract.form.dateNaissance = v })  // ✅ NEW
+watch(() => newClientForm.raison_sociale, v => { contract.form.societe      = v })
+watch(() => newClientForm.gerantNom,      v => { contract.form.gerantNom    = v })
+watch(() => newClientForm.gerantCIN,      v => { contract.form.gerantCIN    = v })
+watch(() => newClientForm.tel,            v => { contract.form.tel          = v })
+watch(() => newClientForm.email,          v => { contract.form.email        = v })
+watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso = v })
 
 // ── Step 3: article selection ─────────────────────────────────────────────────
 
 /**
  * SOURCE OF TRUTH for which articles are currently selected.
- *
- * WHY ref<string[]> and NOT ref<Set<string>>:
- *   Vue 3 tracks reactivity on .value reassignment and on array mutations
- *   (.push, .filter). Set.add() / Set.delete() mutate the Set in-place
- *   without reassigning .value, so Vue never schedules a re-render.
- *   Chip :style bindings would never update after a toggle — appearing stuck.
- *
- * All IDs are stored as String(). Safe for integer PKs ("19") and future UUIDs.
+ * ref<string[]> (never a Set — Vue doesn't track Set mutations, only
+ * .value reassignment and array mutations like .push/.filter).
  */
 const selectedArticleIds = ref<string[]>([])
 
 /**
  * Parallel array of shallow-copied article objects for drag-and-drop.
- * Each entry has added fields: ordre (1-based position), _expanded (editor open).
- * Shallow copies prevent edits here from mutating articlesStore.items.
+ * Shallow copies are intentional — editing title/body here must NOT
+ * mutate the shared library entry in articlesStore.items.
  */
 const orderedArticles = ref<any[]>([])
 
 /**
  * Toggle an article in or out of the selection.
- *
- * ADD: push String(id) → .value mutation triggers Vue reactivity.
- * REMOVE: reassign filtered arrays → .value reassignment triggers Vue reactivity.
- * Re-numbers ordre after remove to close gaps.
- * Never mutates the original article object in the store.
+ * ADD:    push String(id) into selectedArticleIds + push a copy into orderedArticles
+ * REMOVE: assign filtered arrays to both, re-number ordre to close gaps
  */
 function toggleArticle(article: any): void {
     const id = String(article.id)
@@ -233,7 +290,8 @@ function toggleArticle(article: any): void {
             .filter(a => String(a.id) !== id)
             .map((a, i) => ({ ...a, ordre: i + 1 }))
     } else {
-        const newOrdre = orderedArticles.value.length + 1  // compute BEFORE push
+        const newOrdre = orderedArticles.value.length + 1
+
         selectedArticleIds.value.push(id)
         orderedArticles.value.push({
             ...article,
@@ -243,6 +301,9 @@ function toggleArticle(article: any): void {
     }
 }
 
+/**
+ * Revert a selected article's body to the original from the library.
+ */
 function resetArticleBody(article: any): void {
     const original = articlesStore.items.find(a => String(a.id) === String(article.id))
     if (original) article.body = original.body
@@ -271,7 +332,9 @@ function onDrop(targetIndex: number): void {
     dragIndex.value = null
 }
 
-function onDragEnd(): void { dragIndex.value = null }
+function onDragEnd(): void {
+    dragIndex.value = null
+}
 
 // ── Wizard navigation ─────────────────────────────────────────────────────────
 
@@ -295,72 +358,33 @@ async function nextStep(): Promise<void> {
     }
 
     if (step.value === 2 && clientMode.value === 'create') {
-    saving.value = true
-    try {
-        // Step 2a — Create the Entreprise + portal User account.
-        const newClient = await clientsStore.create({
-            raison_sociale:   newClientForm.raison_sociale,
-            forme_juridique:  newClientForm.forme_juridique || undefined,
-            client_nom:       newClientForm.gerantNom,
-            client_email:     newClientForm.email,
-            client_password:  newClientForm.password,
-            client_telephone: newClientForm.tel || undefined,
-            statut:           'actif',
-            pays:             'Maroc',
-        })
-
-        selectedClientId.value = newClient.id
-        selectedClient.value   = newClient
-
-        // Step 2b — Create the Representant (gérant) for this new client.
-        // This is the critical step that was missing before:
-        //   Without it, $entreprise->representant is null in the PDF render,
-        //   so gerant_nom, gerant_cin, tel, email, date_naissance are all empty.
-        // We do this silently — a failure here shows a warning but does NOT
-        // block the wizard. The representant can be added later from the
-        // Clients management page → Représentant modal.
-        if (
-            newClientForm.gerantNom ||
-            newClientForm.gerantCIN ||
-            newClientForm.dateNaissance ||
-            newClientForm.adressePerso
-        ) {
-            try {
-                await clientsStore.createRepresentant(newClient.id, {
-                    nom:             newClientForm.gerantNom   || 'Non renseigné',
-                    cin:             newClientForm.gerantCIN   || 'Non renseigné',
-                    date_naissance:  newClientForm.dateNaissance || undefined,
-                    adresse:         newClientForm.adressePerso  || undefined,
-                    telephone:       newClientForm.tel            || undefined,
-                    email:           newClientForm.email          || undefined,
-                })
-                // Reload the client from the store to get the fresh representant.
-                const updatedClient = clientsStore.items.find(e => e.id === newClient.id)
-                if (updatedClient) {
-                    selectedClient.value = updatedClient
-                    // Re-populate the contract store with the representant data.
-                    contract.fillFromClient(updatedClient)
-                }
-            } catch (repErr: any) {
-                // Non-blocking: show a warning but continue to step 3.
-                toastError?.('Représentant non créé — ' + (repErr?.data?.message ?? 'erreur réseau'))
-            }
+        saving.value = true
+        try {
+            const newClient = await clientsStore.create({
+                raison_sociale:   newClientForm.raison_sociale,
+                forme_juridique:  newClientForm.forme_juridique || undefined,
+                client_nom:       newClientForm.gerantNom,
+                client_email:     newClientForm.email,
+                client_password:  newClientForm.password,
+                client_telephone: newClientForm.tel || undefined,
+                statut:           'actif',
+                pays:             'Maroc',
+            })
+            selectedClientId.value = newClient.id
+            selectedClient.value   = newClient
+            clientMode.value       = 'select'
+            success('Client créé avec succès')
+        } catch (e: any) {
+            const msg = e?.data?.errors
+                ? Object.values(e.data.errors).flat().join(' · ')
+                : e?.data?.message ?? 'Erreur lors de la création du client'
+            toastError?.(msg)
+            saving.value = false
+            return
+        } finally {
+            saving.value = false
         }
-
-        clientMode.value = 'select'
-        success('Client créé avec succès')
-
-    } catch (e: any) {
-        const msg = e?.data?.errors
-            ? Object.values(e.data.errors).flat().join(' · ')
-            : e?.data?.message ?? 'Erreur lors de la création du client'
-        toastError?.(msg)
-        saving.value = false
-        return
-    } finally {
-        saving.value = false
     }
-}
 
     step.value++
 }
@@ -373,10 +397,7 @@ function prevStep(): void {
 
 /**
  * POST /api/contrats
- *
  * Saves all wizard data as a draft and advances to step 4.
- * date_debut / date_fin are sent as null when empty — NOT as empty string.
- * Laravel's 'nullable|date' validator accepts null but rejects ''.
  */
 async function saveDraft(): Promise<void> {
     if (!selectedClientId.value) {
@@ -388,18 +409,19 @@ async function saveDraft(): Promise<void> {
     try {
         const body = {
             entreprise_id:   selectedClientId.value,
-            titre_contrat:   contract.form.titreContrat   || null,
-            date_debut:      contract.form.dateDebut      || null,
-            date_fin:        contract.form.dateFin        || null,
-            duree_mois:      contract.form.months         || null,
-            prix_mensuel:    contract.monthlyTotal        || null,
-            prix_total:      contract.grandTotal          || null,
-            caution:         contract.form.caution        || null,
+            titre_contrat:   contract.form.titreContrat  || null,
+            date_debut:      contract.form.dateDebut     || null,
+            date_fin:        contract.form.dateFin       || null,
+            duree_mois:      contract.form.months        || null,
+            prix_mensuel:    contract.monthlyTotal       || null,
+            prix_total:      contract.grandTotal         || null,
+            caution:         contract.form.caution       || null,
             mode_paiement:   contract.form.mode_paiement  || null,
             ville_signature: contract.form.ville_signature || null,
             date_signature:  contract.form.date_signature  || null,
             instruction_no:  contract.form.instruction_no  || null,
             statut:          'draft',
+
             articles: orderedArticles.value.map(a => ({
                 id:    String(a.id),
                 ordre: a.ordre,
@@ -425,53 +447,308 @@ async function saveDraft(): Promise<void> {
     }
 }
 
-// ── Contract renewal ──────────────────────────────────────────────────────────
+// ── PDF stream (preview + download) — fixed ────────────────────────────────────
 
-const renewing = ref(false)
+const pdfReady         = ref(false)   // true once "Préparer le PDF" has been clicked
+const showPreview      = ref(false)
+const pdfLoading       = ref(false)
+const previewError     = ref('')
+const previewObjectUrl = ref('')      // blob: URL currently shown in the <iframe>
+const downloadingPdf   = ref(false)
 
-/**
- * POST /api/contrats/{id}/renew
- *
- * Clones the current contract into a new draft with dates shifted forward.
- * Navigates to the contracts list after renewal so the domiciliataire can
- * open the new draft in the wizard to adjust dates if needed.
- */
-async function renewContract(): Promise<void> {
-    if (!contratId.value) return
-    renewing.value = true
-    try {
-        const res = await $fetch<{ success: boolean; data: any }>(
-            `${getApiBase()}/api/contrats/${contratId.value}/renew`,
-            { method: 'POST', headers: authHeaders() }
-        )
-        success(`Contrat renouvelé — nouveau brouillon #${res.data.id} créé`)
-        await navigateTo('/admin/contrats')
-    } catch (e: any) {
-        toastError?.(e?.data?.message ?? 'Erreur lors du renouvellement')
-    } finally {
-        renewing.value = false
-    }
-}
-
-// ── PDF stream ────────────────────────────────────────────────────────────────
-
-const pdfStreamUrl = ref('')
-const showPreview  = ref(false)
-const pdfLoading   = ref(false)
-
+/** Build the URL of the (now authenticated) PDF-stream endpoint. */
 function buildStreamUrl(mode: 'preview' | 'download'): string {
-    const token = encodeURIComponent(getToken())
-    return `${getApiBase()}/api/contrats/${contratId.value}/pdf/stream?token=${token}&mode=${mode}`
+    return `${getApiBase()}/api/contrats/${contratId.value}/pdf/stream?mode=${mode}`
 }
 
+/** Reveals the "Aperçu PDF" / "Télécharger PDF" buttons once the contract is saved. */
 function preparePdf(): void {
     if (!contratId.value) return
-    pdfStreamUrl.value = buildStreamUrl('preview')
+    pdfReady.value = true
     success('PDF prêt — cliquez sur Aperçu ou Télécharger')
 }
 
-function openPreview():  void { pdfLoading.value = true; showPreview.value = true }
-function closePreview(): void { showPreview.value = false }
+/**
+ * Fetch the PDF as a blob (with the normal Authorization header) and show it
+ * in the preview modal. Using a blob: URL instead of pointing the <iframe>
+ * straight at the cross-origin API URL is what fixes the
+ * "localhost refused to connect" bug — see the file-level comment above.
+ */
+async function openPreview(): Promise<void> {
+    if (!contratId.value || pdfLoading.value) return
+
+    showPreview.value  = true
+    pdfLoading.value   = true
+    previewError.value = ''
+
+    try {
+        const res = await fetch(buildStreamUrl('preview'), { headers: authHeaders() })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+
+        if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
+        previewObjectUrl.value = URL.createObjectURL(blob)
+    } catch {
+        previewError.value = "Impossible de charger l'aperçu du PDF. Réessayez, ou téléchargez le fichier directement."
+    } finally {
+        pdfLoading.value = false
+    }
+}
+
+function closePreview(): void {
+    showPreview.value = false
+}
+
+/**
+ * Fetch the PDF as a blob and trigger a real file download, instead of
+ * relying on the browser's built-in PDF viewer opening in a new tab.
+ */
+async function downloadPdf(): Promise<void> {
+    if (!contratId.value || downloadingPdf.value) return
+    downloadingPdf.value = true
+    try {
+        const res = await fetch(buildStreamUrl('download'), { headers: authHeaders() })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob      = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+
+        const a    = document.createElement('a')
+        a.href     = objectUrl
+        a.download = `contrat_${contratId.value}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 3000)
+    } catch {
+        toastError?.('Erreur lors du téléchargement du PDF.')
+    } finally {
+        downloadingPdf.value = false
+    }
+}
+
+// ── Live contract preview (no contrat_id / no network call needed) ───────────
+
+const showLivePreview = ref(false)
+
+function openLivePreview(): void {
+    showLivePreview.value = true
+}
+
+function closeLivePreview(): void {
+    showLivePreview.value = false
+}
+
+/**
+ * Escape a value before it is interpolated into the v-html preview string.
+ * Every wizard field (company name, client name, article bodies, ...) is
+ * user input and must never be trusted as raw HTML.
+ */
+function escapeHtml(value: unknown): string {
+    if (value === null || value === undefined) return ''
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+}
+
+/** Format an ISO date string as dd/mm/yyyy for the preview; '—' when empty. */
+function formatPreviewDate(value: string | null | undefined): string {
+    if (!value) return '—'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+/**
+ * Build the {{variable}} → value map used to resolve tokens inside article
+ * bodies for the live preview. Mirrors ContratController::buildTokenMap().
+ */
+function buildPreviewTokenMap(): Record<string, string> {
+    const f = contract.form
+
+    const fmtMoney = (v: unknown): string => {
+        const n = Number(v)
+        return Number.isFinite(n) && n > 0
+            ? `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DH`
+            : ''
+    }
+
+    return {
+        domiciliataire_nom: f.companyName || '',
+        domiciliataire_rc: f.companyRC || '',
+        domiciliataire_if: f.companyIF || '',
+        domiciliataire_tp: f.companyTP || '',
+        domiciliataire_adresse: f.companyAdresse || '',
+        domiciliataire_representant: f.companyRepresentant || '',
+
+        raison_sociale: f.societe || '',
+        societe: f.societe || '',
+        forme_juridique: selectedClient.value?.forme_juridique || '',
+        adresse_domiciliation: f.companyAdresse || '',
+        ville_client: selectedClient.value?.ville || '',
+
+        gerant_nom: f.gerantNom || '',
+        gerant_cin: f.gerantCIN || '',
+        gerant_telephone: f.tel || '',
+        telephone: f.tel || '',
+        gerant_email: f.email || '',
+        email: f.email || '',
+        gerant_adresse: f.adressePerso || '',
+
+        date_debut: formatPreviewDate(f.dateDebut),
+        date_fin: formatPreviewDate(f.dateFin),
+        date_signature: formatPreviewDate(f.date_signature),
+        duree_mois: String(f.months || ''),
+        instruction_no: f.instruction_no || '',
+        ville_signature: f.ville_signature || '',
+
+        prix_mensuel: fmtMoney(contract.monthlyTotal),
+        prix_total: fmtMoney(contract.grandTotal),
+        redevance_mensuelle: fmtMoney(contract.monthlyTotal),
+        redevance_annuelle: fmtMoney(contract.grandTotal),
+        caution: fmtMoney(f.caution),
+        mode_paiement: f.mode_paiement || '',
+    }
+}
+
+/**
+ * Replace every {{key}} token in an already-escaped article body with its
+ * resolved, escaped value. Mirrors ContratController::resolveTokens().
+ */
+function resolvePreviewTokens(escapedBody: string, tokenMap: Record<string, string>): string {
+    let result = escapedBody
+    for (const [key, value] of Object.entries(tokenMap)) {
+        const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi')
+        result = result.replace(pattern, escapeHtml(value))
+    }
+    return result.replace(
+        /\{\{\s*([a-z_]+)\s*\}\}/gi,
+        '<span style="color:#c8a96e;font-style:italic">[$1]</span>'
+    )
+}
+
+/**
+ * Live HTML preview of the contract as currently filled in the wizard.
+ * Recomputes instantly from in-memory state — no save, no backend call.
+ */
+const livePreviewHtml = computed((): string => {
+    const f = contract.form
+    const tokenMap = buildPreviewTokenMap()
+
+    const title               = escapeHtml(f.titreContrat?.trim() || 'CONTRAT DE DOMICILIATION')
+    const companyName         = escapeHtml(f.companyName)         || '—'
+    const companyRC           = escapeHtml(f.companyRC)           || '—'
+    const companyIF           = escapeHtml(f.companyIF)           || '—'
+    const companyRepresentant = escapeHtml(f.companyRepresentant) || '—'
+    const companyCIN          = escapeHtml(f.companyCIN)          || '—'
+    const companyAdresse      = escapeHtml(f.companyAdresse || selectedAddress.value) || '—'
+
+    const societe   = escapeHtml(f.societe)   || '—'
+    const gerantNom = escapeHtml(f.gerantNom) || '—'
+    const gerantCIN = escapeHtml(f.gerantCIN) || '—'
+    const tel       = escapeHtml(f.tel)       || '—'
+    const email     = escapeHtml(f.email)     || '—'
+
+    const dateDebut      = formatPreviewDate(f.dateDebut)
+    const dateFin        = formatPreviewDate(f.dateFin)
+    const dureeMois      = f.months ? `${f.months} mois` : '—'
+    const mensuel        = tokenMap.prix_mensuel || '—'
+    const annuel         = tokenMap.prix_total   || '—'
+    const villeSignature = escapeHtml(f.ville_signature) || '__________________'
+    const dateSignature  = f.date_signature ? formatPreviewDate(f.date_signature) : '__________________'
+    const instructionNo  = escapeHtml(f.instruction_no)
+
+    const articlesHtml = orderedArticles.value.length
+        ? orderedArticles.value.map((article, index) => {
+            const safeTitle    = escapeHtml(article.title) || `Article ${index + 1}`
+            const safeBody     = escapeHtml(article.body ?? '').replace(/\n/g, '<br>')
+            const resolvedBody = resolvePreviewTokens(safeBody, tokenMap)
+            return `
+              <div style="margin-bottom:16px;page-break-inside:avoid">
+                <p style="margin:0 0 6px;font-weight:700;font-size:13px;text-transform:uppercase">
+                  Article ${index + 1} — ${safeTitle}
+                </p>
+                <p style="margin:0;line-height:1.7;text-align:justify">${resolvedBody}</p>
+              </div>`
+        }).join('')
+        : '<p style="color:#999;font-style:italic">Aucun article sélectionné pour le moment.</p>'
+
+    return `
+      <div style="font-family:Arial, sans-serif;color:#000;background:#fff;
+                  padding:40px 48px;max-width:820px;margin:0 auto;font-size:13px;line-height:1.5">
+
+        <p style="text-align:center;font-size:16px;font-weight:700;text-transform:uppercase;margin:0 0 4px">
+          ${companyName}
+        </p>
+        <p style="text-align:center;font-size:18px;font-weight:700;text-transform:uppercase;margin:0 0 6px">
+          ${title}
+        </p>
+        ${instructionNo
+            ? `<p style="text-align:center;font-size:12px;font-weight:700;margin:0 0 20px">Réf. N° ${instructionNo}</p>`
+            : '<div style="margin-bottom:20px"></div>'}
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 10px">Entre les soussignés :</p>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 5px">D'une part</p>
+        <p style="text-align:justify;margin:0 0 15px">
+          Le Centre de domiciliation <strong>${companyName}</strong>, RC <strong>${companyRC}</strong>,
+          IF : <strong>${companyIF}</strong>, sis à <strong>${companyAdresse}</strong>.<br>
+          Représenté par <strong>${companyRepresentant}</strong>, CIN <strong>${companyCIN}</strong>.
+        </p>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 5px">D'autre part</p>
+        <p style="text-align:justify;margin:0 0 8px">
+          La société <strong>${societe}</strong>, représentée par :
+        </p>
+        <ul style="list-style:none;padding-left:24px;margin:0 0 15px">
+          <li>➤ <strong>${gerantNom}</strong>, porteur de CIN/Passeport : <strong>${gerantCIN}</strong></li>
+          <li>➤ Contact : <strong>${tel}</strong> · <strong>${email}</strong></li>
+        </ul>
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:16px 0"/>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 8px">Durée et redevance</p>
+        <p style="margin:0 0 15px">
+          Période : <strong>${dateDebut}</strong> au <strong>${dateFin}</strong> (${dureeMois})<br>
+          Redevance mensuelle : <strong>${mensuel}</strong> &nbsp;|&nbsp; Redevance totale : <strong>${annuel}</strong>
+        </p>
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:16px 0"/>
+
+        <p style="font-size:15px;font-weight:700;text-decoration:underline;text-transform:uppercase;margin:0 0 14px">
+          Clauses contractuelles
+        </p>
+        ${articlesHtml}
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:24px 0 16px"/>
+
+        <p style="text-align:right;font-weight:700;margin:0 0 14px">
+          Fait à ${villeSignature}, le ${dateSignature}
+        </p>
+        <p style="text-align:center;font-style:italic;margin:0 0 20px">
+          « Signature précédée des mentions Lu et approuvé, bon pour accord »
+        </p>
+
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="width:50%;vertical-align:top;padding:10px">
+              <p style="font-weight:700;text-decoration:underline;margin:0 0 6px">La société ${companyName}</p>
+              <p style="margin:0">Représentée par Mr. <strong>${companyRepresentant}</strong></p>
+            </td>
+            <td style="width:50%;vertical-align:top;padding:10px">
+              <p style="font-weight:700;text-decoration:underline;margin:0 0 6px">La société ${societe}</p>
+              <p style="margin:0">Représentée par <strong>${gerantNom}</strong></p>
+              <p style="margin:8px 0 0;font-size:12px">
+                N° Tel : <strong>${tel}</strong><br>Email : <strong>${email}</strong>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </div>`
+})
 
 // ── Date auto-calculation ─────────────────────────────────────────────────────
 
@@ -499,22 +776,38 @@ onMounted(async () => {
         articlesStore.fetchAll(),
     ])
 })
+
+onBeforeUnmount(() => {
+    if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
+})
 </script>
 
 <template>
   <div class="space-y-5 animate-fade-up max-w-3xl mx-auto">
 
-    <!-- Page header -->
-    <div>
-      <h1 class="font-serif text-2xl" style="color:var(--app-text)">
-        Nouveau <em class="italic" style="color:#c8a96e">Contrat</em>
-      </h1>
-      <p class="text-sm mt-1" style="color:var(--app-text-muted)">
-        Étape {{ step }} sur {{ totalSteps }}
-      </p>
+    <!-- ── Page header ──────────────────────────────────────────────────────── -->
+    <div class="flex items-start justify-between gap-3 flex-wrap">
+      <div>
+        <h1 class="font-serif text-2xl" style="color:var(--app-text)">
+          Nouveau <em class="italic" style="color:#c8a96e">Contrat</em>
+        </h1>
+        <p class="text-sm mt-1" style="color:var(--app-text-muted)">
+          Étape {{ step }} sur {{ totalSteps }}
+        </p>
+      </div>
+
+      <!-- Live preview — available at every step, no save required first -->
+      <button type="button" class="btn btn-outline btn-md shrink-0" @click="openLivePreview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        Aperçu du contrat
+      </button>
     </div>
 
-    <!-- Progress bar -->
+    <!-- ── Progress bar ─────────────────────────────────────────────────────── -->
     <div class="flex items-center gap-2">
       <div
         v-for="s in totalSteps" :key="s"
@@ -525,7 +818,7 @@ onMounted(async () => {
 
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         STEP 1 — Domiciliataire profile + address + contract title
+         STEP 1 — Domiciliataire info + address selector + contract title
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-if="step === 1" class="space-y-4">
 
@@ -556,7 +849,7 @@ onMounted(async () => {
         </span>
       </div>
 
-      <!-- Domiciliataire read-only summary — now includes email and telephone -->
+      <!-- Domiciliataire read-only summary -->
       <div class="card p-5">
         <p class="text-xs uppercase tracking-widest font-bold mb-4" style="color:#c8a96e">
           Domiciliataire (depuis votre profil)
@@ -586,19 +879,10 @@ onMounted(async () => {
             <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">TP</p>
             <p style="color:var(--app-text)">{{ contract.form.companyTP || '—' }}</p>
           </div>
-          <!-- ✅ NEW: email and telephone now shown in step 1 summary -->
-          <div>
-            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Email</p>
-            <p class="truncate" style="color:var(--app-text)">{{ contract.form.companyEmail || '—' }}</p>
-          </div>
-          <div>
-            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Téléphone</p>
-            <p style="color:var(--app-text)">{{ contract.form.companyTelephone || '—' }}</p>
-          </div>
         </div>
       </div>
 
-      <!-- Dynamic contract title -->
+      <!-- ── Dynamic contract title (client chooses the name shown on the PDF) -->
       <div class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Titre du contrat
@@ -616,7 +900,6 @@ onMounted(async () => {
             le titre par défaut « Contrat de Domiciliation ».
           </p>
         </div>
-        <!-- Live preview -->
         <div
           v-if="contract.form.titreContrat.trim()"
           class="rounded-xl px-4 py-3 text-sm text-center font-semibold tracking-wide"
@@ -633,7 +916,7 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Address chip selector -->
+      <!-- ── Address selector ──────────────────────────────────────────────── -->
       <div class="card p-5 space-y-4">
         <div class="flex items-center justify-between flex-wrap gap-2">
           <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
@@ -688,7 +971,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Fallback: manual input when profile has no addresses -->
         <div v-else class="space-y-3">
           <div class="flex items-start gap-3 rounded-xl px-4 py-3 text-sm"
                style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:#f59e0b">
@@ -708,7 +990,7 @@ onMounted(async () => {
           <div>
             <label class="f-label">Saisir l'adresse manuellement *</label>
             <input v-model="selectedAddress" class="f-input"
-                   placeholder="Ex : Rue Mohammed V, Résidence Atlas, 80000"
+                   placeholder="Ex : Rue Mohammed V, Résidence Atlas, Agadir 80000"
                    @input="contract.form.companyAdresse = selectedAddress" />
           </div>
         </div>
@@ -739,7 +1021,6 @@ onMounted(async () => {
         </button>
       </div>
 
-      <!-- Existing client mode -->
       <div v-if="clientMode === 'select'" class="space-y-4">
         <div class="relative">
           <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
@@ -789,7 +1070,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- Selected client summary card — now shows dateNaissance -->
         <div v-if="selectedClient" class="card p-5 space-y-3">
           <p class="text-xs uppercase tracking-widest font-bold" style="color:#22c55e">
             ✓ Client sélectionné
@@ -811,10 +1091,6 @@ onMounted(async () => {
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Gérant</p>
               <p style="color:var(--app-text)">{{ contract.form.gerantNom }}</p>
             </div>
-            <div v-if="contract.form.gerantCIN">
-              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">CIN / Passeport</p>
-              <p style="color:var(--app-text)">{{ contract.form.gerantCIN }}</p>
-            </div>
             <div v-if="contract.form.tel">
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Téléphone</p>
               <p style="color:var(--app-text)">{{ contract.form.tel }}</p>
@@ -823,20 +1099,10 @@ onMounted(async () => {
               <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Email</p>
               <p class="truncate" style="color:var(--app-text)">{{ contract.form.email }}</p>
             </div>
-            <div v-if="contract.form.adressePerso">
-              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Adresse personnelle</p>
-              <p style="color:var(--app-text)">{{ contract.form.adressePerso }}</p>
-            </div>
-            <!-- ✅ NEW: date de naissance now shown in existing-client summary -->
-            <div v-if="contract.form.dateNaissance">
-              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Date de naissance</p>
-              <p style="color:var(--app-text)">{{ contract.form.dateNaissance }}</p>
-            </div>
           </div>
         </div>
       </div>
 
-      <!-- New client creation form — includes date de naissance -->
       <div v-else-if="clientMode === 'create'" class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Informations du nouveau client
@@ -849,7 +1115,7 @@ onMounted(async () => {
           </div>
           <div>
             <label class="f-label">Forme juridique</label>
-            <input v-model="newClientForm.forme_juridique" class="f-input" placeholder="SARL, SA..." />
+            <input v-model="newClientForm.forme_juridique" class="f-input" placeholder="SARL, SA, SAS..." />
           </div>
           <div>
             <label class="f-label">Nom du gérant *</label>
@@ -859,9 +1125,8 @@ onMounted(async () => {
             <label class="f-label">CIN / Passeport</label>
             <input v-model="newClientForm.gerantCIN" class="f-input" placeholder="BJ422176" />
           </div>
-          <!-- ✅ date de naissance — required by certain contract clause tokens -->
           <div>
-            <label class="f-label">Date de naissance du gérant</label>
+            <label class="f-label">Date de naissance</label>
             <input v-model="newClientForm.dateNaissance" type="date" class="f-input" />
           </div>
           <div>
@@ -879,13 +1144,13 @@ onMounted(async () => {
                    placeholder="Min. 8 caractères" />
           </div>
           <div class="sm:col-span-2">
-            <label class="f-label">Adresse personnelle du gérant</label>
+            <label class="f-label">Adresse personnelle</label>
             <input v-model="newClientForm.adressePerso" class="f-input"
-                   placeholder="Adresse de résidence du gérant" />
+                   placeholder="Adresse personnelle du gérant" />
           </div>
         </div>
         <p class="text-xs" style="color:var(--app-text-faint)">
-          Un compte portail sera créé avec cet email et ce mot de passe.
+          Un compte client sera créé avec cet email et ce mot de passe.
         </p>
       </div>
 
@@ -897,7 +1162,6 @@ onMounted(async () => {
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-else-if="step === 3" class="space-y-5">
 
-      <!-- Article chip library -->
       <div class="card p-5">
         <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
           <div>
@@ -915,12 +1179,6 @@ onMounted(async () => {
         </div>
 
         <div class="flex flex-wrap gap-2">
-          <!--
-            CRITICAL: :style reads selectedArticleIds.includes(String(article.id))
-            — NEVER any flag from the article object itself.
-            articlesStore.items is shared; a flag on the object would affect
-            all chip renders simultaneously.
-          -->
           <button
             v-for="article in articlesStore.items"
             :key="String(article.id)"
@@ -941,7 +1199,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Selected articles: drag-to-reorder + inline body editor -->
       <div v-if="orderedArticles.length > 0" class="card p-5">
         <div class="flex items-center justify-between mb-4">
           <div>
@@ -960,9 +1217,11 @@ onMounted(async () => {
             :key="String(article.id)"
             draggable="true"
             class="rounded-xl transition-all"
-            :style="`border: 2px solid ${dragIndex === index ? '#c8a96e' : 'var(--app-border)'};
-                     opacity: ${dragIndex === index ? 0.45 : 1};
-                     background: var(--app-surface-2);`"
+            :style="`
+              border: 2px solid ${dragIndex === index ? '#c8a96e' : 'var(--app-border)'};
+              opacity: ${dragIndex === index ? 0.45 : 1};
+              background: var(--app-surface-2);
+            `"
             @dragstart="onDragStart(index, $event)"
             @dragover="onDragOver(index, $event)"
             @drop="onDrop(index)"
@@ -988,7 +1247,7 @@ onMounted(async () => {
                 @click.stop
               />
               <button type="button"
-                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors"
+                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors nav-inactive"
                       @click.stop="article._expanded = !article._expanded">
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                      stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
@@ -1030,7 +1289,6 @@ onMounted(async () => {
           </div>
         </div>
 
-        <!-- PDF order summary -->
         <div class="mt-4 rounded-xl p-4"
              style="background:var(--app-surface);border:1px solid var(--app-border)">
           <p class="text-[10px] uppercase tracking-widest font-bold mb-2"
@@ -1047,7 +1305,6 @@ onMounted(async () => {
         </div>
       </div>
 
-      <!-- Empty state -->
       <div v-else class="rounded-xl p-8 text-center"
            style="background:var(--app-surface-2);border:2px dashed var(--app-border);color:var(--app-text-faint)">
         <svg class="mx-auto mb-3 opacity-40" width="32" height="32" viewBox="0 0 24 24"
@@ -1056,10 +1313,9 @@ onMounted(async () => {
           <polyline points="14 2 14 8 20 8"/>
         </svg>
         <p class="font-medium mb-1">Aucun article sélectionné</p>
-        <p class="text-sm">Le PDF sera généré sans clauses contractuelles.</p>
+        <p class="text-sm">Le PDF sera généré sans articles de contrat.</p>
       </div>
 
-      <!-- Financial fields -->
       <div class="card p-5 space-y-4">
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
           Durée et montants
@@ -1125,7 +1381,7 @@ onMounted(async () => {
 
 
     <!-- ══════════════════════════════════════════════════════════════════════
-         STEP 4 — Confirmation + PDF preview + renewal
+         STEP 4 — Confirmation + PDF preview / download (fixed)
     ══════════════════════════════════════════════════════════════════════ -->
     <div v-else-if="step === 4" class="space-y-4">
       <div class="card p-6 text-center space-y-4">
@@ -1147,12 +1403,10 @@ onMounted(async () => {
             — statut : brouillon
           </p>
         </div>
-
-        <!-- PDF actions -->
         <button class="btn btn-gold btn-lg w-full sm:w-auto" @click="preparePdf">
           Préparer le PDF
         </button>
-        <div v-if="pdfStreamUrl" class="flex flex-col sm:flex-row gap-3 justify-center">
+        <div v-if="pdfReady" class="flex flex-col sm:flex-row gap-3 justify-center">
           <button class="btn btn-outline btn-md" @click="openPreview">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
@@ -1161,41 +1415,24 @@ onMounted(async () => {
             </svg>
             Aperçu PDF
           </button>
-          <a :href="buildStreamUrl('download')" target="_blank" class="btn btn-gold btn-md">
+          <button class="btn btn-gold btn-md" :disabled="downloadingPdf" @click="downloadPdf">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
                  stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
               <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
               <polyline points="7 10 12 15 17 10"/>
               <line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
-            Télécharger PDF
-          </a>
-        </div>
-
-        <!-- Navigation and renewal -->
-        <div class="flex flex-col sm:flex-row gap-3 justify-center pt-2">
-          <NuxtLink to="/admin/contrats" class="btn btn-outline btn-md">
-            Voir tous les contrats →
-          </NuxtLink>
-          <!-- ✅ NEW: Renew contract button -->
-          <button
-            class="btn btn-outline btn-md"
-            :disabled="renewing"
-            @click="renewContract"
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
-                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-              <path d="M23 4v6h-6"/><path d="M1 20v-6h6"/>
-              <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
-            </svg>
-            {{ renewing ? 'Renouvellement...' : 'Renouveler le contrat' }}
+            {{ downloadingPdf ? 'Téléchargement...' : 'Télécharger PDF' }}
           </button>
         </div>
+        <NuxtLink to="/admin/contrats" class="btn btn-outline btn-md w-full sm:w-auto">
+          Voir tous les contrats →
+        </NuxtLink>
       </div>
     </div>
 
 
-    <!-- Navigation buttons (steps 1–3) -->
+    <!-- ── Navigation buttons (steps 1–3) ────────────────────────────────────── -->
     <div v-if="step < 4" class="flex justify-between gap-3 pt-2">
       <button v-if="step > 1" type="button" class="btn btn-outline btn-md" @click="prevStep">
         ← Retour
@@ -1212,7 +1449,7 @@ onMounted(async () => {
     </div>
 
 
-    <!-- PDF fullscreen preview modal -->
+    <!-- ── PDF fullscreen preview modal — blob-based (fixed) ─────────────────── -->
     <ClientOnly>
       <Teleport to="body">
         <div v-if="showPreview" class="fixed inset-0 z-300 flex flex-col"
@@ -1238,13 +1475,46 @@ onMounted(async () => {
                 <p class="text-sm">Chargement du PDF...</p>
               </div>
             </div>
-            <!-- iframe loads from the public stream route outside auth:sanctum -->
-            <iframe :src="pdfStreamUrl" class="w-full h-full"
-                    style="border:none;display:block" @load="pdfLoading = false" />
+            <div v-else-if="previewError" class="absolute inset-0 flex items-center justify-center p-6">
+              <div class="text-center text-white max-w-sm space-y-3">
+                <p class="text-sm">{{ previewError }}</p>
+                <button class="btn btn-outline btn-sm" @click="openPreview">Réessayer</button>
+              </div>
+            </div>
+            <!-- blob: URL — always same-origin, never blocked by framing rules -->
+            <iframe v-else :src="previewObjectUrl" class="w-full h-full"
+                    style="border:none;display:block" />
           </div>
         </div>
       </Teleport>
     </ClientOnly>
 
+    <!-- ── Live contract preview modal (available at any step) ────────────────── -->
+    <ClientOnly>
+      <Teleport to="body">
+        <div v-if="showLivePreview" class="fixed inset-0 z-300 flex flex-col"
+             style="background:rgba(0,0,0,0.92)">
+          <div class="flex items-center justify-between px-5 py-3 shrink-0"
+               style="background:rgba(0,0,0,0.6);border-bottom:1px solid rgba(255,255,255,0.1)">
+            <span class="font-medium text-white">
+              Aperçu — {{ contract.form.titreContrat || 'Contrat de Domiciliation' }}
+            </span>
+            <button class="w-9 h-9 rounded-xl flex items-center justify-center text-white"
+                    style="background:rgba(255,255,255,0.1)" @click="closeLivePreview">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 sm:p-8">
+            <div class="rounded-xl overflow-hidden shadow-2xl mx-auto" style="max-width:900px">
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-html="livePreviewHtml" />
+            </div>
+          </div>
+        </div>
+      </Teleport>
+    </ClientOnly>
   </div>
-</template> 
+</template>

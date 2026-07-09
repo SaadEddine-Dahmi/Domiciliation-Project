@@ -5,61 +5,62 @@
 // Manages the full lifecycle of domiciliation contracts.
 //
 // Routes served:
-//   GET    /api/contrats                   -> index
-//   POST   /api/contrats                   -> store        (create draft)
-//   GET    /api/contrats/{id}              -> show
-//   PUT    /api/contrats/{id}              -> update
-//   POST   /api/contrats/{id}/activate     -> activate
-//   POST   /api/contrats/{id}/terminate    -> terminate
-//   POST   /api/contrats/{id}/renew        -> renew
-//   POST   /api/contrats/{id}/pdf          -> generatePdf   (render + save to disk)
-//   GET    /api/contrats/{id}/pdf/stream   -> streamPdf     (inline iframe preview)
+//   GET    /api/contrats                   → index
+//   POST   /api/contrats                   → store  (create draft)
+//   GET    /api/contrats/{id}              → show
+//   PUT    /api/contrats/{id}              → update
+//   POST   /api/contrats/{id}/activate     → activate
+//   POST   /api/contrats/{id}/terminate    → terminate
+//   POST   /api/contrats/{id}/pdf          → generatePdf  (render + save to disk)
+//   GET    /api/contrats/{id}/pdf/stream   → streamPdf    (authenticated preview/download)
 //
-// ── CRITICAL: entreprise.representant eager-load ────────────────────────
+// ── CRITICAL: entreprise.representant eager-load ───────────────────────────────
 //   The Blade template reads gerant_nom, gerant_cin, tel, email from the
 //   entreprise object. These fields do NOT exist on the entreprises table.
 //   They live in the representants table (hasOne Representant on Entreprise).
-//   Every query that feeds the PDF must eager-load entreprise.representant,
+//   Every query that feeds the PDF must eager-load entreprise.representant
 //   and the Blade receives a virtual-attribute-enriched entreprise object
 //   via prepareEntrepriseForPdf().
 //
-// ── renewedTo eager-load in index()/show() ──────────────────────────────
-//   Lets the frontend know whether a contract has ALREADY been renewed so
-//   it can hide the "Renew" button. Without this, the JSON response would
-//   never include renewed_to, and the frontend would always think a
-//   contract can still be renewed.
+// ── titre_contrat ──────────────────────────────────────────────────────────────
+//   Stored exactly as the domiciliataire typed it in wizard step 1 — this is
+//   the free-text title the client chooses for their own contract. The
+//   fallback 'Contrat de Domiciliation' is applied ONLY in store()/update()
+//   when the field arrives null or empty; nothing is hardcoded upstream of that.
 //
-// ── titre_contrat ────────────────────────────────────────────────────────
-//   Fully dynamic — the person creating the contract types the exact title
-//   printed at the top of the PDF. Stored exactly as typed. The fallback
-//   'Contrat de Domiciliation' is applied ONLY in store() and renew() when
-//   the field arrives null or empty.
-//
-// ── syncArticles() ───────────────────────────────────────────────────────
-//   Article primary keys are integer auto-increment.
+// ── syncArticles() ─────────────────────────────────────────────────────────────
+//   Article PKs are integer auto-increment.
 //   The frontend sends them as strings (String(a.id) in the wizard).
-//   Accepted formats: [{id:"3",ordre:1}] or a flat array [3, 14].
+//   Accepted formats: [{id:"3",ordre:1}] or flat [3,14].
 //   IDs resolving to <= 0 are silently skipped.
 //
-// ── renew() ──────────────────────────────────────────────────────────────
-//   POST /api/contrats/{id}/renew
+// ── streamPdf() ────────────────────────────────────────────────────────────────
+//   FIX (previous bug — "localhost refused to connect" in the wizard preview):
+//   This route used to be registered OUTSIDE auth:sanctum and the response
+//   used to set 'X-Frame-Options: SAMEORIGIN'. The frontend also used to
+//   point the wizard's preview <iframe> directly at this raw URL. Two
+//   problems resulted from that setup:
 //
-//   Creates a brand new draft contract (never modifies the source):
-//     - copies entreprise_id, titre_contrat, financial fields, and
-//       metadata from the source contract, all overridable in the
-//       request body
-//     - sets renewed_from_id to the source contract's id
-//     - computes date_debut / date_fin unless the caller overrides them,
-//       continuing immediately after the source contract's end date
-//     - duplicates the article selection with the same display order
+//     1. X-Frame-Options: SAMEORIGIN silently blocks framing whenever the
+//        parent page (the Nuxt frontend) and this response (the Laravel API)
+//        are on different origins — true by default in local dev (different
+//        ports) and usually true in production too (separate subdomains).
+//        The browser rendered this as a connection-refused-style page even
+//        though the HTTP request itself succeeded. The download link kept
+//        working because X-Frame-Options only restricts framing, never
+//        normal top-level navigation (<a target="_blank">).
+//     2. This method had NO tenant scoping at all — any contract ID could be
+//        streamed by anyone, authenticated or not, exposing client CIN,
+//        phone, address and pricing data with zero access control.
 //
-//   Guarded by Contrat::isRenewable() — see the model for the exact rule.
-//
-// ── streamPdf() ──────────────────────────────────────────────────────────
-//   Registered OUTSIDE auth:sanctum in routes/api.php.
-//   A browser <iframe src="..."> cannot attach Authorization: Bearer.
-//   If this route were inside auth:sanctum, every preview attempt would
-//   receive a 401 and the iframe would render blank instead of the PDF.
+//   FIX APPLIED: the frontend now fetches this URL with fetch() and a normal
+//   Authorization: Bearer header, then renders the response as a same-origin
+//   blob: URL inside the <iframe> (see pages/admin/contrat.vue). blob: URLs
+//   are always same-origin, so no X-Frame-Options/CSP framing rule can ever
+//   block them again. Because we no longer rely on a bare <iframe src> or
+//   <a href> that can't carry headers, this route now lives inside
+//   auth:sanctum like every other contract endpoint, and is scoped to the
+//   authenticated domiciliataire exactly like index()/show()/update() below.
 
 namespace App\Http\Controllers\Api;
 
@@ -68,18 +69,16 @@ use App\Models\Contrat;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
-use Illuminate\Support\Facades\DB;
 
 class ContratController extends Controller
 {
-    // ── Index ────────────────────────────────────────────────────────────
+    // ── Index ──────────────────────────────────────────────────────────────────
 
     /**
      * GET /api/contrats
      *
      * Returns all contracts belonging to the authenticated domiciliataire,
-     * with their related entreprise, ordered articles, and renewal status
-     * eager-loaded.
+     * with their related entreprise and ordered articles eager-loaded.
      */
     public function index(Request $request)
     {
@@ -89,7 +88,6 @@ class ContratController extends Controller
             ->with([
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                'renewedTo:id,renewed_from_id',
             ])
             ->latest()
             ->get();
@@ -97,14 +95,13 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrats]);
     }
 
-    // ── Show ─────────────────────────────────────────────────────────────
+    // ── Show ───────────────────────────────────────────────────────────────────
 
     /**
      * GET /api/contrats/{id}
      *
-     * Returns one contract with its ordered articles and renewal status
-     * eagerly loaded. IDOR guard: scoped to the authenticated
-     * domiciliataire.
+     * Returns one contract with its ordered articles eagerly loaded.
+     * IDOR guard: scoped to the authenticated domiciliataire.
      */
     public function show(string $id)
     {
@@ -114,26 +111,25 @@ class ContratController extends Controller
             ->with([
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                'renewedTo:id,renewed_from_id',
             ])
             ->findOrFail($id);
 
         return response()->json(['success' => true, 'data' => $contrat]);
     }
 
-    // ── Store ────────────────────────────────────────────────────────────
+    // ── Store ──────────────────────────────────────────────────────────────────
 
     /**
      * POST /api/contrats
      *
-     * Creates a new draft contract and writes the selected articles with
-     * their display order into the contrat_articles pivot table via
-     * syncArticles().
+     * Creates a new draft contract and writes the selected articles with their
+     * display order into the contrat_articles pivot table via syncArticles().
      *
      * titre_contrat:
-     *   Defaults to 'Contrat de Domiciliation' only when null or empty.
-     *   This is the single place that default is applied for new
-     *   (non-renewal) contracts.
+     *   This is the freely-editable name the domiciliataire chose for this
+     *   contract in wizard step 1. It defaults to 'Contrat de Domiciliation'
+     *   ONLY when it arrives null or empty. This is the ONLY place that
+     *   default is applied.
      */
     public function store(Request $request)
     {
@@ -185,7 +181,7 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrat], 201);
     }
 
-    // ── Update ───────────────────────────────────────────────────────────
+    // ── Update ─────────────────────────────────────────────────────────────────
 
     /**
      * PUT /api/contrats/{id}
@@ -247,7 +243,7 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrat]);
     }
 
-    // ── Activate ─────────────────────────────────────────────────────────
+    // ── Activate ───────────────────────────────────────────────────────────────
 
     /**
      * POST /api/contrats/{id}/activate
@@ -271,7 +267,7 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrat->fresh()]);
     }
 
-    // ── Terminate ────────────────────────────────────────────────────────
+    // ── Terminate ──────────────────────────────────────────────────────────────
 
     /**
      * POST /api/contrats/{id}/terminate
@@ -295,132 +291,14 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrat->fresh()]);
     }
 
-    // ── Renew ────────────────────────────────────────────────────────────
-
-    /**
-     * POST /api/contrats/{id}/renew
-     *
-     * Renews an expired or active contract by creating a brand new draft
-     * contract that continues where the source contract left off. The
-     * source contract itself is never modified.
-     *
-     * Request body (all fields optional — sensible server-computed
-     * defaults are used when omitted):
-     *
-     *   titre_contrat  - defaults to source.titre_contrat. Fully dynamic;
-     *                    the person can type any title for the renewed
-     *                    document — it does not have to match the source.
-     *   date_debut     - defaults to source.date_fin + 1 day, or today if
-     *                    the source has no date_fin.
-     *   duree_mois     - defaults to source.duree_mois, or 12 if unset.
-     *   prix_mensuel   - defaults to source.prix_mensuel.
-     *   prix_total     - defaults to source.prix_total.
-     *   carry_articles - boolean, default true. When false, the new
-     *                    contract starts with no articles instead of a
-     *                    copy of the source's clause selection.
-     *
-     * IDOR guard: the source contract is scoped to the authenticated
-     * domiciliataire, exactly like every other method in this controller.
-     */
-    public function renew(Request $request, string $id)
-    {
-        $user = auth()->user();
-
-        $source = Contrat::where('domiciliataire_id', $user->id)
-            ->with(['articles' => fn($q) => $q->orderBy('contrat_articles.ordre')])
-            ->findOrFail($id);
-
-        if (!$source->isRenewable()) {
-            return response()->json([
-                'success' => false,
-                'message' => $source->renewedTo()->exists()
-                    ? 'Ce contrat a déjà été renouvelé.'
-                    : 'Seul un contrat actif ou expiré peut être renouvelé.',
-            ], 422);
-        }
-
-        $data = $request->validate([
-            'date_debut' => ['nullable', 'date'],
-            'duree_mois' => ['nullable', 'integer', 'min:1'],
-            'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
-            'prix_total' => ['nullable', 'numeric', 'min:0'],
-            'titre_contrat' => ['nullable', 'string', 'max:255'],
-            'carry_articles' => ['nullable', 'boolean'],
-        ]);
-
-        $dureeMois = $data['duree_mois'] ?? $source->duree_mois ?? 12;
-
-        [$dateDebut, $dateFin] = $this->computeRenewalDates(
-            $source,
-            $data['date_debut'] ?? null,
-            $dureeMois
-        );
-
-        $carryArticles = $data['carry_articles'] ?? true;
-
-        // Resolve the title before the transaction: null-coalesce the
-        // (possibly absent) request value first, then apply the fallback
-        // chain, so we never touch an undefined array key directly.
-        $titreContrat = ($data['titre_contrat'] ?? null)
-            ?: ($source->titre_contrat ?: 'Contrat de Domiciliation');
-
-        $renewal = DB::transaction(function () use ($source, $data, $dateDebut, $dateFin, $dureeMois, $carryArticles, $titreContrat) {
-            $new = Contrat::create([
-                'renewed_from_id' => $source->id,
-                'domiciliataire_id' => $source->domiciliataire_id,
-                'entreprise_id' => $source->entreprise_id,
-                'titre_contrat' => $titreContrat,
-                'date_debut' => $dateDebut,
-                'date_fin' => $dateFin,
-                'duree_mois' => $dureeMois,
-                'prix_mensuel' => $data['prix_mensuel'] ?? $source->prix_mensuel,
-                'prix_total' => $data['prix_total'] ?? $source->prix_total,
-                'instruction_no' => $source->instruction_no,
-                'ville_signature' => $source->ville_signature,
-                'date_signature' => null, // new contract, not yet signed
-                'caution' => $source->caution,
-                'mode_paiement' => $source->mode_paiement,
-                'statut' => 'draft', // always starts as draft, like any new contract
-                'notification_delay_months' => $source->notification_delay_months,
-            ]);
-
-            // Duplicate the article selection, preserving display order.
-            // We intentionally do NOT reuse syncArticles() here: the source
-            // data is already shaped as {article_id => ['ordre' => n]} via
-            // the loaded pivot, not the raw request array syncArticles()
-            // expects from the frontend.
-            if ($carryArticles && $source->articles->isNotEmpty()) {
-                $pivotData = $source->articles->mapWithKeys(fn($article) => [
-                    $article->id => ['ordre' => $article->pivot->ordre],
-                ])->toArray();
-
-                $new->articles()->sync($pivotData);
-            }
-
-            return $new;
-        });
-
-        $renewal->load([
-            'entreprise.representant',
-            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Contrat renouvelé — nouveau brouillon créé.',
-            'data' => $renewal,
-        ], 201);
-    }
-
-    // ── Generate PDF (save to disk) ──────────────────────────────────────
+    // ── Generate PDF (save to disk) ────────────────────────────────────────────
 
     /**
      * POST /api/contrats/{id}/pdf
      *
-     * Renders the Blade template via dompdf, resolves all {{variable}}
-     * tokens in article bodies, saves the output to
-     * storage/app/public/contrats/, updates pdf_path on the record, and
-     * returns the public Storage URL.
+     * Renders the Blade template via dompdf, resolves all {{variable}} tokens
+     * in article bodies, saves the output to storage/app/public/contrats/,
+     * updates pdf_path on the record, and returns the public Storage URL.
      */
     public function generatePdf(string $id)
     {
@@ -434,16 +312,17 @@ class ContratController extends Controller
             ])
             ->findOrFail($id);
 
-        // Enrich the entreprise object with virtual attributes the Blade
-        // expects. The Blade reads $contrat->entreprise->gerant_nom etc.,
-        // which are not real columns — they come from the representants
-        // table via the entreprise->representant relation.
+        // Enrich the entreprise object with virtual attributes the Blade expects.
+        // The Blade reads $contrat->entreprise->gerant_nom etc. which are not real
+        // columns — they come from the representants table via the representant relation.
         $this->prepareEntrepriseForPdf($contrat);
 
+        // Build the {{variable}} → resolved value map
         $tokenMap = $this->buildTokenMap($contrat);
 
-        // Resolve tokens in every article body BEFORE Blade touches the
-        // string, since the Blade uses e() to HTML-escape.
+        // Resolve tokens in every article body before passing to Blade.
+        // The Blade uses {!! nl2br(e($article->body)) !!} — e() HTML-escapes,
+        // so we must resolve tokens BEFORE the Blade touches the string.
         $resolvedArticles = $contrat->articles->map(function ($article) use ($tokenMap) {
             $clone = clone $article;
             $clone->body = $this->resolveTokens($article->body ?? '', $tokenMap);
@@ -468,43 +347,54 @@ class ContratController extends Controller
         ]);
     }
 
-    // ── Stream PDF (inline iframe preview) ───────────────────────────────
+    // ── Stream PDF (authenticated preview / download) ─────────────────────────
 
     /**
-     * GET /api/contrats/{id}/pdf/stream
+     * GET /api/contrats/{id}/pdf/stream?mode=preview|download
      *
-     * Streams the contract PDF inline for <iframe> preview.
+     * Streams the contract PDF for the wizard's "Aperçu du contrat" preview
+     * and its "Télécharger PDF" button.
      *
-     * WHY THIS ROUTE IS OUTSIDE auth:sanctum:
-     *   A browser <iframe src="..."> issues a plain GET with no custom
-     *   headers. It is architecturally impossible to attach
-     *   Authorization: Bearer to an iframe sub-resource request. This
-     *   route is registered BEFORE the auth:sanctum middleware group in
-     *   routes/api.php.
+     * IDOR guard: scoped to the authenticated domiciliataire, same as every
+     * other method in this controller.
      *
-     * Fast path: serves the file from disk if pdf_path is set and exists.
-     * Live path: renders on-the-fly with tokens resolved (preview before
-     * the first save).
+     * ?mode=preview  (default) → Content-Disposition: inline     (shown in the modal)
+     * ?mode=download           → Content-Disposition: attachment (forces a save dialog)
+     *
+     * Fast path: serves the file from disk if pdf_path is set and the file exists.
+     * Live path: renders on-the-fly with tokens resolved (preview before first save).
      */
-    public function streamPdf(string $id)
+    public function streamPdf(Request $request, string $id)
     {
-        $contrat = Contrat::with([
-            'entreprise.representant',
-            'domiciliataire',
-            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-        ])->findOrFail($id);
+        $user = auth()->user();
+
+        $contrat = Contrat::where('domiciliataire_id', $user->id)
+            ->with([
+                'entreprise.representant',
+                'domiciliataire',
+                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+            ])
+            ->findOrFail($id);
+
+        $disposition = $request->query('mode') === 'download' ? 'attachment' : 'inline';
 
         $headers = [
             'Content-Type' => 'application/pdf',
-            'Content-Disposition' => 'inline; filename="contrat_' . $contrat->id . '.pdf"',
+            'Content-Disposition' => $disposition . '; filename="contrat_' . $contrat->id . '.pdf"',
             'Cache-Control' => 'no-store, no-cache, must-revalidate',
-            'X-Frame-Options' => 'SAMEORIGIN',
+            // Intentionally NOT setting X-Frame-Options here — see the class-level
+            // comment above for why the old 'SAMEORIGIN' value broke the wizard's
+            // preview iframe. If you later want to restrict which sites can embed
+            // contract PDFs, use a Content-Security-Policy 'frame-ancestors'
+            // directive naming your actual frontend domain instead.
         ];
 
+        // Fast path: serve the previously generated and saved file
         if ($contrat->pdf_path && Storage::disk('public')->exists($contrat->pdf_path)) {
             return response(Storage::disk('public')->get($contrat->pdf_path), 200, $headers);
         }
 
+        // Live preview path: render on-the-fly without saving to disk
         $this->prepareEntrepriseForPdf($contrat);
         $tokenMap = $this->buildTokenMap($contrat);
         $resolvedArticles = $contrat->articles->map(function ($article) use ($tokenMap) {
@@ -521,20 +411,24 @@ class ContratController extends Controller
         return response($pdf->output(), 200, $headers);
     }
 
-    // ── Private helpers ──────────────────────────────────────────────────
+    // ── Private helpers ────────────────────────────────────────────────────────
 
     /**
-     * Enrich the entreprise relation with virtual attributes the Blade
-     * template reads as direct properties.
+     * Enrich the entreprise relation with virtual attributes the Blade template
+     * reads as direct properties.
      *
-     * The Blade reads $contrat->entreprise->gerant_nom, ->gerant_cin,
-     * ->tel, ->email, ->nom_societe. None of these (except raison_sociale)
-     * exist as real columns on the entreprises table — the real data
-     * lives in the representants table via entreprise->representant.
+     * WHY THIS IS NEEDED:
+     *   The Blade reads $contrat->entreprise->gerant_nom, ->gerant_cin, ->tel,
+     *   ->email, ->nom_societe. None of these (except raison_sociale) exist as
+     *   real columns on the entreprises table. The real data is in the
+     *   representants table via the entreprise->representant hasOne relation.
      *
-     * Rather than rewriting the Blade, we inject the missing attributes
-     * directly onto the Eloquent model instance using setAttribute().
-     * This only affects the in-memory object, never the database row.
+     *   Rather than rewriting the Blade, we inject the missing attributes
+     *   directly onto the Eloquent model instance using setAttribute().
+     *   This is safe and non-destructive — it only affects the in-memory object,
+     *   not the database row.
+     *
+     * @param Contrat $contrat  Must have entreprise.representant eager-loaded
      */
     private function prepareEntrepriseForPdf(Contrat $contrat): void
     {
@@ -544,11 +438,13 @@ class ContratController extends Controller
         if (!$entreprise)
             return;
 
+        // nom_societe: Blade reads this but the column is raison_sociale
         $entreprise->setAttribute(
             'nom_societe',
             $entreprise->raison_sociale ?? ''
         );
 
+        // gerant_nom: from representant nom + prenom (or nom_complet if your model adds it)
         $entreprise->setAttribute(
             'gerant_nom',
             $representant
@@ -556,10 +452,26 @@ class ContratController extends Controller
             : ''
         );
 
-        $entreprise->setAttribute('gerant_cin', $representant?->cin ?? '');
-        $entreprise->setAttribute('tel', $representant?->telephone ?? '');
-        $entreprise->setAttribute('email', $representant?->email ?? '');
+        // gerant_cin: from representant.cin
+        $entreprise->setAttribute(
+            'gerant_cin',
+            $representant?->cin ?? ''
+        );
 
+        // tel: from representant.telephone
+        $entreprise->setAttribute(
+            'tel',
+            $representant?->telephone ?? ''
+        );
+
+        // email: from representant.email
+        $entreprise->setAttribute(
+            'email',
+            $representant?->email ?? ''
+        );
+
+        // adresse: use representant adresse for the "Demeurant à" line,
+        // fall back to entreprise adresse for the domiciliation address
         $entreprise->setAttribute(
             'adresse',
             $representant?->adresse ?? $entreprise->adresse ?? ''
@@ -567,19 +479,20 @@ class ContratController extends Controller
     }
 
     /**
-     * Build the complete {{variable}} -> resolved value map from a loaded
-     * Contrat.
+     * Build the complete {{variable}} → resolved value map from a loaded Contrat.
      *
-     * Every key here is a token the domiciliataire can write inside an
-     * article body: {{raison_sociale}}, {{domiciliataire_rc}},
-     * {{date_debut}}, etc.
+     * Every key here is a token the domiciliataire can write inside an article
+     * body: {{raison_sociale}}, {{domiciliataire_rc}}, {{date_debut}}, etc.
      *
      * To add a new variable:
-     *   1. Add the key -> value pair in this method.
+     *   1. Add the key → value pair in this method.
      *   2. Document it for the domiciliataire (help text, tooltip, etc.).
-     *   resolveTokens() picks it up automatically — no other change needed.
+     *   resolveTokens() picks it up automatically — no other changes needed.
      *
-     * Requires: entreprise.representant + domiciliataire eager-loaded.
+     * Requires: entreprise.representant + domiciliataire eager-loaded on $contrat.
+     *
+     * @param  Contrat $contrat
+     * @return array<string, string>
      */
     private function buildTokenMap(Contrat $contrat): array
     {
@@ -587,16 +500,18 @@ class ContratController extends Controller
         $representant = $entreprise?->representant;
         $domiciliataire = $contrat->domiciliataire;
 
+        // Helper: format a decimal as "1 500,00 DH"
         $fmt = fn($v) => $v !== null
             ? number_format((float) $v, 2, ',', ' ') . ' DH'
             : '';
 
+        // Helper: format a date column as dd/mm/yyyy
         $date = fn($v) => $v
             ? \Carbon\Carbon::parse($v)->format('d/m/Y')
             : '';
 
         return [
-            // ── Domiciliataire (service provider) ────────────────────────
+            // ── Domiciliataire (service provider) ────────────────────────────
             'domiciliataire_nom' => $domiciliataire?->nom_societe ?? '',
             'domiciliataire_rc' => $domiciliataire?->rc ?? '',
             'domiciliataire_if' => $domiciliataire?->if_fiscal ?? '',
@@ -604,14 +519,14 @@ class ContratController extends Controller
             'domiciliataire_adresse' => $domiciliataire?->adresse ?? '',
             'domiciliataire_representant' => $domiciliataire?->representant_legal ?? '',
 
-            // ── Client / domicilié ────────────────────────────────────────
+            // ── Client / domicilié ────────────────────────────────────────────
             'raison_sociale' => $entreprise?->raison_sociale ?? '',
             'societe' => $entreprise?->raison_sociale ?? '',
             'forme_juridique' => $entreprise?->forme_juridique ?? '',
             'adresse_domiciliation' => $entreprise?->adresse ?? '',
             'ville_client' => $entreprise?->ville ?? '',
 
-            // ── Legal representative ──────────────────────────────────────
+            // ── Legal representative (gérant) ─────────────────────────────────
             'gerant_nom' => trim(
                 ($representant?->nom ?? '') . ' ' .
                 ($representant?->prenom ?? '')
@@ -626,7 +541,7 @@ class ContratController extends Controller
             'gerant_nationalite' => $representant?->nationalite ?? '',
             'date_naissance' => $date($representant?->date_naissance),
 
-            // ── Contract dates and duration ────────────────────────────────
+            // ── Contract dates and duration ────────────────────────────────────
             'date_debut' => $date($contrat->date_debut),
             'date_fin' => $date($contrat->date_fin),
             'date_signature' => $date($contrat->date_signature),
@@ -634,13 +549,14 @@ class ContratController extends Controller
             'instruction_no' => $contrat->instruction_no ?? '',
             'ville_signature' => $contrat->ville_signature ?? '',
 
-            // ── Financial ───────────────────────────────────────────────────
+            // ── Financial ─────────────────────────────────────────────────────
             'prix_mensuel' => $fmt($contrat->prix_mensuel),
             'prix_total' => $fmt($contrat->prix_total),
             'caution' => $fmt($contrat->caution),
             'mode_paiement' => $contrat->mode_paiement ?? '',
 
-            // ── Aliases ───────────────────────────────────────────────────
+            // ── Common aliases ─────────────────────────────────────────────────
+            // Allow both spellings so domiciliataires are not blocked by typos
             'redevance_mensuelle' => $fmt($contrat->prix_mensuel),
             'redevance_annuelle' => $fmt($contrat->prix_total),
         ];
@@ -649,10 +565,14 @@ class ContratController extends Controller
     /**
      * Replace every {{key}} token in $text with its resolved value.
      *
-     * Tokens are matched case-insensitively, and optional whitespace
-     * inside braces is tolerated ({{ key }} works too). Unrecognised
-     * tokens are left as-is so the domiciliataire can see which tokens
-     * they mistyped rather than silently erasing them.
+     * Tokens are matched case-insensitively.
+     * Optional whitespace inside braces is handled: {{ key }} works too.
+     * Unrecognised tokens are left as-is so the domiciliataire can see
+     * which tokens they mistyped, rather than silently erasing them.
+     *
+     * @param  string               $text      Raw article body from the database
+     * @param  array<string,string> $tokenMap  Output of buildTokenMap()
+     * @return string
      */
     private function resolveTokens(string $text, array $tokenMap): string
     {
@@ -667,18 +587,20 @@ class ContratController extends Controller
     }
 
     /**
-     * Sync the contrat_articles pivot table with the provided article
-     * list.
+     * Sync the contrat_articles pivot table with the provided article list.
      *
      * Accepted input formats:
      *   Object form: [ {id: "3", ordre: 1}, {id: "14", ordre: 2} ]
      *   Flat form:   [ 3, 14 ]
      *
-     * Article primary keys are integer auto-increment; each ID is cast to
-     * (int). IDs resolving to <= 0 are skipped silently.
+     * Article PKs are integer auto-increment; cast each ID to (int).
+     * IDs resolving to <= 0 are skipped silently.
      *
-     * Eloquent sync() semantics: detaches removed articles, attaches new
-     * ones, updates ordre for existing ones.
+     * Eloquent sync() semantics:
+     *   Detaches removed articles, attaches new ones, updates ordre for existing.
+     *
+     * @param  Contrat  $contrat
+     * @param  array    $rawArticles  Contents of $request->input('articles', [])
      */
     private function syncArticles(Contrat $contrat, array $rawArticles): void
     {
@@ -691,9 +613,11 @@ class ContratController extends Controller
 
         foreach ($rawArticles as $index => $item) {
             if (is_array($item)) {
+                // Object form: {id: "3", ordre: 1}
                 $articleId = (int) ($item['id'] ?? 0);
                 $ordre = (int) ($item['ordre'] ?? ($index + 1));
             } else {
+                // Flat form: 3 or "3"
                 $articleId = (int) $item;
                 $ordre = $index + 1;
             }
@@ -704,27 +628,5 @@ class ContratController extends Controller
         }
 
         $contrat->articles()->sync($syncData);
-    }
-
-    /**
-     * Compute date_debut / date_fin for a renewal.
-     *
-     * Continuity rule: unless the caller overrides date_debut, the new
-     * period starts the day after the source contract's date_fin. If the
-     * source contract somehow has no date_fin, we fall back to today.
-     *
-     * @return array{0: \Carbon\Carbon, 1: \Carbon\Carbon} [date_debut, date_fin]
-     */
-    private function computeRenewalDates(Contrat $source, ?string $overrideDebut, int $dureeMois): array
-    {
-        $dateDebut = $overrideDebut
-            ? \Carbon\Carbon::parse($overrideDebut)
-            : ($source->date_fin
-                ? $source->date_fin->copy()->addDay()
-                : now());
-
-        $dateFin = $dateDebut->copy()->addMonths($dureeMois);
-
-        return [$dateDebut, $dateFin];
     }
 }
