@@ -29,6 +29,8 @@ use App\Models\AppNotification;
 use App\Models\Contrat;
 use App\Models\User;
 use Carbon\Carbon;
+use App\Mail\ContractReminderMail;
+use Illuminate\Support\Facades\Mail;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -44,55 +46,128 @@ Schedule::command('contracts:expire-check')
 Schedule::call(function () {
     $today = Carbon::today();
 
-    $domiciliataires = User::where('role', 'domiciliataire')->get();
+    $reminderOffsets = [
+        30 => '⏳ Le contrat de %s expire dans 1 mois (le %s). Pensez à préparer le renouvellement.',
+        15 => '⏳ Le contrat de %s expire dans 15 jours (le %s).',
+        3  => '⏳ Le contrat de %s expire dans 3 jours (le %s). Dernière ligne droite pour le renouvellement.',
+    ];
 
-    foreach ($domiciliataires as $user) {
-        // Delays configured by this domiciliataire — defaults to
-        // reminding 1 month before expiration if nothing is configured.
-        $prefs = json_decode($user->notification_preferences ?? '{"delays":[1]}', true);
-        $delays = $prefs['delays'] ?? [1];
+    foreach ($reminderOffsets as $daysBefore => $template) {
+        $targetDate = $today->copy()->addDays($daysBefore);
 
-        foreach ($delays as $delayMonths) {
-            $targetDate = $today->copy()->addMonths($delayMonths);
+        $contrats = Contrat::where('statut', 'active')
+            ->whereDate('date_fin', $targetDate)
+            ->with([
+                'entreprise:id,raison_sociale',
+                'entreprise.representant', // needed for the client's email
+                'domiciliataire',
+            ])
+            ->get();
 
-            $contrats = Contrat::where('domiciliataire_id', $user->id)
-                ->where('statut', 'active')
-                ->whereDate('date_fin', $targetDate)
-                ->with('entreprise:id,raison_sociale')
-                ->get();
+        foreach ($contrats as $contrat) {
+            $reminderType = "pre_expiry_{$daysBefore}";
 
-            foreach ($contrats as $contrat) {
-                // Skip if a reminder for this contract was already sent
-                // today — guards against duplicate notifications if the
-                // scheduler fires more than once, or if a contract
-                // matches more than one configured delay on the same day.
-                $alreadySent = AppNotification::where('user_id', $user->id)
-                    ->where('contrat_id', $contrat->id)
-                    ->whereDate('created_at', $today)
-                    ->whereNull('from_user_id')
-                    ->exists();
+            $alreadySent = Alerte::where('contrat_id', $contrat->id)
+                ->where('type', $reminderType)
+                ->exists();
 
-                if ($alreadySent) {
-                    continue;
-                }
-
-                AppNotification::create([
-                    'user_id' => $user->id,
-                    'contrat_id' => $contrat->id,
-                    'message' => sprintf(
-                        '🔔 Rappel : le contrat de %s expire dans %d mois (le %s).',
-                        $contrat->entreprise?->raison_sociale ?? 'un client',
-                        $delayMonths,
-                        $contrat->date_fin->format('d/m/Y')
-                    ),
-                    'is_read' => false,
-                ]);
-
-                Alerte::updateOrCreate(
-                    ['contrat_id' => $contrat->id, 'date_alerte' => $today],
-                    ['envoye' => true]
-                );
+            if ($alreadySent) {
+                continue;
             }
+
+            // In-app notification (unchanged behavior)
+            AppNotification::create([
+                'user_id' => $contrat->domiciliataire_id,
+                'contrat_id' => $contrat->id,
+                'message' => sprintf(
+                    $template,
+                    $contrat->entreprise?->raison_sociale ?? 'un client',
+                    $contrat->date_fin->format('d/m/Y')
+                ),
+                'is_read' => false,
+            ]);
+
+            // Email to the client, if the domiciliataire has email alerts on
+            // and the client has a reachable email address.
+            sendReminderEmailIfEnabled($contrat, $reminderType);
+
+            Alerte::create([
+                'contrat_id' => $contrat->id,
+                'date_alerte' => $today,
+                'type' => $reminderType,
+                'envoye' => true,
+            ]);
         }
     }
+
+    // ── Post-expiry reminder (J+1) ──────────────────────────────────────
+    $postExpiryDate = $today->copy()->subDay();
+
+    $expiredContrats = Contrat::where('statut', 'expired')
+        ->whereDate('date_fin', $postExpiryDate)
+        ->with([
+            'entreprise:id,raison_sociale',
+            'entreprise.representant',
+            'domiciliataire',
+        ])
+        ->get();
+
+    foreach ($expiredContrats as $contrat) {
+        $reminderType = 'post_expiry';
+
+        $alreadySent = Alerte::where('contrat_id', $contrat->id)
+            ->where('type', $reminderType)
+            ->exists();
+
+        if ($alreadySent) {
+            continue;
+        }
+
+        AppNotification::create([
+            'user_id' => $contrat->domiciliataire_id,
+            'contrat_id' => $contrat->id,
+            'message' => sprintf(
+                '❌ Le contrat de %s a expiré le %s. Contactez le client pour un renouvellement.',
+                $contrat->entreprise?->raison_sociale ?? 'un client',
+                $contrat->date_fin->format('d/m/Y')
+            ),
+            'is_read' => false,
+        ]);
+
+        sendReminderEmailIfEnabled($contrat, $reminderType);
+
+        Alerte::create([
+            'contrat_id' => $contrat->id,
+            'date_alerte' => $today,
+            'type' => $reminderType,
+            'envoye' => true,
+        ]);
+    }
 })->dailyAt('08:00')->name('alertes:send')->withoutOverlapping();
+
+/**
+ * Sends the reminder email to the client's address, provided:
+ *   - the domiciliataire has email_alerts_enabled === true
+ *   - the client (via representant, falling back to the linked client
+ *     user account) has a usable email address
+ *
+ * Queued (::queue instead of ::send) so a slow/failing mail provider
+ * never blocks or crashes the scheduled job for other contracts.
+ */
+function sendReminderEmailIfEnabled(\App\Models\Contrat $contrat, string $reminderType): void
+{
+    $domiciliataire = $contrat->domiciliataire;
+    if (!$domiciliataire || !$domiciliataire->email_alerts_enabled) {
+        return;
+    }
+
+    $clientEmail = $contrat->entreprise?->representant?->email
+        ?? $contrat->entreprise?->clientUser?->email
+        ?? null;
+
+    if (!$clientEmail) {
+        return;
+    }
+
+    Mail::to($clientEmail)->queue(new \App\Mail\ContractReminderMail($contrat, $reminderType));
+}

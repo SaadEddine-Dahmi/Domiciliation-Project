@@ -17,10 +17,33 @@ export default defineNuxtConfig({
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE ?? 'http://localhost:8000',
-      authStorageKey: process.env.NUXT_PUBLIC_AUTH_STORAGE_KEY ?? 'astfisc_auth',
-      themeStorageKey: process.env.NUXT_PUBLIC_THEME_STORAGE_KEY ?? 'astfisc_theme',
+
+      // Generic localStorage keys — no brand name hardcoded.
+      // Matches the fallback already used in stores/auth.ts and every
+      // service file's authHeaders() helper ('app_auth').
+      authStorageKey: process.env.NUXT_PUBLIC_AUTH_STORAGE_KEY ?? 'app_auth',
+      themeStorageKey: process.env.NUXT_PUBLIC_THEME_STORAGE_KEY ?? 'app_theme',
+
       sessionMaxAgeDays: process.env.NUXT_PUBLIC_SESSION_MAX_AGE_DAYS ?? '7',
-      appName: process.env.NUXT_PUBLIC_APP_NAME ?? 'AST-FISC',
+
+      // Product name — set NUXT_PUBLIC_APP_NAME in .env once the name
+      // is chosen. Placeholder below is intentionally generic.
+      appName: process.env.NUXT_PUBLIC_APP_NAME ?? 'Domiciliation Manager',
+    },
+  },
+
+  app: {
+    head: {
+      link: [
+        { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
+        { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
+        {
+          rel: 'stylesheet',
+          // Plus Jakarta Sans — primary UI/body font (see main.css for rationale).
+          // Fraunces — serif, used only via .font-serif for headings.
+          href: 'https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Fraunces:ital,wght@0,400;0,600;1,400;1,600&display=swap',
+        },
+      ],
     },
   },
 })

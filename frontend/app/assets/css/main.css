@@ -27,36 +27,32 @@
   --nav-inactive-color: rgba(26, 29, 38, 0.6);
   --nav-hover-bg: rgba(0, 0, 0, 0.04);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.07), 0 0 0 1px rgba(0, 0, 0, 0.05);
+
+  /* ── Typography tokens ──────────────────────────────────────
+     Plus Jakarta Sans: primary UI/body font — see nuxt.config.ts
+     comment for the UX rationale.
+     Fraunces: serif, used only via .font-serif for headings. */
+  --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Arial, sans-serif;
+  --font-serif: 'Fraunces', Georgia, serif;
 }
 
 /* ── Gray (Enhanced Mid-Tone) ── */
 html.gray {
-  /* Backgrounds: Shifted to a medium-deep slate */
   --app-bg: #343a40;
   --app-surface: #3d424a;
   --app-surface-2: #2a2d33;
-
-  /* Borders: Switched to light-transparent for better contrast on dark gray */
   --app-border: rgba(255, 255, 255, 0.1);
   --app-border-2: rgba(255, 255, 255, 0.07);
-
-  /* Text: Switched to light text for readability */
   --app-text: #e8eaed;
   --app-text-muted: rgba(232, 234, 237, 0.65);
   --app-text-faint: rgba(232, 234, 237, 0.4);
-
-  /* Brand Colors */
-  --gold: #d4b982; /* Slightly brightened for better contrast */
+  --gold: #d4b982;
   --gold-2: #c8a96e;
-
-  /* UI Elements */
   --topbar-bg: rgba(50, 54, 61, 0.94);
   --nav-active-bg: rgba(212, 185, 130, 0.15);
   --nav-active-color: #d4b982;
   --nav-inactive-color: rgba(232, 234, 237, 0.6);
   --nav-hover-bg: rgba(255, 255, 255, 0.05);
-
-  /* Shadow: Subtle lift without being too harsh */
   --shadow-card:
     0 2px 8px rgba(0, 0, 0, 0.2), 0 0 0 1px rgba(255, 255, 255, 0.05);
 }
@@ -94,18 +90,28 @@ body,
 body {
   background: var(--app-bg);
   color: var(--app-text);
-  font-family:
-    Inter,
-    ui-sans-serif,
-    system-ui,
-    -apple-system,
-    Segoe UI,
-    Roboto,
-    Arial,
-    sans-serif;
+  font-family: var(--font-sans);
+  /* Slightly looser than the default 1.5 — improves paragraph readability
+     for French copy with accents and longer compound words. */
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Plus Jakarta Sans OpenType features: tabular figures available via
+     .tabular-nums utility below; ss01 sharpens the single-story 'a'. */
+  font-feature-settings: 'ss01';
   transition:
     background 0.2s ease,
     color 0.2s ease;
+}
+
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+/* Tabular numbers for anything showing money/dates in a list — prevents
+   columns of DH amounts from jittering horizontally. */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
 }
 
 /* ─────────────────────────────────────────────────────────────
@@ -286,26 +292,24 @@ body {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
 }
- 
+
 .data-table {
   width: 100%;
   border-collapse: collapse;
   min-width: 540px; /* prevent squishing — scroll instead */
 }
- 
+
 /* Cards stack on mobile */
 @media (max-width: 640px) {
   .card {
     border-radius: 12px;
   }
- 
-  /* Stats grids: 2 cols on mobile */
+
   .stats-grid {
     grid-template-columns: repeat(2, 1fr) !important;
     gap: 0.75rem !important;
   }
- 
-  /* Full-width modals on mobile */
+
   .modal-panel {
     width: 100% !important;
     max-width: 100% !important;
@@ -317,18 +321,17 @@ body {
     right: 0 !important;
   }
 }
- 
+
 /* Page padding responsive — used in layouts */
 .page-content {
   padding: 1rem;
 }
 @media (min-width: 640px)  { .page-content { padding: 1.25rem; } }
 @media (min-width: 1024px) { .page-content { padding: 1.5rem;  } }
- 
+
 /* Prevent text overflow in nav labels */
 .sidebar-label {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
 }
- 

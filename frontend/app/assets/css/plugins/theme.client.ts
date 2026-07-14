@@ -8,8 +8,11 @@ export default defineNuxtPlugin(() => {
   if (!import.meta.client) return
 
   try {
-    const saved = localStorage.getItem('astfisc_theme')
-    const html  = document.documentElement
+    const config = useRuntimeConfig()
+    const storageKey = (config.public.themeStorageKey as string) ?? 'app_theme'
+
+    const saved = localStorage.getItem(storageKey)
+    const html = document.documentElement
 
     // Remove any existing theme classes first
     html.classList.remove('dark', 'gray')

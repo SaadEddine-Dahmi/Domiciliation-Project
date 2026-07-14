@@ -60,16 +60,10 @@ const saving  = ref(false)
  * email is now included — was missing in the previous version.
  */
 const form = reactive({
-  nom:                   '',
-  prenom:                '',
-  email:                 '', 
-  telephone:             '',
-  nom_societe:           '',
-  representant_legal:    '',
-  identite_representant: '',   
-  rc:                    '',
-  if_fiscal:             '',
-  tp:                    '',
+  nom: '', prenom: '', telephone: '', email: '',   // ← email added, read-only display
+  nom_societe: '', representant_legal: '', identite_representant: '',
+  rc: '', if_fiscal: '', tp: '',
+  email_alerts_enabled: true,
 })
 
 /**
@@ -231,6 +225,51 @@ onMounted(fetchProfile)
 
     <!-- ── Page header ─────────────────────────────────────────────────────── -->
     <div class="flex items-start justify-between flex-wrap gap-4">
+        <!-- Email alerts card -->
+<div class="card p-6 space-y-4">
+  <div class="flex items-center gap-2 mb-1">
+    <div class="w-1 h-5 rounded-full shrink-0" style="background:#c8a96e"/>
+    <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+      Alertes email automatiques
+    </p>
+  </div>
+
+  <p class="text-xs" style="color:var(--app-text-faint)">
+    Vos clients recevront des rappels par email avant l'expiration de leur contrat.
+    Les réponses seront envoyées directement à votre adresse
+    <strong style="color:var(--app-text)">{{ form.email }}</strong>.
+  </p>
+
+  <!--
+    FIX: the previous markup relied on `gap-3` alone to separate the
+    toggle button from its label, but the button (w-10 = 40px) and the
+    label text were rendering in the same flex line without the button
+    ever reserving its own box — the knob's `absolute` positioning was
+    escaping its parent and drawing over the label instead of the
+    button occupying real layout space. Wrapping the button + label in
+    an explicit flex row with items-center and an actual margin (not
+    just gap, which can be dropped if Tailwind's JIT doesn't see the
+    class used elsewhere) guarantees the knob never overlaps the text.
+  -->
+  <label class="email-alerts-toggle">
+    <button
+      type="button"
+      role="switch"
+      :aria-checked="form.email_alerts_enabled"
+      class="email-alerts-toggle__track"
+      :class="form.email_alerts_enabled ? 'email-alerts-toggle__track--on' : ''"
+      @click="form.email_alerts_enabled = !form.email_alerts_enabled"
+    >
+      <span
+        class="email-alerts-toggle__knob"
+        :class="form.email_alerts_enabled ? 'email-alerts-toggle__knob--on' : ''"
+      />
+    </button>
+    <span class="email-alerts-toggle__label">
+      Activer l'envoi automatique des rappels par email
+    </span>
+  </label>
+</div>
       <div>
         <h1 class="font-serif text-2xl" style="color:var(--app-text)">
           Mon <em class="italic" style="color:#c8a96e">Profil Entreprise</em>
@@ -575,3 +614,47 @@ onMounted(fetchProfile)
     </template>
   </div>
 </template>
+
+<style scoped>
+.email-alerts-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  cursor: pointer;
+}
+
+.email-alerts-toggle__track {
+  position: relative;
+  width: 40px;
+  height: 24px;
+  min-width: 40px;   /* prevents the track from ever shrinking below its own size */
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.15);
+  transition: background 0.2s ease;
+}
+.email-alerts-toggle__track--on {
+  background: var(--gold);
+}
+
+.email-alerts-toggle__knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #fff;
+  transition: transform 0.2s ease;
+  transform: translateX(0);
+}
+.email-alerts-toggle__knob--on {
+  transform: translateX(16px); /* 40px track - 2*2px padding - 20px knob = 16px travel */
+}
+
+.email-alerts-toggle__label {
+  font-size: 0.875rem;
+  color: var(--app-text-muted);
+  line-height: 1.4;
+}
+</style>

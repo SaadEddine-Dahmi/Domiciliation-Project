@@ -31,6 +31,7 @@ class User extends Authenticatable
         'if_fiscal',
         'tp',
         'adresses',
+        'email_alerts_enabled'
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -39,6 +40,7 @@ class User extends Authenticatable
         'activation_date' => 'date',
         'approved_at'     => 'datetime',
         'adresses' => 'array',
+        'email_alerts_enabled' => 'boolean'
     ];
 
     // ── Relations ──────────────────────────────────────────

@@ -60,51 +60,24 @@ class DomiciliaireProfileController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                // ── Personal identity of the domiciliataire person ────────────
-                'nom'                   => $user->nom,
-                'prenom'                => $user->prenom,
-                'email'                 => $user->email,            // FIX: was missing
-                'telephone'             => $user->telephone,
-
-                // ── Company / société de domiciliation ────────────────────────
-                'nom_societe'           => $user->nom_societe,
-                'representant_legal'    => $user->representant_legal,
-                'identite_representant' => $user->identite_representant,  // CIN du représentant
-                'rc'                    => $user->rc,
-                'if_fiscal'             => $user->if_fiscal,
-                'tp'                    => $user->tp,
-
-                // ── Addresses — JSON array of {label, value} objects ──────────
-                // adresses_list is the User::getAdressesListAttribute() accessor
-                // which safely returns [] when adresses is null.
-                // First entry = siège; additional entries = succursales.
-                'adresses'              => $user->adresses_list,
-
-                // ── Completion flag ────────────────────────────────────────────
-                // True when nom_societe, representant_legal, and at least one
-                // address are all set. Used to show/hide the autofill banner in wizard.
-                'profile_complete'      => $user->hasCompleteProfile(),
+            'data' => [
+                'nom' => $user->nom,
+                'prenom' => $user->prenom,
+                'email' => $user->email, // now used for alerts too
+                'telephone' => $user->telephone,
+                'nom_societe' => $user->nom_societe,
+                'representant_legal' => $user->representant_legal,
+                'identite_representant' => $user->identite_representant,
+                'rc' => $user->rc,
+                'if_fiscal' => $user->if_fiscal,
+                'tp' => $user->tp,
+                'adresses' => $user->adresses_list,
+                'profile_complete' => $user->hasCompleteProfile(),
+                'email_alerts_enabled' => $user->email_alerts_enabled,
             ],
         ]);
     }
 
-    // ──────────────────────────────────────────────────────────────────────────
-
-    /**
-     * PUT /api/profile
-     *
-     * Saves all profile fields for the authenticated domiciliataire.
-     *
-     * VALIDATION NOTES:
-     *   - 'sometimes' on most fields: only validates/saves a field when it is
-     *     present in the request. Allows partial updates without clearing fields.
-     *   - email: Rule::unique()->ignore($user->id) allows saving the current
-     *     user's own email without triggering a uniqueness conflict.
-     *   - adresses: array of {label, value} objects. Entries with empty label
-     *     or value are stripped by the frontend before the request is sent
-     *     (profile.vue filterss them in saveProfile()).
-     */
     public function update(Request $request)
     {
         $user = auth()->user();
@@ -114,39 +87,28 @@ class DomiciliaireProfileController extends Controller
         }
 
         $data = $request->validate([
-            // Personal contact
-            'nom'                   => ['sometimes', 'string', 'max:20'],
-            'prenom'                => ['nullable', 'string', 'max:20'],
-            // FIX: email now accepted. Unique rule ignores the current user's own row.
-            'email'                 => [
-                'sometimes',
-                'email',
-                'max:100',
-                Rule::unique('users')->ignore($user->id),
-            ],
-            'telephone'             => ['nullable', 'string', 'max:13'],
-
-            // Company identity
-            'nom_societe'           => ['nullable', 'string', 'max:255'],
-            'representant_legal'    => ['nullable', 'string', 'max:255'],
+            'nom' => ['sometimes', 'string', 'max:20'],
+            'prenom' => ['nullable', 'string', 'max:20'],
+            'telephone' => ['nullable', 'string', 'max:13'],
+            'nom_societe' => ['nullable', 'string', 'max:255'],
+            'representant_legal' => ['nullable', 'string', 'max:255'],
             'identite_representant' => ['nullable', 'string', 'max:100'],
-            'rc'                    => ['nullable', 'string', 'max:100'],
-            'if_fiscal'             => ['nullable', 'string', 'max:100'],
-            'tp'                    => ['nullable', 'string', 'max:100'],
-
-            // Addresses: siège + succursales
-            // Each entry must have both label and value non-empty.
-            'adresses'              => ['nullable', 'array'],
-            'adresses.*.label'      => ['required_with:adresses', 'string', 'max:100'],
-            'adresses.*.value'      => ['required_with:adresses', 'string', 'max:500'],
+            'rc' => ['nullable', 'string', 'max:100'],
+            'if_fiscal' => ['nullable', 'string', 'max:100'],
+            'tp' => ['nullable', 'string', 'max:100'],
+            'adresses' => ['nullable', 'array'],
+            'adresses.*.label' => ['required_with:adresses', 'string', 'max:100'],
+            'adresses.*.value' => ['required_with:adresses', 'string', 'max:500'],
+            'email_alerts_enabled' => ['nullable', 'boolean'],
         ]);
 
         $user->update($data);
 
         return response()->json([
-            'success'          => true,
-            'message'          => 'Profil mis à jour.',
+            'success' => true,
+            'message' => 'Profil mis à jour.',
             'profile_complete' => $user->fresh()->hasCompleteProfile(),
         ]);
     }
+
 }
