@@ -1,1090 +1,1520 @@
-<!-- ============================================================
-  pages/admin/contrat.vue
-============================================================ -->
 <script setup lang="ts">
-import { ref, computed, watch, onMounted, onBeforeUnmount } from "vue";
-import { storeToRefs } from "pinia";
-import { useRoute, navigateTo } from "#app";
-import { useContractStore } from "~/stores/contrat";
-import { useArticlesStore } from "~/stores/articles";
-import { useClientsStore } from "~/stores/clients";
-import type { ContratForm } from "~/types/contrat";
-import { useContratValidation } from "~/composables/useContratValidation";
-import { useContratDraft } from "~/composables/useContratDraft";
+/**
+ * pages/admin/contrat.vue
+ *
+ * 4-step contract creation wizard.
+ *
+ * Step 1 — Domiciliataire info (autofilled from profile)
+ *           + address chip selector
+ *           + dynamic contract title input with live preview
+ * Step 2 — Client: pick existing or create inline
+ * Step 3 — Articles: chip library selector, drag-to-reorder, inline body editor
+ *           + financial fields (dates, redevance, payment)
+ * Step 4 — Confirmation + PDF stream preview + download
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * ROOT CAUSE OF THE "ALL CHIPS SELECTED" BUG — AND THE FIX
+ * ─────────────────────────────────────────────────────────────────────────────
+ * (unchanged from previous revision — kept for history)
+ *
+ * SYMPTOM: clicking one article chip made ALL chips turn gold simultaneously,
+ *          but only the clicked article appeared in the selected list below.
+ * ROOT CAUSE: Article PKs are integer auto-increment; without an explicit
+ *   'id' cast the id serialised inconsistently as 0/null, so String(id)
+ *   produced the same string for every row and .includes() matched them all.
+ * FIX: Article model casts 'id' => 'integer'; the articles store maps ids
+ *   through String(a.id); selectedArticleIds is a plain ref<string[]> (never
+ *   a Set, since Vue doesn't track Set mutations).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * CONTRACT TITLE — DYNAMIC, CHOSEN BY THE CLIENT
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * contract.form.titreContrat is a plain free-text field, fully editable in
+ * step 1 (see the "Titre du contrat" card below). Nothing on the frontend
+ * hardcodes a title. It is sent to the backend exactly as typed; the
+ * backend applies the fallback 'Contrat de Domiciliation' ONLY when the
+ * field arrives null or empty (ContratController::store()/update()).
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * PDF PREVIEW/DOWNLOAD — FIX FOR "localhost refused to connect"
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * OLD BEHAVIOUR (buggy):
+ *   The "Aperçu PDF" button pointed an <iframe> straight at the API's
+ *   cross-origin PDF-stream URL. The backend used to send
+ *   'X-Frame-Options: SAMEORIGIN' on that response, which tells the browser
+ *   "only render this inside a frame if the parent page is on the exact same
+ *   origin". Since the Nuxt frontend and the Laravel API run on different
+ *   origins (different port locally, usually a different subdomain in
+ *   production), the browser silently refused to display the PDF in the
+ *   iframe — shown to the user as a connection-refused-style error page —
+ *   while the "Télécharger PDF" link kept working because X-Frame-Options
+ *   only restricts framing, not normal top-level navigation.
+ *
+ * NEW BEHAVIOUR:
+ *   Both the preview and the download now fetch the PDF with fetch() and a
+ *   normal Authorization: Bearer header (openPreview() / downloadPdf()
+ *   below), convert the response to a Blob, and use
+ *   URL.createObjectURL(blob) as the source. blob: URLs are always
+ *   same-origin, so no framing restriction can ever block them again — and
+ *   a failed request now surfaces as a catchable error we can show a real
+ *   message for, instead of a cryptic browser page.
+ *   This also let the backend route move back inside auth:sanctum with
+ *   proper tenant scoping (see ContratController::streamPdf()), since we're
+ *   no longer relying on a bare <iframe src>/<a href> that can't carry
+ *   headers.
+ *
+ * ─────────────────────────────────────────────────────────────────────────────
+ * LIVE CONTRACT PREVIEW (in-wizard, no save required)
+ * ─────────────────────────────────────────────────────────────────────────────
+ *
+ * A separate "Aperçu du contrat" button in the page header opens a second
+ * modal that renders the contract as HTML, computed live from the in-memory
+ * wizard state (livePreviewHtml). Unlike the PDF stream above, this needs no
+ * contrat_id and no network call at all, so it works from step 1 onward,
+ * before the contract has even been saved as a draft. Article bodies go
+ * through the same {{variable}} token resolution as
+ * ContratController::buildTokenMap()/resolveTokens(), so the wording shown
+ * here matches the generated PDF. Every interpolated value passes through
+ * escapeHtml() before being placed in the v-html string.
+ */
 
-definePageMeta({ layout: "dashboard", middleware: ["auth"] });
+import { useContractStore } from '~/stores/contrat'
+import { useClientsStore  } from '~/stores/clients'
+import { useArticlesStore } from '~/stores/articles'
 
-// ── Stores ────────────────────────────────────────────────
-const route         = useRoute();
-const contract      = useContractStore();
-const articlesStore = useArticlesStore();
-const clientsStore  = useClientsStore();
-const { success, error: toastError } = useToast();
+definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
-const { items: articleItems, loading: articlesLoading } = storeToRefs(articlesStore);
-const { items: clientItems }                             = storeToRefs(clientsStore);
+const contract      = useContractStore()
+const clientsStore  = useClientsStore()
+const articlesStore = useArticlesStore()
+const { success, error: toastError } = useToast()
 
-// ── Stepper ───────────────────────────────────────────────
-const step  = ref(0);
-const steps = ["AST-FISC", "Client", "Durée", "Articles", "Récap"];
+// ── Auth helpers ──────────────────────────────────────────────────────────────
 
-// ── IDs courants ──────────────────────────────────────────
-const currentContratId     = ref<string>("");
-const selectedEntrepriseId = ref<number | null>(null);
-
-// ── Autosave ──────────────────────────────────────────────
-const autosaveState = ref<"idle" | "saving" | "saved" | "error">("idle");
-const autosaveAt    = ref<string>("");
-const autosaveError = ref<string>("");
-let autosaveTimer: ReturnType<typeof setTimeout> | null = null;
-const AUTOSAVE_DELAY = 1200;
-
-// ── Articles ──────────────────────────────────────────────
-const selectedIds   = ref<string[]>([]);
-const editingId     = ref<string | null>(null);
-const editTitle     = ref<string>("");
-const editBody      = ref<string>("");
-const newArtTitle   = ref<string>("");
-const newArtBody    = ref<string>("");
-const savingArticle = ref(false);
-
-// ── VariablePanel refs ────────────────────────────────────
-const inlineEditTextareaRef = ref<HTMLTextAreaElement | null>(null);
-const inlineEditPanelRef    = ref<any>(null);
-const newArtTextareaRef     = ref<HTMLTextAreaElement | null>(null);
-const newArtPanelRef        = ref<any>(null);
-
-// ── PDF ───────────────────────────────────────────────────
-const showPreview = ref(false);
-const pdfUrl      = ref<string>("");
-const pdfLoading  = ref(false);
-
-// ── Notification delay — multi-select (can pick 1, 3, 6 or any combo)
-const notificationDelays = ref<number[]>([1]);
-
-// ── Composables ───────────────────────────────────────────
-const formTyped = contract.form as ContratForm;
-const { validateStep } = useContratValidation(formTyped);
-const { saveDraft, loadDraft, clearDraft, lastSavedAt } = useContratDraft(
-  formTyped,
-  selectedIds,
-  ref([]),
-);
-
-// ── Computed ──────────────────────────────────────────────
-const selectedSorted = computed(
-  () =>
-    selectedIds.value
-      .map((id) => articleItems.value.find((a) => a.id === id))
-      .filter(Boolean) as typeof articleItems.value,
-);
-
-// ── Helpers API ───────────────────────────────────────────
 function getApiBase(): string {
-  const config = useRuntimeConfig();
-  return (config.public.apiBase as string) ?? "";
+    const config = useRuntimeConfig()
+    return (config.public.apiBase as string) ?? ''
 }
 
+/**
+ * Build the Authorization header from localStorage.
+ * Key 'app_auth' is written by the auth controller on login.
+ * Returns {} when called server-side or when the token is missing.
+ */
 function authHeaders(): Record<string, string> {
-  if (!import.meta.client) return {};
-  try {
-    const raw = localStorage.getItem("astfisc_auth");
-    if (!raw) return {};
-    const parsed = JSON.parse(raw);
-    return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {};
-  } catch {
-    return {};
-  }
+    if (!import.meta.client) return {}
+    try {
+        const raw = localStorage.getItem('app_auth')
+        if (!raw) return {}
+        const parsed = JSON.parse(raw)
+        return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
+    } catch { return {} }
 }
 
-// ── Date helpers ──────────────────────────────────────────
+// ── Wizard state ──────────────────────────────────────────────────────────────
 
-// Returns today as YYYY-MM-DD (for date input value)
-function todayIso(): string {
-  return new Date().toISOString().split("T")[0];
-}
+const step       = ref(1)
+const totalSteps = 4
+const saving     = ref(false)
+const contratId  = ref<number | null>(null)
 
-// Returns today + N months as YYYY-MM-DD
-function addMonths(base: string, n: number): string {
-  const d = new Date(base);
-  d.setMonth(d.getMonth() + n);
-  // Subtract 1 day so 12-04-2026 + 12 months = 11-04-2027
-  d.setDate(d.getDate() - 1);
-  return d.toISOString().split("T")[0];
-}
+// ── Step 1: profile + address selector ───────────────────────────────────────
 
-// Format any date string → dd/mm/yyyy for display
-function formatDatePreview(d: string | null | undefined): string {
-  if (!d) return "—";
-  const date = new Date(d);
-  if (isNaN(date.getTime())) return d;
-  return date.toLocaleDateString("fr-MA", {
-    day:   "2-digit",
-    month: "2-digit",
-    year:  "numeric",
-  });
-}
+const profile       = ref<any>({})
+const profileLoaded = ref(false)
 
-// ── Notification delay toggle (multi-select) ──────────────
-function toggleDelay(m: number): void {
-  if (notificationDelays.value.includes(m)) {
-    // Don't allow deselecting all — keep at least one
-    if (notificationDelays.value.length > 1) {
-      notificationDelays.value = notificationDelays.value.filter((x) => x !== m);
+/**
+ * Normalised address list built from the profile API response.
+ * Handles every shape the backend might return:
+ *   string[]         → ["10 rue X", "Quartier Y"]
+ *   {label, value}[] → [{label:"Siège", value:"10 rue X"}]
+ *   single string    → "10 rue X"
+ *   null / undefined → [] (triggers manual input fallback)
+ */
+const addresses = ref<{ label: string; value: string }[]>([])
+
+/**
+ * The address selected or typed for this contract.
+ * Single source of truth for step 1 validation.
+ */
+const selectedAddress = ref('')
+
+function normaliseAddresses(raw: any): { label: string; value: string }[] {
+    if (!raw) return []
+    if (Array.isArray(raw)) {
+        return raw
+            .map((item, i) => {
+                if (typeof item === 'string') return { label: `Adresse ${i + 1}`, value: item }
+                if (item && typeof item === 'object') {
+                    const value = item.value ?? item.adresse ?? item.address ?? String(item)
+                    const label = item.label ?? item.nom    ?? item.name    ?? `Adresse ${i + 1}`
+                    return { label, value }
+                }
+                return { label: `Adresse ${i + 1}`, value: String(item) }
+            })
+            .filter(a => a.value.trim())
     }
-  } else {
-    notificationDelays.value = [...notificationDelays.value, m].sort((a, b) => a - b);
-  }
+    if (typeof raw === 'string' && raw.trim()) {
+        return [{ label: 'Adresse principale', value: raw.trim() }]
+    }
+    return []
 }
 
-// ── Calcul durée depuis les dates ─────────────────────────
-function monthsBetween(start: string, end: string): number {
-  if (!start || !end) return 0;
-  const diff = new Date(end).getTime() - new Date(start).getTime();
-  if (diff < 0) return 0;
-  return Math.max(1, Math.round(diff / (1000 * 60 * 60 * 24 * 30.44)));
+async function loadProfile(): Promise<void> {
+    try {
+        const res = await $fetch<{ success: boolean; data: any }>(
+            `${getApiBase()}/api/profile`,
+            { headers: authHeaders() }
+        )
+        profile.value = res.data ?? {}
+        contract.fillFromProfile(res.data ?? {})
+
+        const raw = res.data?.adresses
+                 ?? res.data?.addresses
+                 ?? res.data?.adresse
+                 ?? res.data?.address
+                 ?? null
+        addresses.value = normaliseAddresses(raw)
+
+        profileLoaded.value = !!(res.data?.nom_societe && res.data?.representant_legal)
+    } catch {
+        profileLoaded.value = false
+        addresses.value     = []
+    }
 }
 
-function syncMonthsFromDates(): void {
-  const m = monthsBetween(contract.form.dateDebut, contract.form.dateFin);
-  if (m > 0) {
-    contract.form.months = m;
-    contract.syncFromMonths();
-  }
+/** Select an address chip — writes to both the local ref and the store. */
+function pickAddress(addr: { label: string; value: string }): void {
+    selectedAddress.value        = addr.value
+    contract.form.companyAdresse = addr.value
 }
 
-// ── Client-side variable renderer ─────────────────────────
-// Mirrors TemplateService.render() so preview matches PDF
-function renderVariables(body: string, vars: Record<string, string>): string {
-  let result = body;
-  for (const [key, value] of Object.entries(vars)) {
-    result = result.replaceAll(`{{${key}}}`, `<strong>${value}</strong>`);
-  }
-  // Show unreplaced vars in gold so missing data is visible
-  result = result.replace(
-    /\{\{([a-z_]+)\}\}/g,
-    '<span style="color:#c8a96e;font-style:italic">[$1]</span>',
-  );
-  return result;
+// ── Step 2: client selection / creation ──────────────────────────────────────
+
+const clientMode        = ref<'select' | 'create'>('select')
+const selectedClientId  = ref<number | null>(null)
+const selectedClient    = ref<any>(null)
+const clientSearchQuery = ref('')
+
+const newClientForm = reactive({
+    raison_sociale:  '',
+    forme_juridique: '',
+    gerantNom:       '',
+    gerantCIN:       '',
+    dateNaissance:   '',
+    adressePerso:    '',
+    tel:             '',
+    email:           '',
+    password:        '',
+})
+
+const filteredClients = computed(() => {
+    const q     = clientSearchQuery.value.toLowerCase().trim()
+    const items = clientsStore.items ?? []
+    if (!q) return items
+    return items.filter(c =>
+        c.raison_sociale?.toLowerCase().includes(q) ||
+        c.client_user?.email?.toLowerCase().includes(q)
+    )
+})
+
+/**
+ * Select an existing client and copy their fields into the store form
+ * so they appear pre-filled in the PDF.
+ */
+function selectClient(client: any): void {
+    selectedClientId.value = client.id
+    selectedClient.value   = client
+
+    contract.form.societe      = client.raison_sociale ?? ''
+    contract.form.gerantNom    = client.representant?.nom_complet
+                                 ?? (client.client_user
+                                     ? `${client.client_user.nom ?? ''} ${client.client_user.prenom ?? ''}`.trim()
+                                     : '')
+    contract.form.gerantCIN    = client.representant?.cin       ?? ''
+    contract.form.tel          = client.representant?.telephone  ?? client.client_user?.telephone ?? ''
+    contract.form.email        = client.representant?.email      ?? client.client_user?.email     ?? ''
+    contract.form.adressePerso = client.representant?.adresse    ?? ''
+
+    clientSearchQuery.value = ''
 }
 
-// ── Articles CRUD ─────────────────────────────────────────
-function toggleArticle(id: string): void {
-  selectedIds.value = selectedIds.value.includes(id)
-    ? selectedIds.value.filter((x) => x !== id)
-    : [...selectedIds.value, id];
+function switchToCreate(): void {
+    selectedClientId.value = null
+    selectedClient.value   = null
+    clientMode.value       = 'create'
+    Object.assign(newClientForm, {
+        raison_sociale: '', forme_juridique: '',
+        gerantNom: '', gerantCIN: '', dateNaissance: '',
+        adressePerso: '', tel: '', email: '', password: '',
+    })
 }
 
-function startEdit(a: { id: string; title: string; body: string }): void {
-  editingId.value = a.id;
-  editTitle.value = a.title;
-  editBody.value  = a.body;
-}
+// Keep the store form in sync as the new-client fields are typed.
+watch(() => newClientForm.raison_sociale, v => { contract.form.societe      = v })
+watch(() => newClientForm.gerantNom,      v => { contract.form.gerantNom    = v })
+watch(() => newClientForm.gerantCIN,      v => { contract.form.gerantCIN    = v })
+watch(() => newClientForm.tel,            v => { contract.form.tel          = v })
+watch(() => newClientForm.email,          v => { contract.form.email        = v })
+watch(() => newClientForm.adressePerso,   v => { contract.form.adressePerso = v })
 
-function cancelEdit(): void {
-  editingId.value = null;
-  editTitle.value = "";
-  editBody.value  = "";
-}
+// ── Step 3: article selection ─────────────────────────────────────────────────
 
-async function saveEdit(): Promise<void> {
-  if (!editingId.value || !editTitle.value.trim()) return;
-  savingArticle.value = true;
-  try {
-    await articlesStore.update(editingId.value, editTitle.value.trim(), editBody.value.trim(), true);
-    success("Article mis à jour");
-    cancelEdit();
-  } catch (e: any) {
-    toastError?.(e?.data?.message ?? "Erreur mise à jour article");
-  } finally {
-    savingArticle.value = false;
-  }
-}
+/**
+ * SOURCE OF TRUTH for which articles are currently selected.
+ * ref<string[]> (never a Set — Vue doesn't track Set mutations, only
+ * .value reassignment and array mutations like .push/.filter).
+ */
+const selectedArticleIds = ref<string[]>([])
 
-async function deleteArticle(id: string): Promise<void> {
-  if (!confirm("Supprimer cet article définitivement ?")) return;
-  try {
-    await articlesStore.remove(id);
-    selectedIds.value = selectedIds.value.filter((x) => x !== id);
-    success("Article supprimé");
-  } catch (e: any) {
-    toastError?.(e?.data?.message ?? "Erreur suppression article");
-  }
-}
+/**
+ * Parallel array of shallow-copied article objects for drag-and-drop.
+ * Shallow copies are intentional — editing title/body here must NOT
+ * mutate the shared library entry in articlesStore.items.
+ */
+const orderedArticles = ref<any[]>([])
 
-async function addArticle(): Promise<void> {
-  if (!newArtTitle.value.trim()) return;
-  savingArticle.value = true;
-  try {
-    const created = await articlesStore.create(newArtTitle.value.trim(), newArtBody.value.trim());
-    selectedIds.value.push(created.id);
-    newArtTitle.value = "";
-    newArtBody.value  = "";
-    success("Article ajouté à la bibliothèque");
-  } catch (e: any) {
-    toastError?.(e?.data?.message ?? "Erreur création article");
-  } finally {
-    savingArticle.value = false;
-  }
-}
+/**
+ * Toggle an article in or out of the selection.
+ * ADD:    push String(id) into selectedArticleIds + push a copy into orderedArticles
+ * REMOVE: assign filtered arrays to both, re-number ordre to close gaps
+ */
+function toggleArticle(article: any): void {
+    const id = String(article.id)
 
-// ── Sauvegarde contrat ────────────────────────────────────
-function buildContratBody() {
-  return {
-    entreprise_id:             selectedEntrepriseId.value,
-    date_debut:                contract.form.dateDebut       || null,
-    date_fin:                  contract.form.dateFin         || null,
-    duree_mois:                contract.form.months          || null,
-    prix_mensuel:              contract.monthlyTotal         || null,
-    prix_total:                contract.grandTotal           || null,
-    statut:                    "draft",
-    // Send the smallest delay to backend for DB storage
-    notification_delay_months: Math.min(...notificationDelays.value),
-    article_ids:               selectedIds.value,
-    instruction_no:            contract.form.instruction_no  || null,
-    ville_signature:           contract.form.ville_signature || null,
-    date_signature:            contract.form.date_signature  || null,
-    caution:                   contract.form.caution         || null,
-    mode_paiement:             contract.form.mode_paiement   || null,
-  };
-}
-
-async function saveAsDraft(silent = false): Promise<void> {
-  if (!selectedEntrepriseId.value) {
-    if (!silent) toastError?.("Sélectionnez une entreprise cliente (étape 2)");
-    return;
-  }
-  try {
-    if (!silent) autosaveState.value = "saving";
-    const body = buildContratBody();
-
-    if (!currentContratId.value) {
-      const res = await $fetch<{ success: boolean; data: any }>(
-        `${getApiBase()}/api/contrats`,
-        { method: "POST", headers: authHeaders(), body },
-      );
-      currentContratId.value = String(res.data.id);
-      await navigateTo(
-        { path: "/admin/contrat", query: { id: currentContratId.value } },
-        { replace: true },
-      );
-      if (!silent) success("Brouillon créé");
+    if (selectedArticleIds.value.includes(id)) {
+        selectedArticleIds.value = selectedArticleIds.value.filter(x => x !== id)
+        orderedArticles.value    = orderedArticles.value
+            .filter(a => String(a.id) !== id)
+            .map((a, i) => ({ ...a, ordre: i + 1 }))
     } else {
-      await $fetch(`${getApiBase()}/api/contrats/${currentContratId.value}`, {
-        method: "PUT",
-        headers: authHeaders(),
-        body,
-      });
-      if (!silent) success("Brouillon mis à jour");
+        const newOrdre = orderedArticles.value.length + 1
+
+        selectedArticleIds.value.push(id)
+        orderedArticles.value.push({
+            ...article,
+            ordre:     newOrdre,
+            _expanded: false,
+        })
+    }
+}
+
+/**
+ * Revert a selected article's body to the original from the library.
+ */
+function resetArticleBody(article: any): void {
+    const original = articlesStore.items.find(a => String(a.id) === String(article.id))
+    if (original) article.body = original.body
+}
+
+// ── Drag-and-drop reordering ──────────────────────────────────────────────────
+
+const dragIndex = ref<number | null>(null)
+
+function onDragStart(index: number, event: DragEvent): void {
+    dragIndex.value = index
+    if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+}
+
+function onDragOver(index: number, event: DragEvent): void {
+    event.preventDefault()
+    if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+}
+
+function onDrop(targetIndex: number): void {
+    if (dragIndex.value === null || dragIndex.value === targetIndex) return
+    const arr = [...orderedArticles.value]
+    const [moved] = arr.splice(dragIndex.value, 1)
+    arr.splice(targetIndex, 0, moved)
+    orderedArticles.value = arr.map((a, i) => ({ ...a, ordre: i + 1 }))
+    dragIndex.value = null
+}
+
+function onDragEnd(): void {
+    dragIndex.value = null
+}
+
+// ── Wizard navigation ─────────────────────────────────────────────────────────
+
+function canProceed(): boolean {
+    if (step.value === 1) return selectedAddress.value.trim().length > 0
+    if (step.value === 2) {
+        if (clientMode.value === 'select') return selectedClientId.value !== null
+        return !!(newClientForm.raison_sociale && newClientForm.email && newClientForm.password)
+    }
+    return true
+}
+
+async function nextStep(): Promise<void> {
+    if (!canProceed()) {
+        toastError?.(
+            step.value === 1
+                ? 'Veuillez sélectionner une adresse de domiciliation'
+                : 'Veuillez remplir les champs obligatoires'
+        )
+        return
     }
 
-    autosaveState.value = "saved";
-    autosaveAt.value    = new Date().toISOString();
-    autosaveError.value = "";
-  } catch (e: any) {
-    autosaveState.value = "error";
-    autosaveError.value = e?.data?.errors
-      ? Object.values(e.data.errors).flat().join(" · ")
-      : (e?.data?.message ?? "Erreur de sauvegarde");
-    if (!silent) toastError?.(autosaveError.value);
-  }
-}
-
-function scheduleAutosave(): void {
-  if (!selectedEntrepriseId.value) return;
-  if (autosaveTimer) clearTimeout(autosaveTimer);
-  autosaveState.value = "saving";
-  autosaveTimer = setTimeout(() => saveAsDraft(true), AUTOSAVE_DELAY);
-}
-
-// ── PDF ───────────────────────────────────────────────────
-async function generateAndDownloadPdf(): Promise<void> {
-  if (!currentContratId.value) {
-    toastError?.("Sauvegardez d'abord le contrat avant de générer le PDF");
-    return;
-  }
-  pdfLoading.value = true;
-  try {
-    const res = await $fetch<{ success: boolean; data: { url: string; pdf_path: string } }>(
-      `${getApiBase()}/api/contrats/${currentContratId.value}/pdf`,
-      { method: "POST", headers: authHeaders() },
-    );
-    pdfUrl.value = res.data.url;
-
-    const response = await fetch(res.data.url);
-    const blob     = await response.blob();
-    const blobUrl  = URL.createObjectURL(new Blob([blob], { type: "application/pdf" }));
-    const a        = document.createElement("a");
-    a.href         = blobUrl;
-    a.download     = `contrat_${currentContratId.value}.pdf`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(blobUrl), 3000);
-    success("PDF généré et téléchargé ✓");
-  } catch (e: any) {
-    toastError?.(e?.data?.message ?? "Erreur génération PDF");
-  } finally {
-    pdfLoading.value = false;
-  }
-}
-
-// ── Stepper navigation ────────────────────────────────────
-function next(): void {
-  if (!validateStep(step.value)) return toastError?.("Veuillez corriger les champs requis");
-  if (step.value < steps.length - 1) step.value++;
-}
-function prev(): void {
-  if (step.value > 0) step.value--;
-}
-
-// ── Reset ─────────────────────────────────────────────────
-function resetForNewContract(): void {
-  contract.resetForm?.();
-  contract.selectedServices  = [];
-  // Default dates: today → today + 12 months - 1 day
-  const today = todayIso();
-  contract.form.dateDebut    = today;
-  contract.form.dateFin      = addMonths(today, 12);
-  contract.form.months       = 12;
-  selectedIds.value          = articleItems.value.filter((a) => a.is_active).map((a) => a.id);
-  currentContratId.value     = "";
-  selectedEntrepriseId.value = null;
-  pdfUrl.value               = "";
-  step.value                 = 0;
-  autosaveState.value        = "idle";
-  autosaveAt.value           = "";
-  autosaveError.value        = "";
-  notificationDelays.value   = [1];
-}
-
-async function preloadFromRouteId(): Promise<void> {
-  const id = String(route.query.id || "");
-  if (!id) return;
-  try {
-    const res = await $fetch<{ success: boolean; data: any }>(
-      `${getApiBase()}/api/contrats/${id}`,
-      { headers: authHeaders() },
-    );
-    const c = res.data;
-    currentContratId.value     = String(c.id);
-    selectedEntrepriseId.value = c.entreprise_id    ?? null;
-    contract.form.dateDebut    = c.date_debut        ?? "";
-    contract.form.dateFin      = c.date_fin          ?? "";
-    contract.form.months       = c.duree_mois        ?? 12;
-    contract.form.instruction_no  = c.instruction_no  ?? "";
-    contract.form.ville_signature = c.ville_signature ?? "";
-    contract.form.date_signature  = c.date_signature  ?? "";
-    contract.form.caution         = c.caution         ?? "";
-    contract.form.mode_paiement   = c.mode_paiement   ?? "";
-    contract.setMonthly(Number(c.prix_mensuel ?? 0));
-    if (Array.isArray(c.articles)) {
-      selectedIds.value = c.articles.map((a: any) => a.id);
+    if (step.value === 2 && clientMode.value === 'create') {
+        saving.value = true
+        try {
+            const newClient = await clientsStore.create({
+                raison_sociale:   newClientForm.raison_sociale,
+                forme_juridique:  newClientForm.forme_juridique || undefined,
+                client_nom:       newClientForm.gerantNom,
+                client_email:     newClientForm.email,
+                client_password:  newClientForm.password,
+                client_telephone: newClientForm.tel || undefined,
+                statut:           'actif',
+                pays:             'Maroc',
+            })
+            selectedClientId.value = newClient.id
+            selectedClient.value   = newClient
+            clientMode.value       = 'select'
+            success('Client créé avec succès')
+        } catch (e: any) {
+            const msg = e?.data?.errors
+                ? Object.values(e.data.errors).flat().join(' · ')
+                : e?.data?.message ?? 'Erreur lors de la création du client'
+            toastError?.(msg)
+            saving.value = false
+            return
+        } finally {
+            saving.value = false
+        }
     }
-    if (c.notification_delay_months) {
-      notificationDelays.value = [c.notification_delay_months];
-    }
-    if (c.pdf_path) pdfUrl.value = `${getApiBase()}/storage/${c.pdf_path}`;
-  } catch (e) {
-    console.error("Erreur chargement contrat:", e);
-  }
+
+    step.value++
 }
 
-// ── Watches ───────────────────────────────────────────────
-watch(() => [contract.form.dateDebut, contract.form.dateFin], syncMonthsFromDates);
-watch(() => contract.form.months, () => contract.syncFromMonths());
-watch(
-  () => [contract.form, selectedIds.value, contract.selectedServices],
-  () => { saveDraft(); scheduleAutosave(); },
-  { deep: true },
-);
+function prevStep(): void {
+    if (step.value > 1) step.value--
+}
 
-// ── Lifecycle ─────────────────────────────────────────────
+// ── Save draft ────────────────────────────────────────────────────────────────
+
+/**
+ * POST /api/contrats
+ * Saves all wizard data as a draft and advances to step 4.
+ */
+async function saveDraft(): Promise<void> {
+    if (!selectedClientId.value) {
+        toastError?.('Aucun client sélectionné')
+        return
+    }
+
+    saving.value = true
+    try {
+        const body = {
+            entreprise_id:   selectedClientId.value,
+            titre_contrat:   contract.form.titreContrat  || null,
+            date_debut:      contract.form.dateDebut     || null,
+            date_fin:        contract.form.dateFin       || null,
+            duree_mois:      contract.form.months        || null,
+            prix_mensuel:    contract.monthlyTotal       || null,
+            prix_total:      contract.grandTotal         || null,
+            caution:         contract.form.caution       || null,
+            mode_paiement:   contract.form.mode_paiement  || null,
+            ville_signature: contract.form.ville_signature || null,
+            date_signature:  contract.form.date_signature  || null,
+            instruction_no:  contract.form.instruction_no  || null,
+            statut:          'draft',
+
+            articles: orderedArticles.value.map(a => ({
+                id:    String(a.id),
+                ordre: a.ordre,
+            })),
+        }
+
+        const res = await $fetch<{ success: boolean; data: any }>(
+            `${getApiBase()}/api/contrats`,
+            { method: 'POST', headers: authHeaders(), body }
+        )
+
+        contratId.value = res.data.id
+        success('Contrat enregistré avec succès')
+        step.value = 4
+
+    } catch (e: any) {
+        const msg = e?.data?.errors
+            ? Object.values(e.data.errors).flat().join(' · ')
+            : e?.data?.message ?? 'Erreur lors de la sauvegarde'
+        toastError?.(msg)
+    } finally {
+        saving.value = false
+    }
+}
+
+// ── PDF stream (preview + download) — fixed ────────────────────────────────────
+
+const pdfReady         = ref(false)   // true once "Préparer le PDF" has been clicked
+const showPreview      = ref(false)
+const pdfLoading       = ref(false)
+const previewError     = ref('')
+const previewObjectUrl = ref('')      // blob: URL currently shown in the <iframe>
+const downloadingPdf   = ref(false)
+
+/** Build the URL of the (now authenticated) PDF-stream endpoint. */
+function buildStreamUrl(mode: 'preview' | 'download'): string {
+    return `${getApiBase()}/api/contrats/${contratId.value}/pdf/stream?mode=${mode}`
+}
+
+/** Reveals the "Aperçu PDF" / "Télécharger PDF" buttons once the contract is saved. */
+function preparePdf(): void {
+    if (!contratId.value) return
+    pdfReady.value = true
+    success('PDF prêt — cliquez sur Aperçu ou Télécharger')
+}
+
+/**
+ * Fetch the PDF as a blob (with the normal Authorization header) and show it
+ * in the preview modal. Using a blob: URL instead of pointing the <iframe>
+ * straight at the cross-origin API URL is what fixes the
+ * "localhost refused to connect" bug — see the file-level comment above.
+ */
+async function openPreview(): Promise<void> {
+    if (!contratId.value || pdfLoading.value) return
+
+    showPreview.value  = true
+    pdfLoading.value   = true
+    previewError.value = ''
+
+    try {
+        const res = await fetch(buildStreamUrl('preview'), { headers: authHeaders() })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob = await res.blob()
+
+        if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
+        previewObjectUrl.value = URL.createObjectURL(blob)
+    } catch {
+        previewError.value = "Impossible de charger l'aperçu du PDF. Réessayez, ou téléchargez le fichier directement."
+    } finally {
+        pdfLoading.value = false
+    }
+}
+
+function closePreview(): void {
+    showPreview.value = false
+}
+
+/**
+ * Fetch the PDF as a blob and trigger a real file download, instead of
+ * relying on the browser's built-in PDF viewer opening in a new tab.
+ */
+async function downloadPdf(): Promise<void> {
+    if (!contratId.value || downloadingPdf.value) return
+    downloadingPdf.value = true
+    try {
+        const res = await fetch(buildStreamUrl('download'), { headers: authHeaders() })
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const blob      = await res.blob()
+        const objectUrl = URL.createObjectURL(blob)
+
+        const a    = document.createElement('a')
+        a.href     = objectUrl
+        a.download = `contrat_${contratId.value}.pdf`
+        document.body.appendChild(a)
+        a.click()
+        document.body.removeChild(a)
+        setTimeout(() => URL.revokeObjectURL(objectUrl), 3000)
+    } catch {
+        toastError?.('Erreur lors du téléchargement du PDF.')
+    } finally {
+        downloadingPdf.value = false
+    }
+}
+
+// ── Live contract preview (no contrat_id / no network call needed) ───────────
+
+const showLivePreview = ref(false)
+
+function openLivePreview(): void {
+    showLivePreview.value = true
+}
+
+function closeLivePreview(): void {
+    showLivePreview.value = false
+}
+
+/**
+ * Escape a value before it is interpolated into the v-html preview string.
+ * Every wizard field (company name, client name, article bodies, ...) is
+ * user input and must never be trusted as raw HTML.
+ */
+function escapeHtml(value: unknown): string {
+    if (value === null || value === undefined) return ''
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#x27;')
+}
+
+/** Format an ISO date string as dd/mm/yyyy for the preview; '—' when empty. */
+function formatPreviewDate(value: string | null | undefined): string {
+    if (!value) return '—'
+    const date = new Date(value)
+    if (Number.isNaN(date.getTime())) return value
+    return date.toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+}
+
+/**
+ * Build the {{variable}} → value map used to resolve tokens inside article
+ * bodies for the live preview. Mirrors ContratController::buildTokenMap().
+ */
+function buildPreviewTokenMap(): Record<string, string> {
+    const f = contract.form
+
+    const fmtMoney = (v: unknown): string => {
+        const n = Number(v)
+        return Number.isFinite(n) && n > 0
+            ? `${n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} DH`
+            : ''
+    }
+
+    return {
+        domiciliataire_nom: f.companyName || '',
+        domiciliataire_rc: f.companyRC || '',
+        domiciliataire_if: f.companyIF || '',
+        domiciliataire_tp: f.companyTP || '',
+        domiciliataire_adresse: f.companyAdresse || '',
+        domiciliataire_representant: f.companyRepresentant || '',
+
+        raison_sociale: f.societe || '',
+        societe: f.societe || '',
+        forme_juridique: selectedClient.value?.forme_juridique || '',
+        adresse_domiciliation: f.companyAdresse || '',
+        ville_client: selectedClient.value?.ville || '',
+
+        gerant_nom: f.gerantNom || '',
+        gerant_cin: f.gerantCIN || '',
+        gerant_telephone: f.tel || '',
+        telephone: f.tel || '',
+        gerant_email: f.email || '',
+        email: f.email || '',
+        gerant_adresse: f.adressePerso || '',
+
+        date_debut: formatPreviewDate(f.dateDebut),
+        date_fin: formatPreviewDate(f.dateFin),
+        date_signature: formatPreviewDate(f.date_signature),
+        duree_mois: String(f.months || ''),
+        instruction_no: f.instruction_no || '',
+        ville_signature: f.ville_signature || '',
+
+        prix_mensuel: fmtMoney(contract.monthlyTotal),
+        prix_total: fmtMoney(contract.grandTotal),
+        redevance_mensuelle: fmtMoney(contract.monthlyTotal),
+        redevance_annuelle: fmtMoney(contract.grandTotal),
+        caution: fmtMoney(f.caution),
+        mode_paiement: f.mode_paiement || '',
+    }
+}
+
+/**
+ * Replace every {{key}} token in an already-escaped article body with its
+ * resolved, escaped value. Mirrors ContratController::resolveTokens().
+ */
+function resolvePreviewTokens(escapedBody: string, tokenMap: Record<string, string>): string {
+    let result = escapedBody
+    for (const [key, value] of Object.entries(tokenMap)) {
+        const pattern = new RegExp(`\\{\\{\\s*${key}\\s*\\}\\}`, 'gi')
+        result = result.replace(pattern, escapeHtml(value))
+    }
+    return result.replace(
+        /\{\{\s*([a-z_]+)\s*\}\}/gi,
+        '<span style="color:#c8a96e;font-style:italic">[$1]</span>'
+    )
+}
+
+/**
+ * Live HTML preview of the contract as currently filled in the wizard.
+ * Recomputes instantly from in-memory state — no save, no backend call.
+ */
+const livePreviewHtml = computed((): string => {
+    const f = contract.form
+    const tokenMap = buildPreviewTokenMap()
+
+    const title               = escapeHtml(f.titreContrat?.trim() || 'CONTRAT DE DOMICILIATION')
+    const companyName         = escapeHtml(f.companyName)         || '—'
+    const companyRC           = escapeHtml(f.companyRC)           || '—'
+    const companyIF           = escapeHtml(f.companyIF)           || '—'
+    const companyRepresentant = escapeHtml(f.companyRepresentant) || '—'
+    const companyCIN          = escapeHtml(f.companyCIN)          || '—'
+    const companyAdresse      = escapeHtml(f.companyAdresse || selectedAddress.value) || '—'
+
+    const societe   = escapeHtml(f.societe)   || '—'
+    const gerantNom = escapeHtml(f.gerantNom) || '—'
+    const gerantCIN = escapeHtml(f.gerantCIN) || '—'
+    const tel       = escapeHtml(f.tel)       || '—'
+    const email     = escapeHtml(f.email)     || '—'
+
+    const dateDebut      = formatPreviewDate(f.dateDebut)
+    const dateFin        = formatPreviewDate(f.dateFin)
+    const dureeMois      = f.months ? `${f.months} mois` : '—'
+    const mensuel        = tokenMap.prix_mensuel || '—'
+    const annuel         = tokenMap.prix_total   || '—'
+    const villeSignature = escapeHtml(f.ville_signature) || '__________________'
+    const dateSignature  = f.date_signature ? formatPreviewDate(f.date_signature) : '__________________'
+    const instructionNo  = escapeHtml(f.instruction_no)
+
+    const articlesHtml = orderedArticles.value.length
+        ? orderedArticles.value.map((article, index) => {
+            const safeTitle    = escapeHtml(article.title) || `Article ${index + 1}`
+            const safeBody     = escapeHtml(article.body ?? '').replace(/\n/g, '<br>')
+            const resolvedBody = resolvePreviewTokens(safeBody, tokenMap)
+            return `
+              <div style="margin-bottom:16px;page-break-inside:avoid">
+                <p style="margin:0 0 6px;font-weight:700;font-size:13px;text-transform:uppercase">
+                  Article ${index + 1} — ${safeTitle}
+                </p>
+                <p style="margin:0;line-height:1.7;text-align:justify">${resolvedBody}</p>
+              </div>`
+        }).join('')
+        : '<p style="color:#999;font-style:italic">Aucun article sélectionné pour le moment.</p>'
+
+    return `
+      <div style="font-family:Arial, sans-serif;color:#000;background:#fff;
+                  padding:40px 48px;max-width:820px;margin:0 auto;font-size:13px;line-height:1.5">
+
+        <p style="text-align:center;font-size:16px;font-weight:700;text-transform:uppercase;margin:0 0 4px">
+          ${companyName}
+        </p>
+        <p style="text-align:center;font-size:18px;font-weight:700;text-transform:uppercase;margin:0 0 6px">
+          ${title}
+        </p>
+        ${instructionNo
+            ? `<p style="text-align:center;font-size:12px;font-weight:700;margin:0 0 20px">Réf. N° ${instructionNo}</p>`
+            : '<div style="margin-bottom:20px"></div>'}
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 10px">Entre les soussignés :</p>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 5px">D'une part</p>
+        <p style="text-align:justify;margin:0 0 15px">
+          Le Centre de domiciliation <strong>${companyName}</strong>, RC <strong>${companyRC}</strong>,
+          IF : <strong>${companyIF}</strong>, sis à <strong>${companyAdresse}</strong>.<br>
+          Représenté par <strong>${companyRepresentant}</strong>, CIN <strong>${companyCIN}</strong>.
+        </p>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 5px">D'autre part</p>
+        <p style="text-align:justify;margin:0 0 8px">
+          La société <strong>${societe}</strong>, représentée par :
+        </p>
+        <ul style="list-style:none;padding-left:24px;margin:0 0 15px">
+          <li>➤ <strong>${gerantNom}</strong>, porteur de CIN/Passeport : <strong>${gerantCIN}</strong></li>
+          <li>➤ Contact : <strong>${tel}</strong> · <strong>${email}</strong></li>
+        </ul>
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:16px 0"/>
+
+        <p style="font-weight:700;text-decoration:underline;margin:0 0 8px">Durée et redevance</p>
+        <p style="margin:0 0 15px">
+          Période : <strong>${dateDebut}</strong> au <strong>${dateFin}</strong> (${dureeMois})<br>
+          Redevance mensuelle : <strong>${mensuel}</strong> &nbsp;|&nbsp; Redevance totale : <strong>${annuel}</strong>
+        </p>
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:16px 0"/>
+
+        <p style="font-size:15px;font-weight:700;text-decoration:underline;text-transform:uppercase;margin:0 0 14px">
+          Clauses contractuelles
+        </p>
+        ${articlesHtml}
+
+        <hr style="border:none;border-top:1px solid #ccc;margin:24px 0 16px"/>
+
+        <p style="text-align:right;font-weight:700;margin:0 0 14px">
+          Fait à ${villeSignature}, le ${dateSignature}
+        </p>
+        <p style="text-align:center;font-style:italic;margin:0 0 20px">
+          « Signature précédée des mentions Lu et approuvé, bon pour accord »
+        </p>
+
+        <table style="width:100%;border-collapse:collapse">
+          <tr>
+            <td style="width:50%;vertical-align:top;padding:10px">
+              <p style="font-weight:700;text-decoration:underline;margin:0 0 6px">La société ${companyName}</p>
+              <p style="margin:0">Représentée par Mr. <strong>${companyRepresentant}</strong></p>
+            </td>
+            <td style="width:50%;vertical-align:top;padding:10px">
+              <p style="font-weight:700;text-decoration:underline;margin:0 0 6px">La société ${societe}</p>
+              <p style="margin:0">Représentée par <strong>${gerantNom}</strong></p>
+              <p style="margin:8px 0 0;font-size:12px">
+                N° Tel : <strong>${tel}</strong><br>Email : <strong>${email}</strong>
+              </p>
+            </td>
+          </tr>
+        </table>
+
+      </div>`
+})
+
+// ── Date auto-calculation ─────────────────────────────────────────────────────
+
+watch(() => contract.form.dateDebut, recalcMonths)
+watch(() => contract.form.dateFin,   recalcMonths)
+
+function recalcMonths(): void {
+    if (!contract.form.dateDebut || !contract.form.dateFin) return
+    const start  = new Date(contract.form.dateDebut)
+    const end    = new Date(contract.form.dateFin)
+    const months = (end.getFullYear() - start.getFullYear()) * 12
+                 + (end.getMonth() - start.getMonth())
+    if (!isNaN(months) && months > 0) {
+        contract.form.months = months
+        contract.syncFromMonths()
+    }
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+
 onMounted(async () => {
-  await Promise.all([articlesStore.fetchAll(), clientsStore.fetchAll()]);
-
-  const isNew = String(route.query.new || "") === "1";
-  if (isNew) {
-    resetForNewContract();
-    clearDraft();
-    await navigateTo({ path: "/admin/contrat", query: {} }, { replace: true });
-    return;
-  }
-
-  await preloadFromRouteId();
-
-  if (!currentContratId.value) {
-    loadDraft();
-    if (!selectedIds.value.length) {
-      selectedIds.value = articleItems.value.filter((a) => a.is_active).map((a) => a.id);
-    }
-    // Set default dates only if not restored from draft
-    if (!contract.form.dateDebut) {
-      const today = todayIso();
-      contract.form.dateDebut = today;
-      contract.form.dateFin   = addMonths(today, 12);
-      contract.form.months    = 12;
-    }
-  }
-
-  syncMonthsFromDates();
-});
+    await Promise.all([
+        loadProfile(),
+        clientsStore.fetchAll(),
+        articlesStore.fetchAll(),
+    ])
+})
 
 onBeforeUnmount(() => {
-  if (autosaveTimer) clearTimeout(autosaveTimer);
-});
-
-// ── HTML Preview computed ─────────────────────────────────
-// SECURITY: esc() is defined OUTSIDE computed — fixes compiler error
-// All user values must go through esc() before v-html interpolation
-function esc(value: string | null | undefined): string {
-  if (!value) return "";
-  return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;")
-    .replace(/\//g, "&#x2F;");
-}
-
-const contractPreviewHtml = computed((): string => {
-  const f          = contract.form as any;
-  const entreprise = clientItems.value.find((c) => c.id === selectedEntrepriseId.value);
-  const rep        = (entreprise as any)?.representant;
-
-  // Variable map — mirrors TemplateService.dataFromContrat()
-  const vars: Record<string, string> = {
-    domiciliataire_nom:     f.astNom      || "",
-    domiciliataire_rc:      f.astRC       || "",
-    domiciliataire_if:      f.astIF       || "",
-    domiciliataire_adresse: f.astAdresse  || "",
-    raison_sociale:      entreprise?.raison_sociale  || f.societe || "",
-    forme_juridique:     entreprise?.forme_juridique || "",
-    adresse_entreprise:  entreprise?.adresse         || "",
-    ville:               entreprise?.ville           || "",
-    pays:                entreprise?.pays            || "",
-    capital:             entreprise?.capital
-      ? Number(entreprise.capital).toLocaleString("fr-MA") + " DH"
-      : "",
-    gerant_nom:         f.gerantNom       || rep?.nom_complet || "",
-    gerant_cin:         f.gerantCIN       || rep?.cin         || "",
-    gerant_naissance:   rep?.date_naissance
-      ? formatDatePreview(rep.date_naissance)
-      : "",
-    gerant_adresse:     rep?.adresse      || f.adressePerso   || "",
-    gerant_telephone:   f.tel             || rep?.telephone   || "",
-    gerant_email:       f.email           || rep?.email       || "",
-    gerant_nationalite: rep?.nationalite  || "",
-    numero_contrat:  currentContratId.value       || "",
-    instruction_no:  f.instruction_no             || "",
-    date_debut:      formatDatePreview(f.dateDebut),
-    date_fin:        formatDatePreview(f.dateFin),
-    duree_mois:      String(f.months              || ""),
-    date_signature:  formatDatePreview(f.date_signature),
-    ville_signature: f.ville_signature            || "",
-    redevance_mensuelle: contract.monthlyTotal
-      ? contract.monthlyTotal.toLocaleString("fr-MA") + " DH/mois"
-      : "",
-    redevance_annuelle: contract.grandTotal
-      ? contract.grandTotal.toLocaleString("fr-MA") + " DH"
-      : "",
-    caution: f.caution
-      ? Number(f.caution).toLocaleString("fr-MA") + " DH"
-      : "",
-    mode_paiement: f.mode_paiement || "",
-  };
-
-  const articleLines = selectedSorted.value
-    .map((a, i) =>
-      `<div style="margin-bottom:16px">
-        <p style="margin:0 0 6px;font-weight:700;font-size:13px">
-          ARTICLE ${i + 1} — ${esc(a.title)}
-        </p>
-        <p style="margin:0;line-height:1.7;text-align:justify">
-          ${renderVariables(esc(a.body ?? ""), vars)}
-        </p>
-      </div>`
-    )
-    .join("");
-
-  // SECURITY: every user value goes through esc() before HTML interpolation
-  const domiciliataire  = esc(vars.domiciliataire_nom) || "-";
-  const domicilie       = esc(vars.raison_sociale)      || "-";
-  const astNom          = esc(f.astNom)                 || "-";
-  const astRC           = esc(f.astRC)                  || "-";
-  const astIF           = esc(f.astIF)                  || "-";
-  const astAdresse      = esc(f.astAdresse)             || "-";
-  const astRepresentant = esc(f.astRepresentant)        || "-";
-  const astCIN          = esc(f.astCIN)                 || "-";
-  const gerantNom       = esc(vars.gerant_nom)          || "-";
-  const gerantCin       = esc(vars.gerant_cin)          || "-";
-  const gerantTel       = esc(vars.gerant_telephone)    || "-";
-  const gerantEmail     = esc(vars.gerant_email)        || "-";
-  const dateDebut       = esc(vars.date_debut)          || "-";
-  const dateFin         = esc(vars.date_fin)            || "-";
-  const dureeMois       = esc(vars.duree_mois)          || "-";
-  const mensuel         = esc(vars.redevance_mensuelle) || "-";
-  const annuel          = esc(vars.redevance_annuelle)  || "-";
-  const villeSig        = esc(vars.ville_signature)     || "__________________";
-  const dateSig         = esc(vars.date_signature)      || "__________________";
-
-  return `
-    <div style="font-family:'Times New Roman',serif;color:#111;background:#fff;
-                padding:40px 48px;max-width:860px;margin:0 auto;font-size:12px;line-height:1.65">
-      <h1 style="text-align:center;font-size:20px;margin:0 0 6px;letter-spacing:1px;text-transform:uppercase">
-        Contrat de Domiciliation
-      </h1>
-      <p style="text-align:center;font-size:11px;color:#555;margin:0 0 14px">
-        ${astNom} — RC : ${astRC} — IF : ${astIF}
-      </p>
-      <hr style="border:none;border-top:1.5px solid #c8a96e;margin:12px 0 16px"/>
-
-      <p style="margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888">Parties</p>
-      <p style="margin:0 0 5px"><b>Domiciliataire :</b> ${domiciliataire}</p>
-      <p style="margin:0 0 5px"><b>Représenté par :</b> ${astRepresentant}, CIN ${astCIN}</p>
-      <p style="margin:0 0 5px"><b>Adresse siège :</b> ${astAdresse}</p>
-      <p style="margin:0 0 5px"><b>Domicilié :</b> ${domicilie}</p>
-      <p style="margin:0 0 5px"><b>Gérant :</b> ${gerantNom}, CIN ${gerantCin}</p>
-      <p style="margin:0 0 14px"><b>Contact :</b> ${gerantTel} · ${gerantEmail}</p>
-
-      <hr style="border:none;border-top:1px solid #ddd;margin:10px 0 14px"/>
-
-      <p style="margin:0 0 5px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888">Durée &amp; Redevance</p>
-      <p style="margin:0 0 5px"><b>Période :</b> ${dateDebut} → ${dateFin} (${dureeMois} mois)</p>
-      <p style="margin:0 0 16px"><b>Redevance mensuelle :</b> ${mensuel} &nbsp;|&nbsp; <b>Annuelle :</b> ${annuel}</p>
-
-      <hr style="border:none;border-top:1px solid #ddd;margin:10px 0 14px"/>
-
-      <p style="margin:0 0 12px;font-size:10px;text-transform:uppercase;letter-spacing:1px;color:#888">Articles du contrat</p>
-      ${articleLines || '<p style="color:#999;font-style:italic">Aucun article sélectionné.</p>'}
-
-      <hr style="border:none;border-top:1.5px solid #c8a96e;margin:20px 0 14px"/>
-
-      <div style="display:table;width:100%;margin-top:40px">
-        <div style="display:table-cell;width:50%">
-          <p style="margin:0 0 50px">Fait à ${villeSig}</p>
-          <p style="margin:0;font-weight:bold">Signature du domiciliataire</p>
-          <p style="margin:4px 0 0;font-size:11px;color:#555">${domiciliataire}</p>
-        </div>
-        <div style="display:table-cell;width:50%;text-align:right">
-          <p style="margin:0 0 50px">Le ${dateSig}</p>
-          <p style="margin:0;font-weight:bold">Lu et approuvé, bon pour accord</p>
-          <p style="margin:4px 0 0;font-size:11px;color:#555">${domicilie}</p>
-        </div>
-      </div>
-    </div>`;
-});
+    if (previewObjectUrl.value) URL.revokeObjectURL(previewObjectUrl.value)
+})
 </script>
 
 <template>
-  <div class="space-y-4 animate-fade-up">
+  <div class="space-y-5 animate-fade-up max-w-3xl mx-auto">
 
-    <!-- ── Header ─────────────────────────────────────── -->
-    <div class="card p-4 flex items-center justify-between flex-wrap gap-2">
+    <!-- ── Page header ──────────────────────────────────────────────────────── -->
+    <div class="flex items-start justify-between gap-3 flex-wrap">
       <div>
-        <h1 class="font-serif text-2xl">
-          {{ currentContratId ? `Contrat #${currentContratId}` : "Nouveau contrat" }}
+        <h1 class="font-serif text-2xl" style="color:var(--app-text)">
+          Nouveau <em class="italic" style="color:#c8a96e">Contrat</em>
         </h1>
-        <p class="text-xs mt-1 text-app-text/40">
-          <span v-if="autosaveState === 'saved'">
-            ✓ Sauvegardé {{ new Date(autosaveAt).toLocaleTimeString() }}
-          </span>
-          <span v-else-if="autosaveState === 'saving'">⏳ Sauvegarde en cours...</span>
-          <span v-else-if="autosaveState === 'error'" class="text-red-400">
-            ✗ {{ autosaveError }}
-          </span>
-          <span v-else-if="lastSavedAt">
-            Brouillon local : {{ new Date(lastSavedAt).toLocaleString() }}
-          </span>
-        </p>
-      </div>
-      <div class="flex gap-2">
-        <button class="btn btn-outline btn-sm" @click="showPreview = true">👁 Aperçu</button>
-        <button class="btn btn-outline btn-sm" @click="saveAsDraft(false)">💾 Sauvegarder</button>
-      </div>
-    </div>
-
-    <!-- ── Stepper ────────────────────────────────────── -->
-    <div class="card p-3">
-      <div class="flex items-center gap-2 flex-wrap">
-        <button
-          v-for="(s, i) in steps"
-          :key="s"
-          class="px-3 py-1.5 rounded-lg text-xs border font-bold transition"
-          :class="step === i
-            ? 'border-gold text-gold bg-gold/10'
-            : 'border-white/10 text-app-text/50 hover:border-white/20'"
-          @click="step = i"
-        >
-          {{ i + 1 }}. {{ s }}
-        </button>
-      </div>
-    </div>
-
-    <!-- ── Étape 0 : AST-FISC ────────────────────────── -->
-    <div v-if="step === 0" class="card p-4 grid grid-cols-1 md:grid-cols-2 gap-3">
-      <div>
-        <label class="f-label">Raison sociale</label>
-        <input v-model="contract.form.astNom" class="f-input" />
-      </div>
-      <div>
-        <label class="f-label">RC</label>
-        <input v-model="contract.form.astRC" class="f-input" />
-      </div>
-      <div>
-        <label class="f-label">IF</label>
-        <input v-model="contract.form.astIF" class="f-input" />
-      </div>
-      <div>
-        <label class="f-label">Représentant</label>
-        <input v-model="contract.form.astRepresentant" class="f-input" />
-      </div>
-      <div>
-        <label class="f-label">CIN Représentant</label>
-        <input v-model="contract.form.astCIN" class="f-input" />
-      </div>
-      <div>
-        <label class="f-label">Adresse siège</label>
-        <input v-model="contract.form.astAdresse" class="f-input" />
-      </div>
-    </div>
-
-    <!-- ── Étape 1 : Client ───────────────────────────── -->
-    <div v-else-if="step === 1" class="card p-4 space-y-4">
-      <div>
-        <label class="f-label">Entreprise cliente *</label>
-        <select v-model="selectedEntrepriseId" class="f-input">
-          <option :value="null" disabled>-- Sélectionner une entreprise --</option>
-          <option v-for="c in clientItems" :key="c.id" :value="c.id">
-            {{ c.raison_sociale }}{{ c.ville ? ` — ${c.ville}` : "" }}
-          </option>
-        </select>
-        <p
-          v-if="!clientItems.length && !clientsStore.loading"
-          class="text-xs text-app-text/40 mt-1"
-        >
-          Aucun client —
-          <NuxtLink to="/admin/clients" class="text-gold underline">
-            créer un client d'abord
-          </NuxtLink>
+        <p class="text-sm mt-1" style="color:var(--app-text-muted)">
+          Étape {{ step }} sur {{ totalSteps }}
         </p>
       </div>
 
-      <div
-        v-if="selectedEntrepriseId"
-        class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3"
-      >
-        <p class="text-app-text/40 text-xs uppercase tracking-widest mb-2">
-          Informations depuis la base de données
-        </p>
-        <template
-          v-for="c in clientItems.filter((x) => x.id === selectedEntrepriseId)"
-          :key="c.id"
-        >
-          <p><b>Raison sociale :</b> {{ c.raison_sociale }}</p>
-          <p><b>Forme juridique :</b> {{ c.forme_juridique ?? "-" }}</p>
-          <p><b>Adresse :</b> {{ c.adresse ?? "-" }}, {{ c.ville ?? "-" }}</p>
-          <p v-if="c.client_user">
-            <b>Gérant :</b> {{ c.client_user.nom }} {{ c.client_user.prenom }}
-          </p>
-          <p v-if="c.client_user"><b>Email :</b> {{ c.client_user.email }}</p>
-        </template>
-      </div>
-
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label class="f-label">Nom gérant (contrat)</label>
-          <input v-model="contract.form.gerantNom" class="f-input" />
-        </div>
-        <div>
-          <label class="f-label">CIN gérant</label>
-          <input v-model="contract.form.gerantCIN" class="f-input" />
-        </div>
-        <div>
-          <label class="f-label">Téléphone</label>
-          <input v-model="contract.form.tel" class="f-input" />
-        </div>
-        <div>
-          <label class="f-label">Email</label>
-          <input v-model="contract.form.email" class="f-input" type="email" />
-        </div>
-        <div class="md:col-span-2">
-          <label class="f-label">Adresse personnelle</label>
-          <input v-model="contract.form.adressePerso" class="f-input" />
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Étape 2 : Durée & Montants ────────────────── -->
-    <div v-else-if="step === 2" class="card p-4 space-y-4">
-
-      <!-- Dates + redevance -->
-      <p class="text-xs uppercase text-gold tracking-widest font-bold">
-        Durée &amp; Redevance
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label class="f-label">Date début *</label>
-          <input v-model="contract.form.dateDebut" class="f-input" type="date" />
-        </div>
-        <div>
-          <label class="f-label">Date fin</label>
-          <input v-model="contract.form.dateFin" class="f-input" type="date" />
-        </div>
-        <div>
-          <label class="f-label">Redevance mensuelle (DH)</label>
-          <input
-            :value="contract.form.redevanceMensuelle"
-            class="f-input"
-            type="number"
-            @input="(e: any) => contract.setMonthly(Number(e.target.value) || 0)"
-          />
-        </div>
-        <div>
-          <label class="f-label">Redevance annuelle (DH)</label>
-          <input
-            :value="contract.form.redevanceAnnuelle"
-            class="f-input"
-            type="number"
-            @input="(e: any) => contract.setAnnual(Number(e.target.value) || 0)"
-          />
-        </div>
-      </div>
-
-      <!-- Recap -->
-      <div class="rounded-xl border border-white/10 p-3 space-y-1 text-sm bg-white/3">
-        <p>Durée calculée : <b>{{ contract.form.months }} mois</b></p>
-        <p>Total mensuel : <b>{{ contract.monthlyTotal }} DH</b></p>
-        <p>Total global : <b class="text-gold text-base">{{ contract.grandTotal }} DH</b></p>
-      </div>
-
-      <!-- Notification delay — multi-select -->
-      <div class="rounded-xl border border-gold/20 p-3 space-y-2 bg-gold/5">
-        <p class="text-xs uppercase text-gold tracking-widest font-bold">
-          🔔 Rappels avant expiration
-        </p>
-        <p class="text-xs text-app-text/50">
-          Sélectionnez un ou plusieurs délais — vous recevrez une notification à chaque échéance.
-        </p>
-        <div class="flex gap-2 flex-wrap">
-          <button
-            v-for="m in [1, 3, 6]"
-            :key="m"
-            class="px-4 py-2 rounded-lg text-sm font-bold border transition"
-            :class="notificationDelays.includes(m)
-              ? 'border-gold bg-gold/20 text-gold'
-              : 'border-white/10 text-app-text/50 hover:border-white/30'"
-            @click="toggleDelay(m)"
-          >
-            {{ m }} mois
-          </button>
-        </div>
-        <p class="text-xs text-app-text/30">
-          Sélectionnés : {{ notificationDelays.sort((a,b) => a-b).join(", ") }} mois avant expiration
-        </p>
-      </div>
-
-      <!-- Contract detail fields — feed {{variables}} -->
-      <p class="text-xs uppercase text-gold tracking-widest font-bold pt-1">
-        Détails du contrat
-      </p>
-      <p class="text-xs text-app-text/40 -mt-2">
-        Ces valeurs remplaceront les variables dans les articles.
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-        <div>
-          <label class="f-label">
-            N° Instruction
-            <code class="text-gold text-[10px] ml-1 font-mono">&#123;&#123;instruction_no&#125;&#125;</code>
-          </label>
-          <input
-            v-model="contract.form.instruction_no"
-            class="f-input"
-            placeholder="Ex: 1923"
-          />
-        </div>
-        <div>
-          <label class="f-label">
-            Ville de signature
-            <code class="text-gold text-[10px] ml-1 font-mono">&#123;&#123;ville_signature&#125;&#125;</code>
-          </label>
-          <input
-            v-model="contract.form.ville_signature"
-            class="f-input"
-            placeholder="Ex: AGADIR"
-          />
-        </div>
-        <div>
-          <label class="f-label">
-            Date de signature
-            <code class="text-gold text-[10px] ml-1 font-mono">&#123;&#123;date_signature&#125;&#125;</code>
-          </label>
-          <input
-            v-model="contract.form.date_signature"
-            class="f-input"
-            type="date"
-          />
-        </div>
-        <div>
-          <label class="f-label">
-            Mode de paiement
-            <code class="text-gold text-[10px] ml-1 font-mono">&#123;&#123;mode_paiement&#125;&#125;</code>
-          </label>
-          <select v-model="contract.form.mode_paiement" class="f-input">
-            <option value="">-- Choisir --</option>
-            <option value="Virement bancaire">Virement bancaire</option>
-            <option value="Espèces">Espèces</option>
-            <option value="Chèque">Chèque</option>
-          </select>
-        </div>
-        <div>
-          <label class="f-label">
-            Caution (DH)
-            <code class="text-gold text-[10px] ml-1 font-mono">&#123;&#123;caution&#125;&#125;</code>
-          </label>
-          <input
-            v-model="contract.form.caution"
-            class="f-input"
-            type="number"
-            placeholder="Ex: 500"
-          />
-        </div>
-      </div>
-    </div>
-
-    <!-- ── Étape 3 : Articles depuis DB ──────────────── -->
-    <div v-else-if="step === 3" class="space-y-3">
-      <div class="card p-4 space-y-3">
-
-        <div class="flex items-center justify-between">
-          <p class="font-semibold text-sm">
-            Bibliothèque d'articles
-            <span class="text-app-text/40 font-normal ml-1">
-              ({{ articleItems.length }} disponibles)
-            </span>
-          </p>
-          <p class="text-xs text-gold">{{ selectedIds.length }} sélectionné(s)</p>
-        </div>
-
-        <div v-if="articlesLoading" class="text-center py-8 text-app-text/40">
-          Chargement des articles...
-        </div>
-
-        <div v-else class="space-y-2">
-          <div
-            v-for="a in articleItems"
-            :key="a.id"
-            class="rounded-xl border p-3 transition"
-            :class="selectedIds.includes(a.id)
-              ? 'border-gold/40 bg-gold/5'
-              : 'border-white/10 hover:border-white/20'"
-          >
-            <div v-if="editingId !== a.id">
-              <div class="flex items-start justify-between gap-2">
-                <button class="text-left flex-1 min-w-0" @click="toggleArticle(a.id)">
-                  <p class="font-semibold text-sm">{{ a.title }}</p>
-                  <p class="text-xs text-app-text/50 mt-1 line-clamp-2">{{ a.body }}</p>
-                </button>
-                <div class="flex gap-1 flex-shrink-0 ml-2 items-center">
-                  <span
-                    class="text-xs px-2 py-0.5 rounded-full"
-                    :class="selectedIds.includes(a.id)
-                      ? 'text-gold bg-gold/10'
-                      : 'text-app-text/40 bg-white/5'"
-                  >
-                    {{ selectedIds.includes(a.id) ? "✓ Sélectionné" : "○" }}
-                  </span>
-                  <button class="btn btn-outline btn-sm" @click.stop="startEdit(a)">Éditer</button>
-                  <button class="btn btn-danger btn-sm" @click.stop="deleteArticle(a.id)">✕</button>
-                </div>
-              </div>
-            </div>
-
-            <div v-else class="space-y-3">
-              <input
-                v-model="editTitle"
-                class="f-input text-sm"
-                placeholder="Titre de l'article"
-              />
-              <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                <div>
-                  <p class="f-label mb-1">
-                    Contenu
-                    <span class="text-app-text/30 font-normal text-xs ml-1">
-                      — glissez les variables →
-                    </span>
-                  </p>
-                  <textarea
-                    ref="inlineEditTextareaRef"
-                    v-model="editBody"
-                    class="f-input text-sm min-h-[140px] resize-y font-mono"
-                    placeholder="Contenu de l'article avec {{variables}}..."
-                    @dragover="inlineEditPanelRef?.onDragOver($event)"
-                    @drop="inlineEditPanelRef?.onDrop($event)"
-                  />
-                </div>
-                <div
-                  class="border border-white/10 rounded-xl p-3 overflow-y-auto"
-                  style="max-height:220px"
-                >
-                  <VariablePanel
-                    ref="inlineEditPanelRef"
-                    v-model="editBody"
-                    :textarea-ref="inlineEditTextareaRef"
-                  />
-                </div>
-              </div>
-              <div class="flex gap-2">
-                <button
-                  class="btn btn-gold btn-sm"
-                  :disabled="savingArticle"
-                  @click="saveEdit"
-                >
-                  {{ savingArticle ? "Enregistrement..." : "✓ Enregistrer" }}
-                </button>
-                <button class="btn btn-outline btn-sm" @click="cancelEdit">Annuler</button>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div class="border-t border-white/10 pt-4 space-y-3">
-          <p class="text-xs uppercase text-gold tracking-widest font-bold">
-            Ajouter un article à la bibliothèque
-          </p>
-          <input
-            v-model="newArtTitle"
-            class="f-input"
-            placeholder="Titre du nouvel article"
-          />
-          <div class="grid grid-cols-1 lg:grid-cols-2 gap-3">
-            <div>
-              <textarea
-                ref="newArtTextareaRef"
-                v-model="newArtBody"
-                class="f-input min-h-[140px] resize-y font-mono text-sm"
-                placeholder="Contenu du nouvel article avec {{variables}}..."
-                @dragover="newArtPanelRef?.onDragOver($event)"
-                @drop="newArtPanelRef?.onDrop($event)"
-              />
-            </div>
-            <div
-              class="border border-white/10 rounded-xl p-3 overflow-y-auto"
-              style="max-height:220px"
-            >
-              <VariablePanel
-                ref="newArtPanelRef"
-                v-model="newArtBody"
-                :textarea-ref="newArtTextareaRef"
-              />
-            </div>
-          </div>
-          <button
-            class="btn btn-gold btn-md"
-            :disabled="savingArticle || !newArtTitle.trim()"
-            @click="addArticle"
-          >
-            {{ savingArticle ? "Ajout..." : "+ Ajouter à la bibliothèque" }}
-          </button>
-        </div>
-
-      </div>
-    </div>
-
-    <!-- ── Étape 4 : Récapitulatif ────────────────────── -->
-    <div v-else class="card p-4 space-y-3">
-      <p class="font-serif text-lg">Récapitulatif du contrat</p>
-      <div class="space-y-1 text-sm">
-        <p>
-          Entreprise :
-          <b>{{ clientItems.find((c) => c.id === selectedEntrepriseId)?.raison_sociale ?? "—" }}</b>
-        </p>
-        <p>
-          Période :
-          <b>{{ formatDatePreview(contract.form.dateDebut) }} → {{ formatDatePreview(contract.form.dateFin) }}</b>
-        </p>
-        <p>Durée : <b>{{ contract.form.months }} mois</b></p>
-        <p>Redevance mensuelle : <b>{{ contract.monthlyTotal }} DH</b></p>
-        <p>Total global : <b class="text-gold text-base">{{ contract.grandTotal }} DH</b></p>
-        <p>Articles inclus : <b>{{ selectedIds.length }}</b></p>
-        <p v-if="contract.form.ville_signature">
-          Ville signature : <b>{{ contract.form.ville_signature }}</b>
-        </p>
-        <p v-if="contract.form.mode_paiement">
-          Mode de paiement : <b>{{ contract.form.mode_paiement }}</b>
-        </p>
-        <p>
-          Rappels configurés :
-          <b>{{ notificationDelays.sort((a,b) => a-b).join(", ") }} mois avant expiration</b>
-        </p>
-      </div>
-
-      <div v-if="pdfUrl" class="p-3 rounded-xl border border-green-500/30 bg-green-500/10">
-        <p class="text-sm text-green-400">
-          ✓ PDF disponible —
-          <a :href="pdfUrl" target="_blank" class="underline">Ouvrir dans un nouvel onglet</a>
-        </p>
-      </div>
-    </div>
-
-    <!-- ── Navigation ─────────────────────────────────── -->
-    <div class="flex items-center justify-between gap-2">
-      <button class="btn btn-outline btn-md" :disabled="step === 0" @click="prev">
-        ← Précédent
+      <!-- Live preview — available at every step, no save required first -->
+      <button type="button" class="btn btn-outline btn-md shrink-0" @click="openLivePreview">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+          <circle cx="12" cy="12" r="3"/>
+        </svg>
+        Aperçu du contrat
       </button>
-      <div class="flex gap-2 flex-wrap justify-end">
-        <button class="btn btn-outline btn-sm" @click="clearDraft">🗑 Vider brouillon</button>
-        <button
-          v-if="step === 4"
-          class="btn btn-gold btn-md"
-          :disabled="pdfLoading"
-          @click="generateAndDownloadPdf"
-        >
-          {{ pdfLoading ? "⏳ Génération..." : "⬇ Générer PDF" }}
-        </button>
-        <button v-if="step < 4" class="btn btn-gold btn-md" @click="next">Suivant →</button>
-      </div>
     </div>
 
-  </div>
+    <!-- ── Progress bar ─────────────────────────────────────────────────────── -->
+    <div class="flex items-center gap-2">
+      <div
+        v-for="s in totalSteps" :key="s"
+        class="h-1.5 flex-1 rounded-full transition-all duration-300"
+        :style="`background: ${s <= step ? '#c8a96e' : 'var(--app-border)'}`"
+      />
+    </div>
 
-  <!-- ── Modal aperçu — teleported to body ─────────────── -->
-  <Teleport to="body">
-    <div
-      v-if="showPreview"
-      class="fixed inset-0 z-[200] bg-black/80 overflow-y-auto"
-    >
-      <div class="min-h-full px-4 py-8">
-        <div class="max-w-4xl mx-auto">
 
-          <div class="flex justify-end mb-4 gap-2">
-            <button class="btn btn-outline btn-sm" @click="showPreview = false">
-              ✕ Fermer
-            </button>
-            <button
-              class="btn btn-gold btn-sm"
-              :disabled="pdfLoading"
-              @click="generateAndDownloadPdf"
-            >
-              {{ pdfLoading ? "Génération..." : "⬇ Télécharger PDF" }}
-            </button>
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STEP 1 — Domiciliataire info + address selector + contract title
+    ══════════════════════════════════════════════════════════════════════ -->
+    <div v-if="step === 1" class="space-y-4">
+
+      <!-- Profile status banner -->
+      <div
+        class="flex items-center gap-3 rounded-xl px-4 py-3 text-sm"
+        :style="profileLoaded
+          ? 'background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.2);color:#22c55e'
+          : 'background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:#f59e0b'"
+      >
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none"
+             stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+          <template v-if="profileLoaded">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </template>
+          <template v-else>
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+            <line x1="12" y1="9" x2="12" y2="13"/>
+            <line x1="12" y1="17" x2="12.01" y2="17"/>
+          </template>
+        </svg>
+        <span>
+          {{ profileLoaded ? 'Profil chargé automatiquement' : 'Profil incomplet —' }}
+          <NuxtLink to="/admin/profile" class="underline ml-1" style="opacity:0.8">
+            {{ profileLoaded ? 'Modifier →' : 'Compléter votre profil →' }}
+          </NuxtLink>
+        </span>
+      </div>
+
+      <!-- Domiciliataire read-only summary -->
+      <div class="card p-5">
+        <p class="text-xs uppercase tracking-widest font-bold mb-4" style="color:#c8a96e">
+          Domiciliataire (depuis votre profil)
+        </p>
+        <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Société</p>
+            <p class="font-medium" style="color:var(--app-text)">{{ contract.form.companyName || '—' }}</p>
           </div>
-
-          <div class="rounded-xl overflow-hidden shadow-2xl">
-            <!-- eslint-disable-next-line vue/no-v-html -->
-            <div v-html="contractPreviewHtml" />
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Représentant</p>
+            <p class="font-medium" style="color:var(--app-text)">{{ contract.form.companyRepresentant || '—' }}</p>
           </div>
-
-          <div class="flex justify-center mt-6 pb-4">
-            <button class="btn btn-outline btn-md" @click="showPreview = false">
-              ✕ Fermer l'aperçu
-            </button>
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">CIN</p>
+            <p style="color:var(--app-text)">{{ contract.form.companyCIN || '—' }}</p>
           </div>
-
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">RC</p>
+            <p style="color:var(--app-text)">{{ contract.form.companyRC || '—' }}</p>
+          </div>
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">IF</p>
+            <p style="color:var(--app-text)">{{ contract.form.companyIF || '—' }}</p>
+          </div>
+          <div>
+            <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">TP</p>
+            <p style="color:var(--app-text)">{{ contract.form.companyTP || '—' }}</p>
+          </div>
         </div>
       </div>
-    </div>
-  </Teleport>
 
+      <!-- ── Dynamic contract title (client chooses the name shown on the PDF) -->
+      <div class="card p-5 space-y-4">
+        <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+          Titre du contrat
+        </p>
+        <div>
+          <label class="f-label">Intitulé affiché sur le document PDF</label>
+          <input
+            v-model="contract.form.titreContrat"
+            class="f-input"
+            placeholder="Contrat de Domiciliation"
+            maxlength="255"
+          />
+          <p class="text-[10px] mt-1" style="color:var(--app-text-faint)">
+            Ce texte apparaît centré en tête du PDF. Laissez vide pour utiliser
+            le titre par défaut « Contrat de Domiciliation ».
+          </p>
+        </div>
+        <div
+          v-if="contract.form.titreContrat.trim()"
+          class="rounded-xl px-4 py-3 text-sm text-center font-semibold tracking-wide"
+          style="background:rgba(200,169,110,0.08);border:1px solid rgba(200,169,110,0.2);color:#c8a96e"
+        >
+          Aperçu : {{ contract.form.titreContrat }}
+        </div>
+        <div>
+          <label class="f-label">
+            Numéro d'instruction
+            <span class="text-[10px] ml-1" style="color:var(--app-text-faint)">(optionnel)</span>
+          </label>
+          <input v-model="contract.form.instruction_no" class="f-input" placeholder="INS-2026-001" />
+        </div>
+      </div>
+
+      <!-- ── Address selector ──────────────────────────────────────────────── -->
+      <div class="card p-5 space-y-4">
+        <div class="flex items-center justify-between flex-wrap gap-2">
+          <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+            Adresse de domiciliation *
+          </p>
+          <NuxtLink to="/admin/profile" class="text-[10px] underline"
+                    style="color:var(--app-text-faint)" target="_blank">
+            Gérer les adresses →
+          </NuxtLink>
+        </div>
+
+        <div v-if="addresses.length > 0" class="space-y-3">
+          <p class="text-xs" style="color:var(--app-text-faint)">
+            Sélectionnez l'adresse qui apparaîtra sur ce contrat :
+          </p>
+          <div class="flex flex-col gap-2">
+            <button
+              v-for="addr in addresses" :key="addr.value"
+              type="button"
+              class="w-full text-left rounded-xl px-4 py-3 transition-all text-sm"
+              :style="selectedAddress === addr.value
+                ? 'background:rgba(200,169,110,0.12);border:2px solid #c8a96e;color:var(--app-text)'
+                : 'background:var(--app-surface-2);border:2px solid var(--app-border);color:var(--app-text-muted)'"
+              @click="pickAddress(addr)"
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div class="min-w-0">
+                  <p class="font-semibold text-xs uppercase tracking-wide mb-0.5"
+                     :style="selectedAddress === addr.value ? 'color:#c8a96e' : 'color:var(--app-text-faint)'">
+                    {{ addr.label }}
+                  </p>
+                  <p class="truncate" style="color:var(--app-text)">{{ addr.value }}</p>
+                </div>
+                <div class="shrink-0 w-6 h-6 rounded-full flex items-center justify-center transition-all"
+                     :style="selectedAddress === addr.value ? 'background:#c8a96e' : 'background:var(--app-border)'">
+                  <svg width="11" height="11" viewBox="0 0 24 24" fill="none"
+                       stroke="white" stroke-width="3" stroke-linecap="round">
+                    <path d="M20 6L9 17l-5-5"/>
+                  </svg>
+                </div>
+              </div>
+            </button>
+          </div>
+          <div v-if="selectedAddress"
+               class="flex items-center gap-2 rounded-lg px-3 py-2 text-xs"
+               style="background:rgba(34,197,94,0.08);border:1px solid rgba(34,197,94,0.15);color:#22c55e">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.5" stroke-linecap="round">
+              <path d="M20 6L9 17l-5-5"/>
+            </svg>
+            {{ selectedAddress }}
+          </div>
+        </div>
+
+        <div v-else class="space-y-3">
+          <div class="flex items-start gap-3 rounded-xl px-4 py-3 text-sm"
+               style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.2);color:#f59e0b">
+            <svg class="shrink-0 mt-0.5" width="14" height="14" viewBox="0 0 24 24"
+                 fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+              <line x1="12" y1="9" x2="12" y2="13"/>
+              <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </svg>
+            <span>
+              Aucune adresse enregistrée dans votre profil.
+              <NuxtLink to="/admin/profile" class="underline ml-1" target="_blank">
+                Ajouter des adresses →
+              </NuxtLink>
+            </span>
+          </div>
+          <div>
+            <label class="f-label">Saisir l'adresse manuellement *</label>
+            <input v-model="selectedAddress" class="f-input"
+                   placeholder="Ex : Rue Mohammed V, Résidence Atlas, Agadir 80000"
+                   @input="contract.form.companyAdresse = selectedAddress" />
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STEP 2 — Client selection / creation
+    ══════════════════════════════════════════════════════════════════════ -->
+    <div v-else-if="step === 2" class="space-y-4">
+
+      <div class="flex gap-2">
+        <button type="button" class="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                :style="clientMode === 'select'
+                  ? 'background:rgba(200,169,110,0.15);border:2px solid #c8a96e;color:#c8a96e'
+                  : 'background:var(--app-surface-2);border:2px solid var(--app-border);color:var(--app-text-muted)'"
+                @click="clientMode = 'select'; selectedClient = null; selectedClientId = null">
+          Choisir un client existant
+        </button>
+        <button type="button" class="flex-1 py-2.5 rounded-xl text-sm font-medium transition-all"
+                :style="clientMode === 'create'
+                  ? 'background:rgba(200,169,110,0.15);border:2px solid #c8a96e;color:#c8a96e'
+                  : 'background:var(--app-surface-2);border:2px solid var(--app-border);color:var(--app-text-muted)'"
+                @click="switchToCreate">
+          + Nouveau client
+        </button>
+      </div>
+
+      <div v-if="clientMode === 'select'" class="space-y-4">
+        <div class="relative">
+          <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+               width="14" height="14" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="2" stroke-linecap="round"
+               style="color:var(--app-text-faint)">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input v-model="clientSearchQuery" class="f-input pl-9"
+                 placeholder="Rechercher par raison sociale ou email..." />
+        </div>
+
+        <div class="space-y-2 max-h-64 overflow-y-auto">
+          <div v-for="client in filteredClients" :key="client.id"
+               class="flex items-center gap-3 p-3 rounded-xl cursor-pointer transition-all"
+               :style="selectedClientId === client.id
+                 ? 'background:rgba(200,169,110,0.12);border:2px solid #c8a96e'
+                 : 'background:var(--app-surface-2);border:2px solid var(--app-border)'"
+               @click="selectClient(client)">
+            <div class="w-9 h-9 rounded-full flex items-center justify-center font-bold text-sm shrink-0"
+                 style="background:rgba(200,169,110,0.15);color:#c8a96e">
+              {{ (client.raison_sociale ?? '?').slice(0, 2).toUpperCase() }}
+            </div>
+            <div class="min-w-0 flex-1">
+              <p class="font-semibold text-sm truncate" style="color:var(--app-text)">
+                {{ client.raison_sociale }}
+              </p>
+              <p class="text-xs truncate" style="color:var(--app-text-muted)">
+                {{ client.client_user?.email ?? '' }}
+                <span v-if="client.ville"> · {{ client.ville }}</span>
+              </p>
+            </div>
+            <div v-if="selectedClientId === client.id" class="shrink-0">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="#c8a96e" stroke-width="2.5" stroke-linecap="round">
+                <path d="M20 6L9 17l-5-5"/>
+              </svg>
+            </div>
+          </div>
+          <div v-if="filteredClients.length === 0 && clientSearchQuery"
+               class="text-center py-6 rounded-xl"
+               style="background:var(--app-surface-2);border:2px dashed var(--app-border);color:var(--app-text-faint)">
+            <p class="text-sm mb-2">Aucun client trouvé pour "{{ clientSearchQuery }}"</p>
+            <button type="button" class="btn btn-gold btn-sm" @click="switchToCreate">
+              + Créer ce client maintenant
+            </button>
+          </div>
+        </div>
+
+        <div v-if="selectedClient" class="card p-5 space-y-3">
+          <p class="text-xs uppercase tracking-widest font-bold" style="color:#22c55e">
+            ✓ Client sélectionné
+          </p>
+          <div class="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
+            <div>
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Société</p>
+              <p class="font-medium" style="color:var(--app-text)">{{ selectedClient.raison_sociale }}</p>
+            </div>
+            <div v-if="selectedClient.forme_juridique">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Forme juridique</p>
+              <p style="color:var(--app-text)">{{ selectedClient.forme_juridique }}</p>
+            </div>
+            <div v-if="selectedClient.ville">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Ville</p>
+              <p style="color:var(--app-text)">{{ selectedClient.ville }}</p>
+            </div>
+            <div v-if="contract.form.gerantNom">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Gérant</p>
+              <p style="color:var(--app-text)">{{ contract.form.gerantNom }}</p>
+            </div>
+            <div v-if="contract.form.tel">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Téléphone</p>
+              <p style="color:var(--app-text)">{{ contract.form.tel }}</p>
+            </div>
+            <div v-if="contract.form.email">
+              <p class="text-xs mb-0.5" style="color:var(--app-text-faint)">Email</p>
+              <p class="truncate" style="color:var(--app-text)">{{ contract.form.email }}</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div v-else-if="clientMode === 'create'" class="card p-5 space-y-4">
+        <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+          Informations du nouveau client
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div class="sm:col-span-2">
+            <label class="f-label">Raison sociale *</label>
+            <input v-model="newClientForm.raison_sociale" class="f-input" required
+                   placeholder="ATLAS IMPORT EXPORT SARL" />
+          </div>
+          <div>
+            <label class="f-label">Forme juridique</label>
+            <input v-model="newClientForm.forme_juridique" class="f-input" placeholder="SARL, SA, SAS..." />
+          </div>
+          <div>
+            <label class="f-label">Nom du gérant *</label>
+            <input v-model="newClientForm.gerantNom" class="f-input" required placeholder="Nom complet" />
+          </div>
+          <div>
+            <label class="f-label">CIN / Passeport</label>
+            <input v-model="newClientForm.gerantCIN" class="f-input" placeholder="BJ422176" />
+          </div>
+          <div>
+            <label class="f-label">Date de naissance</label>
+            <input v-model="newClientForm.dateNaissance" type="date" class="f-input" />
+          </div>
+          <div>
+            <label class="f-label">Téléphone</label>
+            <input v-model="newClientForm.tel" class="f-input" placeholder="+212 6XX XXX XXX" />
+          </div>
+          <div>
+            <label class="f-label">Email (accès portail) *</label>
+            <input v-model="newClientForm.email" type="email" class="f-input" required
+                   placeholder="client@exemple.ma" />
+          </div>
+          <div>
+            <label class="f-label">Mot de passe portail *</label>
+            <input v-model="newClientForm.password" type="password" class="f-input" required
+                   placeholder="Min. 8 caractères" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="f-label">Adresse personnelle</label>
+            <input v-model="newClientForm.adressePerso" class="f-input"
+                   placeholder="Adresse personnelle du gérant" />
+          </div>
+        </div>
+        <p class="text-xs" style="color:var(--app-text-faint)">
+          Un compte client sera créé avec cet email et ce mot de passe.
+        </p>
+      </div>
+
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STEP 3 — Articles + financial fields
+    ══════════════════════════════════════════════════════════════════════ -->
+    <div v-else-if="step === 3" class="space-y-5">
+
+      <div class="card p-5">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
+          <div>
+            <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+              Bibliothèque d'articles
+            </p>
+            <p class="text-xs mt-0.5" style="color:var(--app-text-faint)">
+              Cliquez pour ajouter au contrat
+            </p>
+          </div>
+          <NuxtLink to="/admin/articles" class="text-xs underline"
+                    style="color:var(--app-text-faint)" target="_blank">
+            Gérer les articles →
+          </NuxtLink>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            v-for="article in articlesStore.items"
+            :key="String(article.id)"
+            type="button"
+            class="px-3 py-1.5 rounded-lg text-xs font-medium transition-all border"
+            :style="selectedArticleIds.includes(String(article.id))
+              ? 'background:#c8a96e;color:#111;border-color:#c8a96e'
+              : 'background:var(--app-surface-2);border-color:var(--app-border);color:var(--app-text-muted)'"
+            @click="toggleArticle(article)"
+          >
+            {{ selectedArticleIds.includes(String(article.id)) ? '✓ ' : '+ ' }}{{ article.title }}
+          </button>
+
+          <p v-if="articlesStore.items.length === 0" class="text-sm" style="color:var(--app-text-faint)">
+            Aucun article dans la bibliothèque.
+            <NuxtLink to="/admin/articles" class="underline">Créer des articles →</NuxtLink>
+          </p>
+        </div>
+      </div>
+
+      <div v-if="orderedArticles.length > 0" class="card p-5">
+        <div class="flex items-center justify-between mb-4">
+          <div>
+            <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+              Articles sélectionnés — {{ orderedArticles.length }} article(s)
+            </p>
+            <p class="text-xs mt-0.5" style="color:var(--app-text-faint)">
+              Glissez pour réordonner · ∨ pour modifier le texte
+            </p>
+          </div>
+        </div>
+
+        <div class="space-y-3">
+          <div
+            v-for="(article, index) in orderedArticles"
+            :key="String(article.id)"
+            draggable="true"
+            class="rounded-xl transition-all"
+            :style="`
+              border: 2px solid ${dragIndex === index ? '#c8a96e' : 'var(--app-border)'};
+              opacity: ${dragIndex === index ? 0.45 : 1};
+              background: var(--app-surface-2);
+            `"
+            @dragstart="onDragStart(index, $event)"
+            @dragover="onDragOver(index, $event)"
+            @drop="onDrop(index)"
+            @dragend="onDragEnd"
+          >
+            <div class="flex items-center gap-3 px-4 py-3">
+              <svg class="shrink-0 cursor-grab active:cursor-grabbing" width="16" height="16"
+                   viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+                   stroke-linecap="round" style="color:var(--app-text-faint)">
+                <circle cx="9" cy="5"  r="1"/><circle cx="15" cy="5"  r="1"/>
+                <circle cx="9" cy="12" r="1"/><circle cx="15" cy="12" r="1"/>
+                <circle cx="9" cy="19" r="1"/><circle cx="15" cy="19" r="1"/>
+              </svg>
+              <span class="w-7 h-7 rounded-full flex items-center justify-center text-[11px] font-bold shrink-0"
+                    style="background:rgba(200,169,110,0.2);color:#c8a96e">
+                {{ article.ordre }}
+              </span>
+              <input
+                v-model="article.title"
+                class="flex-1 min-w-0 bg-transparent border-none outline-none font-semibold text-sm"
+                style="color:var(--app-text)"
+                :placeholder="`Titre de l'article ${article.ordre}`"
+                @click.stop
+              />
+              <button type="button"
+                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center transition-colors nav-inactive"
+                      @click.stop="article._expanded = !article._expanded">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.2" stroke-linecap="round"
+                     :style="`transform:rotate(${article._expanded ? 180 : 0}deg);transition:transform 0.2s`">
+                  <path d="M6 9l6 6 6-6"/>
+                </svg>
+              </button>
+              <button type="button"
+                      class="shrink-0 w-8 h-8 rounded-lg flex items-center justify-center"
+                      style="color:#ef4444"
+                      @click.stop="toggleArticle(article)">
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                     stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                  <path d="M18 6L6 18M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+
+            <Transition name="expand-body">
+              <div v-if="article._expanded" class="px-4 pb-4 pt-1"
+                   style="border-top:1px solid var(--app-border-2)"
+                   @dragstart.stop @dragover.stop>
+                <label class="f-label mb-2">Corps de l'article</label>
+                <textarea v-model="article.body" class="f-input resize-none" rows="6"
+                          :placeholder="`Texte de l'article ${article.ordre}...`"
+                          @click.stop @mousedown.stop />
+                <div class="flex items-center justify-between mt-2">
+                  <p class="text-[10px]" style="color:var(--app-text-faint)">
+                    {{ article.body?.length ?? 0 }} caractères
+                  </p>
+                  <button type="button" class="text-[11px] underline"
+                          style="color:var(--app-text-faint)"
+                          @click="resetArticleBody(article)">
+                    Réinitialiser depuis la bibliothèque
+                  </button>
+                </div>
+              </div>
+            </Transition>
+          </div>
+        </div>
+
+        <div class="mt-4 rounded-xl p-4"
+             style="background:var(--app-surface);border:1px solid var(--app-border)">
+          <p class="text-[10px] uppercase tracking-widest font-bold mb-2"
+             style="color:var(--app-text-faint)">
+            Ordre dans le PDF
+          </p>
+          <div class="flex flex-wrap gap-2">
+            <span v-for="a in orderedArticles" :key="String(a.id)"
+                  class="text-xs px-2 py-1 rounded-lg font-medium"
+                  style="background:rgba(200,169,110,0.1);color:#c8a96e;border:1px solid rgba(200,169,110,0.2)">
+              Art. {{ a.ordre }} — {{ a.title }}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div v-else class="rounded-xl p-8 text-center"
+           style="background:var(--app-surface-2);border:2px dashed var(--app-border);color:var(--app-text-faint)">
+        <svg class="mx-auto mb-3 opacity-40" width="32" height="32" viewBox="0 0 24 24"
+             fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round">
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+          <polyline points="14 2 14 8 20 8"/>
+        </svg>
+        <p class="font-medium mb-1">Aucun article sélectionné</p>
+        <p class="text-sm">Le PDF sera généré sans articles de contrat.</p>
+      </div>
+
+      <div class="card p-5 space-y-4">
+        <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+          Durée et montants
+        </p>
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="f-label">Date de début</label>
+            <input :value="contract.form.dateDebut" type="date" class="f-input"
+                   @change="contract.setDateDebut(($event.target as HTMLInputElement).value)" />
+          </div>
+          <div>
+            <label class="f-label">
+              Date de fin
+              <span class="text-[10px] ml-1" style="color:var(--app-text-faint)">(calculée automatiquement)</span>
+            </label>
+            <input :value="contract.form.dateFin" type="date" class="f-input"
+                   @change="contract.form.dateFin = ($event.target as HTMLInputElement).value; recalcMonths()" />
+          </div>
+          <div>
+            <label class="f-label">Durée (mois)</label>
+            <input :value="contract.form.months" type="number" min="1" class="f-input"
+                   @input="contract.setMonths(Number(($event.target as HTMLInputElement).value))" />
+          </div>
+          <div>
+            <label class="f-label">Redevance mensuelle (DH)</label>
+            <input :value="contract.form.redevanceMensuelle" type="number" min="0" step="0.01" class="f-input"
+                   @input="contract.setMonthly(Number(($event.target as HTMLInputElement).value))" />
+          </div>
+          <div>
+            <label class="f-label">
+              Redevance annuelle (DH)
+              <span class="text-[10px] ml-1" style="color:var(--app-text-faint)">(auto)</span>
+            </label>
+            <input :value="contract.form.redevanceAnnuelle" type="number" min="0" step="0.01" class="f-input"
+                   @input="contract.setAnnual(Number(($event.target as HTMLInputElement).value))" />
+          </div>
+          <div>
+            <label class="f-label">Mode de paiement</label>
+            <select v-model="contract.form.mode_paiement" class="f-input">
+              <option value="">--</option>
+              <option>Virement</option>
+              <option>Espèces</option>
+              <option>Chèque</option>
+              <option>Carte bancaire</option>
+            </select>
+          </div>
+          <div>
+            <label class="f-label">Caution (DH)</label>
+            <input v-model="contract.form.caution" type="number" min="0" class="f-input" />
+          </div>
+          <div>
+            <label class="f-label">Ville de signature</label>
+            <input v-model="contract.form.ville_signature" class="f-input" placeholder="Agadir" />
+          </div>
+          <div>
+            <label class="f-label">Date de signature</label>
+            <input v-model="contract.form.date_signature" type="date" class="f-input" />
+          </div>
+        </div>
+      </div>
+
+    </div>
+
+
+    <!-- ══════════════════════════════════════════════════════════════════════
+         STEP 4 — Confirmation + PDF preview / download (fixed)
+    ══════════════════════════════════════════════════════════════════════ -->
+    <div v-else-if="step === 4" class="space-y-4">
+      <div class="card p-6 text-center space-y-4">
+        <div class="w-16 h-16 rounded-2xl flex items-center justify-center mx-auto"
+             style="background:rgba(34,197,94,0.1)">
+          <svg width="28" height="28" viewBox="0 0 24 24" fill="none"
+               stroke="#22c55e" stroke-width="2" stroke-linecap="round">
+            <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"/>
+            <polyline points="22 4 12 14.01 9 11.01"/>
+          </svg>
+        </div>
+        <div>
+          <h2 class="font-serif text-xl" style="color:var(--app-text)">Contrat enregistré</h2>
+          <p class="text-sm mt-1" style="color:var(--app-text-muted)">
+            Contrat #{{ contratId }} —
+            <em style="color:#c8a96e">
+              {{ contract.form.titreContrat || 'Contrat de Domiciliation' }}
+            </em>
+            — statut : brouillon
+          </p>
+        </div>
+        <button class="btn btn-gold btn-lg w-full sm:w-auto" @click="preparePdf">
+          Préparer le PDF
+        </button>
+        <div v-if="pdfReady" class="flex flex-col sm:flex-row gap-3 justify-center">
+          <button class="btn btn-outline btn-md" @click="openPreview">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Aperçu PDF
+          </button>
+          <button class="btn btn-gold btn-md" :disabled="downloadingPdf" @click="downloadPdf">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {{ downloadingPdf ? 'Téléchargement...' : 'Télécharger PDF' }}
+          </button>
+        </div>
+        <NuxtLink to="/admin/contrats" class="btn btn-outline btn-md w-full sm:w-auto">
+          Voir tous les contrats →
+        </NuxtLink>
+      </div>
+    </div>
+
+
+    <!-- ── Navigation buttons (steps 1–3) ────────────────────────────────────── -->
+    <div v-if="step < 4" class="flex justify-between gap-3 pt-2">
+      <button v-if="step > 1" type="button" class="btn btn-outline btn-md" @click="prevStep">
+        ← Retour
+      </button>
+      <div v-else />
+      <button v-if="step === 3" type="button" class="btn btn-gold btn-md ml-auto"
+              :disabled="saving" @click="saveDraft">
+        {{ saving ? 'Enregistrement...' : 'Enregistrer le contrat →' }}
+      </button>
+      <button v-else type="button" class="btn btn-gold btn-md ml-auto"
+              :disabled="saving" @click="nextStep">
+        {{ saving ? 'Patientez...' : 'Suivant →' }}
+      </button>
+    </div>
+
+
+    <!-- ── PDF fullscreen preview modal — blob-based (fixed) ─────────────────── -->
+    <ClientOnly>
+      <Teleport to="body">
+        <div v-if="showPreview" class="fixed inset-0 z-300 flex flex-col"
+             style="background:rgba(0,0,0,0.92)">
+          <div class="flex items-center justify-between px-5 py-3 shrink-0"
+               style="background:rgba(0,0,0,0.6);border-bottom:1px solid rgba(255,255,255,0.1)">
+            <span class="font-medium text-white">
+              Contrat #{{ contratId }} — {{ contract.form.titreContrat || 'Contrat de Domiciliation' }}
+            </span>
+            <button class="w-9 h-9 rounded-xl flex items-center justify-center text-white"
+                    style="background:rgba(255,255,255,0.1)" @click="closePreview">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="flex-1 relative">
+            <div v-if="pdfLoading" class="absolute inset-0 flex items-center justify-center"
+                 style="background:rgba(0,0,0,0.5);z-index:1">
+              <div class="text-center text-white">
+                <div class="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-3"/>
+                <p class="text-sm">Chargement du PDF...</p>
+              </div>
+            </div>
+            <div v-else-if="previewError" class="absolute inset-0 flex items-center justify-center p-6">
+              <div class="text-center text-white max-w-sm space-y-3">
+                <p class="text-sm">{{ previewError }}</p>
+                <button class="btn btn-outline btn-sm" @click="openPreview">Réessayer</button>
+              </div>
+            </div>
+            <!-- blob: URL — always same-origin, never blocked by framing rules -->
+            <iframe v-else :src="previewObjectUrl" class="w-full h-full"
+                    style="border:none;display:block" />
+          </div>
+        </div>
+      </Teleport>
+    </ClientOnly>
+
+    <!-- ── Live contract preview modal (available at any step) ────────────────── -->
+    <ClientOnly>
+      <Teleport to="body">
+        <div v-if="showLivePreview" class="fixed inset-0 z-300 flex flex-col"
+             style="background:rgba(0,0,0,0.92)">
+          <div class="flex items-center justify-between px-5 py-3 shrink-0"
+               style="background:rgba(0,0,0,0.6);border-bottom:1px solid rgba(255,255,255,0.1)">
+            <span class="font-medium text-white">
+              Aperçu — {{ contract.form.titreContrat || 'Contrat de Domiciliation' }}
+            </span>
+            <button class="w-9 h-9 rounded-xl flex items-center justify-center text-white"
+                    style="background:rgba(255,255,255,0.1)" @click="closeLivePreview">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+          <div class="flex-1 overflow-y-auto p-4 sm:p-8">
+            <div class="rounded-xl overflow-hidden shadow-2xl mx-auto" style="max-width:900px">
+              <!-- eslint-disable-next-line vue/no-v-html -->
+              <div v-html="livePreviewHtml" />
+            </div>
+          </div>
+        </div>
+      </Teleport>
+    </ClientOnly>
+  </div>
 </template>

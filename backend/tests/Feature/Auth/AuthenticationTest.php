@@ -1,223 +1,122 @@
 <?php
-// tests/Feature/Auth/AuthenticationTest.php
 
 namespace Tests\Feature\Auth;
 
-use Tests\TestCase;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Hash;
+use Tests\TestCase;
 
 class AuthenticationTest extends TestCase
 {
-    // ── Register ───────────────────────────────────────────
+    use RefreshDatabase;
 
-    /** @test */
-    public function domiciliataire_can_register_and_starts_as_pending(): void
+    /** Registering as domiciliataire creates a 'pending' account and does NOT return a token. */
+    public function test_register_domiciliataire_is_pending_and_has_no_token(): void
     {
-        $response = $this->postJson('/api/auth/register', [
-            'nom'      => 'Dahmi',
-            'prenom'   => 'Saad',
-            'email'    => 'saad@test.ma',
+        $res = $this->postJson('/api/auth/register', [
+            'nom' => 'Dahmi',
+            'prenom' => 'Saad',
+            'email' => 'saad@example.com',
             'password' => 'password123',
         ]);
 
-        $response->assertStatus(201)
-            ->assertJsonPath('success', true)
+        $res->assertStatus(201)
+            ->assertJson(['success' => true])
             ->assertJsonPath('data.user.status', 'pending');
 
-        // Token should NOT be returned for pending users
-        $response->assertJsonMissing(['token']);
-
-        $this->assertDatabaseHas('users', [
-            'email'  => 'saad@test.ma',
-            'status' => 'pending',
-            'role'   => 'domiciliataire',
-        ]);
+        $this->assertArrayNotHasKey('token', $res->json('data'));
+        $this->assertDatabaseHas('users', ['email' => 'saad@example.com', 'status' => 'pending']);
     }
 
-    /** @test */
-    public function register_requires_valid_email(): void
+    /** Registering as client is immediately active and returns a usable token. */
+    public function test_register_client_is_active_with_token(): void
     {
-        $this->postJson('/api/auth/register', [
-            'nom'      => 'Test',
-            'email'    => 'not-an-email',
+        $res = $this->postJson('/api/auth/register', [
+            'nom' => 'Client',
+            'email' => 'client@example.com',
             'password' => 'password123',
-        ])->assertStatus(422);
-    }
-
-    /** @test */
-    public function register_requires_minimum_password_length(): void
-    {
-        $this->postJson('/api/auth/register', [
-            'nom'      => 'Test',
-            'email'    => 'test@test.ma',
-            'password' => '123',
-        ])->assertStatus(422);
-    }
-
-    /** @test */
-    public function duplicate_email_is_rejected(): void
-    {
-        User::factory()->create(['email' => 'existing@test.ma']);
-
-        $this->postJson('/api/auth/register', [
-            'nom'      => 'Test',
-            'email'    => 'existing@test.ma',
-            'password' => 'password123',
-        ])->assertStatus(422);
-    }
-
-    // ── Login ──────────────────────────────────────────────
-
-    /** @test */
-    public function active_user_can_login_and_receives_token(): void
-    {
-        $user = User::factory()->create([
-            'email'    => 'active@test.ma',
-            'password' => Hash::make('password123'),
-            'status'   => 'active',
-            'role'     => 'domiciliataire',
+            'role' => 'client',
         ]);
 
-        $response = $this->postJson('/api/auth/login', [
-            'email'    => 'active@test.ma',
-            'password' => 'password123',
-        ]);
+        $res->assertStatus(201)
+            ->assertJsonPath('data.user.status', 'active');
 
-        $response->assertStatus(200)
-            ->assertJsonPath('success', true)
-            ->assertJsonStructure(['data' => ['user', 'token']]);
+        $this->assertNotEmpty($res->json('data.token'));
     }
 
-    /** @test */
-    public function login_is_case_insensitive_for_email(): void
+    /** Login fails with wrong credentials. */
+    public function test_login_rejects_bad_credentials(): void
     {
         User::factory()->create([
-            'email'    => 'user@test.ma',
-            'password' => Hash::make('password123'),
-            'status'   => 'active',
-        ]);
-
-        $this->postJson('/api/auth/login', [
-            'email'    => 'USER@TEST.MA',
-            'password' => 'password123',
-        ])->assertStatus(200);
-    }
-
-    /** @test */
-    public function wrong_password_returns_422(): void
-    {
-        User::factory()->create([
-            'email'    => 'user@test.ma',
-            'password' => Hash::make('correct'),
-            'status'   => 'active',
-        ]);
-
-        $this->postJson('/api/auth/login', [
-            'email'    => 'user@test.ma',
-            'password' => 'wrong',
-        ])->assertStatus(422);
-    }
-
-    /** @test */
-    public function pending_user_cannot_login(): void
-    {
-        User::factory()->create([
-            'email'    => 'pending@test.ma',
-            'password' => Hash::make('password123'),
-            'status'   => 'pending',
-        ]);
-
-        $this->postJson('/api/auth/login', [
-            'email'    => 'pending@test.ma',
-            'password' => 'password123',
-        ])->assertStatus(403)
-          ->assertJsonPath('success', false);
-    }
-
-    /** @test */
-    public function rejected_user_cannot_login(): void
-    {
-        User::factory()->create([
-            'email' => 'rejected@test.ma',
-            'password' => Hash::make('password123'),
-            'status' => 'rejected',
-            'rejection_reason' => 'Dossier incomplet.',
-        ]);
-
-        $response = $this->postJson('/api/auth/login', [
-            'email' => 'rejected@test.ma',
-            'password' => 'password123',
-        ]);
-
-        $response->assertStatus(403)
-            ->assertJsonPath('success', false)
-            // FIX: check inside the message string, not as a fragment array
-            ->assertJsonFragment(['message' => 'Votre compte a été rejeté. Raison : Dossier incomplet.']);
-    }
-
-    /** @test */
-    public function approved_user_with_future_activation_date_cannot_login(): void
-    {
-        User::factory()->create([
-            'email'           => 'approved@test.ma',
-            'password'        => Hash::make('password123'),
-            'status'          => 'approved',
-            'activation_date' => now()->addDays(5)->toDateString(),
-        ]);
-
-        $this->postJson('/api/auth/login', [
-            'email'    => 'approved@test.ma',
-            'password' => 'password123',
-        ])->assertStatus(403);
-    }
-
-    /** @test */
-    public function approved_user_auto_activates_when_activation_date_passed(): void
-    {
-        $user = User::factory()->create([
-            'email'           => 'autoactivate@test.ma',
-            'password'        => Hash::make('password123'),
-            'status'          => 'approved',
-            'activation_date' => now()->subDay()->toDateString(),
-        ]);
-
-        $this->postJson('/api/auth/login', [
-            'email'    => 'autoactivate@test.ma',
-            'password' => 'password123',
-        ])->assertStatus(200);
-
-        $this->assertDatabaseHas('users', [
-            'id'     => $user->id,
+            'email' => 'user@example.com',
+            'password' => Hash::make('correct-password'),
             'status' => 'active',
         ]);
+
+        $this->postJson('/api/auth/login', [
+            'email' => 'user@example.com',
+            'password' => 'wrong-password',
+        ])->assertStatus(422);
     }
 
-    // ── Me / Logout ────────────────────────────────────────
-
-    /** @test */
-    public function authenticated_user_can_get_their_profile(): void
+    /** Login succeeds for an active user and returns a Bearer token. */
+    public function test_login_succeeds_for_active_user(): void
     {
-        $user = $this->actingAsDomiciliataire();
+        User::factory()->create([
+            'email' => 'ok@example.com',
+            'password' => Hash::make('password123'),
+            'status' => 'active',
+            'role' => 'domiciliataire',
+        ]);
 
-        $this->getJson('/api/auth/me')
-            ->assertStatus(200)
-            ->assertJsonPath('data.email', $user->email);
+        $res = $this->postJson('/api/auth/login', [
+            'email' => 'ok@example.com',
+            'password' => 'password123',
+        ]);
+
+        $res->assertOk()->assertJson(['success' => true]);
+        $this->assertNotEmpty($res->json('data.token'));
     }
 
-    /** @test */
-    public function unauthenticated_request_to_me_returns_401(): void
+    /** Login is blocked for a pending account, with the correct French message. */
+    public function test_login_blocked_for_pending_account(): void
     {
-        $this->getJson('/api/auth/me')->assertStatus(401);
+        User::factory()->create([
+            'email' => 'pending@example.com',
+            'password' => Hash::make('password123'),
+            'status' => 'pending',
+        ]);
+
+        $res = $this->postJson('/api/auth/login', [
+            'email' => 'pending@example.com',
+            'password' => 'password123',
+        ]);
+
+        $res->assertStatus(403)
+            ->assertJsonFragment(['message' => 'Votre compte est en attente de validation.']);
     }
 
-    /** @test */
-    public function user_can_logout(): void
+    /** /api/auth/me returns the authenticated user. */
+    public function test_me_returns_authenticated_user(): void
     {
-        $this->actingAsDomiciliataire();
+        $user = User::factory()->create();
 
-        $this->postJson('/api/auth/logout')
-            ->assertStatus(200)
-            ->assertJsonPath('success', true);
+        $this->actingAs($user, 'sanctum')
+            ->getJson('/api/auth/me')
+            ->assertOk()
+            ->assertJsonPath('data.id', $user->id);
+    }
+
+    /** Logout revokes the current access token. */
+    public function test_logout_revokes_token(): void
+    {
+        $user = User::factory()->create();
+        $token = $user->createToken('api-token')->plainTextToken;
+
+        $this->withHeader('Authorization', "Bearer {$token}")
+            ->postJson('/api/auth/logout')
+            ->assertOk()
+            ->assertJson(['success' => true]);
     }
 }

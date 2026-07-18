@@ -1,10 +1,11 @@
-<?php
+﻿<?php
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 
-return new class extends Migration {
+return new class extends Migration
+{
     public function up(): void
     {
         Schema::create('template_articles', function (Blueprint $table) {
@@ -15,13 +16,8 @@ return new class extends Migration {
                 ->cascadeOnUpdate()
                 ->cascadeOnDelete();
 
-            // ✅ FIX ICI
-            $table->foreignUuid('article_id')
-                ->constrained('articles')
-                ->cascadeOnUpdate()
-                ->restrictOnDelete();
-
-            $table->integer('ordre');
+            $table->uuid('article_id')->after('template_id');
+            $table->integer('ordre')->default(1);
             $table->timestamps();
 
             $table->unique(['template_id', 'article_id']);

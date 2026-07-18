@@ -1,47 +1,40 @@
 <?php
-// tests/Feature/Admin/AdminTest.php
 
 namespace Tests\Feature\Admin;
 
-use Tests\TestCase;
-use App\Models\User;
 use App\Models\Entreprise;
+use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
 class AdminTest extends TestCase
 {
-    /** @test */
-    public function admin_can_list_all_domiciliataires(): void
+    use RefreshDatabase;
+
+    /** Non-admin cannot access the domiciliataires listing. */
+    public function test_non_admin_cannot_list_domiciliataires(): void
     {
-        $this->actingAsAdmin();
-        User::factory()->domiciliataire()->count(3)->create();
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
 
-        $this->getJson('/api/admin/domiciliataires')
-            ->assertStatus(200)
-            ->assertJsonPath('success', true);
-    }
-
-    /** @test */
-    public function domiciliataire_cannot_access_admin_domiciliataires_list(): void
-    {
-        $this->actingAsDomiciliataire();
-
-        $this->getJson('/api/admin/domiciliataires')
+        $this->actingAs($tenant, 'sanctum')
+            ->getJson('/api/admin/domiciliataires')
             ->assertStatus(403);
     }
 
-    /** @test */
-    public function admin_response_does_not_include_passwords(): void
+    /** Admin sees domiciliataires with counts, but never sensitive data (CIN, password). */
+    public function test_admin_list_excludes_sensitive_fields(): void
     {
-        $this->actingAsAdmin();
-        User::factory()->domiciliataire()->create();
+        $admin = User::factory()->create(['role' => 'admin']);
+        $tenant = User::factory()->create(['role' => 'domiciliataire', 'nom' => 'Dahmi']);
+        Entreprise::create(['domiciliataire_id' => $tenant->id, 'raison_sociale' => 'CLIENT SARL']);
 
-        $response = $this->getJson('/api/admin/domiciliataires');
+        $res = $this->actingAs($admin, 'sanctum')->getJson('/api/admin/domiciliataires');
 
-        $response->assertStatus(200);
+        $res->assertOk();
+        $row = collect($res->json('data'))->firstWhere('id', $tenant->id);
 
-        // Verify no password field in any user record
-        foreach ($response->json('data') as $user) {
-            $this->assertArrayNotHasKey('password', $user);
-        }
+        $this->assertEquals(1, $row['entreprises_count']);
+        $this->assertArrayNotHasKey('cin', $row);
+        $this->assertArrayNotHasKey('password', $row);
     }
 }

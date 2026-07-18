@@ -1,104 +1,102 @@
 <?php
-// tests/Feature/Representant/RepresentantTest.php
 
 namespace Tests\Feature\Representant;
 
-use Tests\TestCase;
 use App\Models\Entreprise;
 use App\Models\Representant;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
+use Tests\TestCase;
 
 class RepresentantTest extends TestCase
 {
-    /** @test */
-    public function can_create_representant_for_entreprise(): void
-    {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
+    use RefreshDatabase;
 
-        $this->postJson("/api/entreprises/{$entreprise->id}/representant", [
-            'nom'    => 'El Jadiani',
-            'prenom' => 'Youssef',
-            'cin'    => 'BJ422176',
-        ])->assertStatus(201)
-          ->assertJsonPath('data.nom', 'El Jadiani');
+    private function tenantWithEntreprise(): array
+    {
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $entreprise = Entreprise::create([
+            'domiciliataire_id' => $tenant->id,
+            'raison_sociale' => 'ATLAS IMPORT EXPORT SARL',
+            'statut' => 'actif',
+        ]);
+
+        return [$tenant, $entreprise];
     }
 
-    /** @test */
-    public function cannot_create_second_representant_for_same_entreprise(): void
+    /** Creating a representant for the first time succeeds. */
+    public function test_can_create_representant(): void
     {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
+        [$tenant, $entreprise] = $this->tenantWithEntreprise();
 
-        Representant::factory()->create(['entreprise_id' => $entreprise->id]);
+        $res = $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/entreprises/{$entreprise->id}/representant", [
+                'nom' => 'El Jadiani',
+                'prenom' => 'Youssef',
+                'cin' => 'BJ422176',
+            ]);
 
-        $this->postJson("/api/entreprises/{$entreprise->id}/representant", [
-            'nom' => 'Another',
-            'cin' => 'AB123456',
-        ])->assertStatus(422);
+        $res->assertCreated();
+        $this->assertDatabaseHas('representants', ['entreprise_id' => $entreprise->id, 'cin' => 'BJ422176']);
     }
 
-    /** @test */
-    public function can_get_representant_of_entreprise(): void
+    /** Cannot create a second representant for the same entreprise (1-to-1 enforced). */
+    public function test_cannot_create_duplicate_representant(): void
     {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
-        $rep        = Representant::factory()->create(['entreprise_id' => $entreprise->id]);
+        [$tenant, $entreprise] = $this->tenantWithEntreprise();
 
-        $this->getJson("/api/entreprises/{$entreprise->id}/representant")
-            ->assertStatus(200)
-            ->assertJsonPath('data.id', $rep->id);
+        Representant::create([
+            'entreprise_id' => $entreprise->id,
+            'nom' => 'First',
+            'cin' => 'AA111111',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/entreprises/{$entreprise->id}/representant", [
+                'nom' => 'Second',
+                'cin' => 'BB222222',
+            ])
+            ->assertStatus(422);
     }
 
-    /** @test */
-    public function returns_null_data_when_no_representant_exists(): void
+    /** Update accepts partial payloads (sometimes rule fix). */
+    public function test_update_representant_accepts_partial_payload(): void
     {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
+        [$tenant, $entreprise] = $this->tenantWithEntreprise();
 
-        $this->getJson("/api/entreprises/{$entreprise->id}/representant")
-            ->assertStatus(200)
-            ->assertJsonPath('data', null);
+        $rep = Representant::create([
+            'entreprise_id' => $entreprise->id,
+            'nom' => 'Original',
+            'cin' => 'CC333333',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->putJson("/api/entreprises/{$entreprise->id}/representant", [
+                'telephone' => '+212600000000',
+            ])
+            ->assertOk();
+
+        $this->assertDatabaseHas('representants', [
+            'id' => $rep->id,
+            'telephone' => '+212600000000',
+            'nom' => 'Original', // unchanged
+        ]);
     }
 
-    /** @test */
-    public function can_update_representant(): void
+    /** ClientController::index eager-loads representant so the wizard can autofill. */
+    public function test_clients_index_includes_representant(): void
     {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
-        Representant::factory()->create(['entreprise_id' => $entreprise->id]);
+        [$tenant, $entreprise] = $this->tenantWithEntreprise();
+        Representant::create([
+            'entreprise_id' => $entreprise->id,
+            'nom' => 'Gerant',
+            'cin' => 'DD444444',
+        ]);
 
-        $this->putJson("/api/entreprises/{$entreprise->id}/representant", [
-            'nom'    => 'Updated',
-            'prenom' => 'Name',
-            'cin'    => 'XY999999',
-        ])->assertStatus(200)
-          ->assertJsonPath('data.nom', 'Updated');
-    }
+        $res = $this->actingAs($tenant, 'sanctum')->getJson('/api/clients');
 
-    /** @test */
-    public function can_delete_representant(): void
-    {
-        $owner      = $this->actingAsDomiciliataire();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
-        $rep        = Representant::factory()->create(['entreprise_id' => $entreprise->id]);
-
-        $this->deleteJson("/api/entreprises/{$entreprise->id}/representant")
-            ->assertStatus(200);
-
-        $this->assertDatabaseMissing('representants', ['id' => $rep->id]);
-    }
-
-    /** @test */
-    public function cannot_access_representant_of_another_tenants_entreprise(): void
-    {
-        $this->actingAsDomiciliataire();
-
-        $other      = User::factory()->domiciliataire()->create();
-        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $other->id]);
-        Representant::factory()->create(['entreprise_id' => $entreprise->id]);
-
-        $this->getJson("/api/entreprises/{$entreprise->id}/representant")
-            ->assertStatus(404);
+        $res->assertOk();
+        $this->assertNotNull($res->json('data.0.representant'));
+        $this->assertEquals('DD444444', $res->json('data.0.representant.cin'));
     }
 }

@@ -20,13 +20,13 @@ return new class extends Migration {
                 ->cascadeOnUpdate()
                 ->restrictOnDelete();
 
-            $table->string('numero_facture', 100);
+            // $table->string('numero_facture', 100);
             $table->date('date_facture')->nullable();
             $table->decimal('montant_total', 10, 2)->nullable();
             $table->enum('statut', ['pending', 'paid', 'cancelled'])->default('pending');
             $table->timestamps();
 
-            $table->unique('numero_facture');
+            $table->string('numero_facture', 20)->unique()->nullable();
             $table->index('contrat_id');
             $table->index('entreprise_id');
             $table->index('statut');

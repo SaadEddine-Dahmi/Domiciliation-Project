@@ -1,47 +1,43 @@
 <?php
-// database/factories/ContratFactory.php
 
 namespace Database\Factories;
 
-use App\Models\Contrat;
-use App\Models\Entreprise;
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class ContratFactory extends Factory
 {
-    protected $model = Contrat::class;
+    protected $model = \App\Models\Contrat::class;
 
     public function definition(): array
     {
-        $domiciliataire = User::factory()->domiciliataire()->create();
-        $entreprise     = Entreprise::factory()->create([
-            'domiciliataire_id' => $domiciliataire->id,
-        ]);
-
         return [
-            'domiciliataire_id'        => $domiciliataire->id,
-            'entreprise_id'            => $entreprise->id,
-            'date_debut'               => now()->toDateString(),
-            'date_fin'                 => now()->addYear()->toDateString(),
-            'duree_mois'               => 12,
-            'prix_mensuel'             => 500.00,
-            'prix_total'               => 6000.00,
-            'statut'                   => 'draft',
-            'notification_delay_months'=> 1,
+            'titre_contrat'  => 'Contrat de Domiciliation',
+            'date_debut'     => now()->toDateString(),
+            'date_fin'       => now()->addYear()->toDateString(),
+            'duree_mois'     => 12,
+            'prix_mensuel'   => 500,
+            'prix_total'     => 6000,
+            'statut'         => 'draft',
+            // domiciliataire_id / entreprise_id are always overridden explicitly
+            // in tests since they must point at real, related rows.
         ];
     }
 
+    /** Contract already in the 'active' lifecycle state. */
     public function active(): static
     {
-        return $this->state(['statut' => 'active']);
+        return $this->state(fn () => ['statut' => 'active']);
     }
 
+    /** Contract already expired. */
     public function expired(): static
     {
-        return $this->state([
-            'statut'   => 'expired',
-            'date_fin' => now()->subDay()->toDateString(),
-        ]);
+        return $this->state(fn () => ['statut' => 'expired']);
+    }
+
+    /** Contract already terminated. */
+    public function terminated(): static
+    {
+        return $this->state(fn () => ['statut' => 'terminated']);
     }
 }

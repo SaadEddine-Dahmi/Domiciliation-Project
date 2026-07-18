@@ -16,7 +16,9 @@ return new class extends Migration {
             $table->string('telephone', 13)->nullable();
             $table->enum('role', ['domiciliataire', 'client', 'admin'])->default('domiciliataire');
             // Préférences de délai d'alerte : JSON ex: {"delays":[1,3,6]}
-            $table->text('notification_preferences')->nullable()->default('{"delays":[1]}');
+            $table->string('notification_preferences', 255)
+    ->nullable()
+    ->default('{"delays":[1]}');
             $table->rememberToken();
             $table->timestamps();
         });

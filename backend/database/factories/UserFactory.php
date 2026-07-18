@@ -1,55 +1,58 @@
 <?php
-// database/factories/UserFactory.php
 
 namespace Database\Factories;
 
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
 
 class UserFactory extends Factory
 {
-    protected $model = User::class;
+    protected $model = \App\Models\User::class;
 
     public function definition(): array
     {
         return [
-            'nom' => fake()->lastName(),
-            'prenom' => fake()->firstName(),
-            'email' => fake()->unique()->safeEmail(),
-            'password' => Hash::make('password'),
-            // FIX: varchar(13) — use short fixed format, never faker phone
-            'telephone' => '+212600000000',
-            'role' => 'domiciliataire',
-            'status' => 'active',
+            'nom'       => $this->faker->lastName(),
+            'prenom'    => $this->faker->firstName(),
+            'email'     => $this->faker->unique()->safeEmail(),
+            'password'  => Hash::make('password123'),
+            'telephone' => $this->faker->phoneNumber(),
+            'role'      => 'domiciliataire',
+            'status'    => 'active',
         ];
     }
 
-    public function domiciliataire(): static
-    {
-        return $this->state(['role' => 'domiciliataire', 'status' => 'active']);
-    }
-
-    public function client(): static
-    {
-        return $this->state(['role' => 'client', 'status' => 'active']);
-    }
-
-    public function admin(): static
-    {
-        return $this->state(['role' => 'admin', 'status' => 'active']);
-    }
-
+    /** Pending domiciliataire account awaiting admin approval. */
     public function pending(): static
     {
-        return $this->state(['status' => 'pending']);
+        return $this->state(fn () => ['role' => 'domiciliataire', 'status' => 'pending']);
     }
 
-    public function rejected(): static
+    /** Approved but not yet auto-activated (activation_date in the future). */
+    public function approved(): static
     {
-        return $this->state([
-            'status' => 'rejected',
-            'rejection_reason' => 'Dossier incomplet.',
+        return $this->state(fn () => [
+            'status'          => 'approved',
+            'activation_date' => now()->addDay(),
         ]);
+    }
+
+    /** Explicit domiciliataire role — used when a test needs "another tenant". */
+    public function domiciliataire(): static
+    {
+        return $this->state(fn () => ['role' => 'domiciliataire', 'status' => 'active']);
+    }
+
+    /** Explicit client role. */
+    public function client(): static
+    {
+        return $this->state(fn () => ['role' => 'client', 'status' => 'active']);
+    }
+
+    /** Explicit admin role. */
+    public function admin(): static
+    {
+        return $this->state(fn () => ['role' => 'admin', 'status' => 'active']);
     }
 }

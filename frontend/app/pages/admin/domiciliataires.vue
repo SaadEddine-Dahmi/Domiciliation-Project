@@ -1,7 +1,6 @@
-<!-- app/pages/admin/domiciliataires.vue -->
-<!-- Super admin only — manage domiciliataire accounts -->
-<!-- Tabs: Active accounts | Pending approval -->
+<!-- pages/admin/domiciliataires.vue -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
 import { activationService } from '~/services/activation.service'
 import type { PendingUser } from '~/types/user'
 
@@ -10,12 +9,8 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const auth = useAuthStore()
 const { success, error: toastError } = useToast()
 
-// Redirect if not admin
 onMounted(async () => {
-  if (!auth.isAdmin) {
-    await navigateTo('/admin/dashboard')
-    return
-  }
+  if (!auth.isAdmin) { await navigateTo('/admin/dashboard'); return }
   await Promise.all([loadActive(), loadPending()])
 })
 
@@ -27,17 +22,15 @@ function getApiBase(): string {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
   } catch { return {} }
 }
 
-// ── Tabs ─────────────────────────────────────────────────
 const activeTab = ref<'active' | 'pending'>('active')
 
-// ── Active domiciliataires ────────────────────────────────
 const domiciliataires = ref<any[]>([])
 const loadingActive   = ref(true)
 const search          = ref('')
@@ -66,7 +59,6 @@ const filteredActive = computed(() => {
   )
 })
 
-// ── Pending domiciliataires ───────────────────────────────
 const pendingUsers   = ref<PendingUser[]>([])
 const loadingPending = ref(true)
 
@@ -82,16 +74,14 @@ async function loadPending(): Promise<void> {
   }
 }
 
-// ── Approve modal ─────────────────────────────────────────
-const showApproveModal  = ref(false)
-const selectedUser      = ref<PendingUser | null>(null)
-const activationDate    = ref('')
-const savingApproval    = ref(false)
+const showApproveModal = ref(false)
+const selectedUser     = ref<PendingUser | null>(null)
+const activationDate   = ref('')
+const savingApproval   = ref(false)
 
 function openApprove(user: PendingUser): void {
-  selectedUser.value   = user
-  // Default: today
-  activationDate.value = new Date().toISOString().split('T')[0]
+  selectedUser.value     = user
+  activationDate.value   = new Date().toISOString().split('T')[0]
   showApproveModal.value = true
 }
 
@@ -102,25 +92,22 @@ async function submitApprove(): Promise<void> {
     await activationService.approve(selectedUser.value.id, activationDate.value)
     success(`Compte de ${selectedUser.value.nom} approuvé.`)
     showApproveModal.value = false
-    // Remove from pending list
     pendingUsers.value = pendingUsers.value.filter(u => u.id !== selectedUser.value!.id)
-    // Reload active list
     await loadActive()
   } catch (e: any) {
-    toastError?.(e?.data?.message ?? 'Erreur lors de l\'approbation')
+    toastError?.(e?.data?.message ?? "Erreur lors de l'approbation")
   } finally {
     savingApproval.value = false
   }
 }
 
-// ── Reject modal ──────────────────────────────────────────
 const showRejectModal = ref(false)
 const rejectReason    = ref('')
 const savingRejection = ref(false)
 
 function openReject(user: PendingUser): void {
-  selectedUser.value  = user
-  rejectReason.value  = ''
+  selectedUser.value    = user
+  rejectReason.value    = ''
   showRejectModal.value = true
 }
 
@@ -143,7 +130,6 @@ async function submitReject(): Promise<void> {
 <template>
   <div class="space-y-5 animate-fade-up">
 
-    <!-- Header -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
         <h1 class="font-serif text-2xl">
@@ -151,66 +137,46 @@ async function submitReject(): Promise<void> {
         </h1>
         <p class="text-app-text/50 text-sm mt-1">
           {{ domiciliataires.length }} actif(s) ·
-          <span
-            class="font-semibold"
-            :class="pendingUsers.length ? 'text-yellow-400' : 'text-app-text/40'"
-          >
+          <span class="font-semibold" :class="pendingUsers.length ? 'text-yellow-400' : 'text-app-text/40'">
             {{ pendingUsers.length }} en attente
           </span>
         </p>
       </div>
-      <span
-        class="text-xs px-3 py-1 rounded-full font-bold"
-        style="background:rgba(239,68,68,0.15);color:#ef4444"
-      >Super Admin</span>
+      <span class="text-xs px-3 py-1 rounded-full font-bold"
+            style="background:rgba(239,68,68,0.15);color:#ef4444">Super Admin</span>
     </div>
 
-    <!-- Tabs -->
     <div class="flex gap-2 border-b border-white/10 pb-0">
       <button
         class="px-4 py-2 text-sm font-medium border-b-2 transition-colors"
-        :class="activeTab === 'active'
-          ? 'border-gold text-gold'
-          : 'border-transparent text-app-text/40 hover:text-white'"
+        :class="activeTab === 'active' ? 'border-gold text-gold' : 'border-transparent text-app-text/40 hover:text-white'"
         @click="activeTab = 'active'"
       >
         Actifs ({{ domiciliataires.length }})
       </button>
       <button
         class="px-4 py-2 text-sm font-medium border-b-2 transition-colors relative"
-        :class="activeTab === 'pending'
-          ? 'border-yellow-400 text-yellow-400'
-          : 'border-transparent text-app-text/40 hover:text-white'"
+        :class="activeTab === 'pending' ? 'border-yellow-400 text-yellow-400' : 'border-transparent text-app-text/40 hover:text-white'"
         @click="activeTab = 'pending'"
       >
         En attente ({{ pendingUsers.length }})
-        <!-- Badge if pending users exist -->
-        <span
-          v-if="pendingUsers.length && activeTab !== 'pending'"
-          class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-yellow-400"
-        />
+        <span v-if="pendingUsers.length && activeTab !== 'pending'"
+              class="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-yellow-400" />
       </button>
     </div>
 
-    <!-- ── Tab: Active domiciliataires ────────────────── -->
+    <!-- Active tab -->
     <div v-if="activeTab === 'active'">
       <div class="card p-3 mb-4">
         <input v-model="search" class="f-input" placeholder="Rechercher par nom, email..." />
       </div>
-
       <div v-if="loadingActive" class="text-center py-12 text-app-text/40">Chargement...</div>
-
       <div v-else-if="filteredActive.length" class="space-y-3">
-        <div
-          v-for="d in filteredActive" :key="d.id"
-          class="card p-4"
-        >
+        <div v-for="d in filteredActive" :key="d.id" class="card p-4">
           <div class="flex items-start justify-between gap-4 flex-wrap">
             <div class="flex items-center gap-4">
-              <div
-                class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
-                style="background:rgba(200,169,110,0.15);color:#c8a96e"
-              >
+              <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm flex-shrink-0"
+                   style="background:rgba(200,169,110,0.15);color:#c8a96e">
                 {{ (d.nom ?? 'D').slice(0, 2).toUpperCase() }}
               </div>
               <div>
@@ -233,36 +199,29 @@ async function submitReject(): Promise<void> {
           <div v-if="d.entreprises?.length" class="mt-3 pt-3 border-t border-white/5">
             <p class="text-xs text-app-text/40 mb-2">Entreprises clientes :</p>
             <div class="flex flex-wrap gap-2">
-              <span
-                v-for="e in d.entreprises" :key="e.id"
-                class="text-xs px-2 py-0.5 rounded-full bg-white/5 text-app-text/60"
-              >{{ e.raison_sociale }}</span>
+              <span v-for="e in d.entreprises" :key="e.id"
+                    class="text-xs px-2 py-0.5 rounded-full bg-white/5 text-app-text/60">
+                {{ e.raison_sociale }}
+              </span>
             </div>
           </div>
         </div>
       </div>
-
       <div v-else class="card p-10 text-center text-app-text/40">
         <p class="text-4xl mb-3">👤</p>
         <p>Aucun domiciliataire actif trouvé.</p>
       </div>
     </div>
 
-    <!-- ── Tab: Pending approval ───────────────────────── -->
+    <!-- Pending tab -->
     <div v-if="activeTab === 'pending'">
       <div v-if="loadingPending" class="text-center py-12 text-app-text/40">Chargement...</div>
-
       <div v-else-if="pendingUsers.length" class="space-y-3">
-        <div
-          v-for="u in pendingUsers" :key="u.id"
-          class="card p-4 border border-yellow-400/20"
-        >
+        <div v-for="u in pendingUsers" :key="u.id" class="card p-4 border border-yellow-400/20">
           <div class="flex items-center justify-between gap-4 flex-wrap">
             <div class="flex items-center gap-4">
-              <div
-                class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
-                style="background:rgba(250,204,21,0.15);color:#facc15"
-              >
+              <div class="w-10 h-10 rounded-full flex items-center justify-center font-bold text-sm"
+                   style="background:rgba(250,204,21,0.15);color:#facc15">
                 {{ (u.nom ?? 'D').slice(0, 2).toUpperCase() }}
               </div>
               <div>
@@ -275,29 +234,21 @@ async function submitReject(): Promise<void> {
               </div>
             </div>
             <div class="flex gap-2">
-              <button class="btn btn-danger btn-sm" @click="openReject(u)">
-                ✕ Rejeter
-              </button>
-              <button class="btn btn-gold btn-sm" @click="openApprove(u)">
-                ✓ Approuver
-              </button>
+              <button class="btn btn-danger btn-sm" @click="openReject(u)">✕ Rejeter</button>
+              <button class="btn btn-gold btn-sm" @click="openApprove(u)">✓ Approuver</button>
             </div>
           </div>
         </div>
       </div>
-
       <div v-else class="card p-10 text-center text-app-text/40">
         <p class="text-4xl mb-3">✅</p>
         <p>Aucun compte en attente de validation.</p>
       </div>
     </div>
 
-    <!-- ════ Modal Approuver ══════════════════════════════ -->
-    <div
-      v-if="showApproveModal"
-      class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
-      @click.self="showApproveModal = false"
-    >
+    <!-- Approve modal -->
+    <div v-if="showApproveModal" class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+         @click.self="showApproveModal = false">
       <div class="card w-full max-w-sm p-6 space-y-5">
         <h2 class="font-serif text-xl">Approuver le compte</h2>
         <p class="text-sm text-app-text/60">
@@ -305,36 +256,22 @@ async function submitReject(): Promise<void> {
         </p>
         <div>
           <label class="f-label">Date d'activation *</label>
-          <input
-            v-model="activationDate"
-            class="f-input"
-            type="date"
-            :min="new Date().toISOString().split('T')[0]"
-            required
-          />
-          <p class="text-xs text-app-text/40 mt-1">
-            L'utilisateur pourra se connecter à partir de cette date.
-          </p>
+          <input v-model="activationDate" class="f-input" type="date"
+                 :min="new Date().toISOString().split('T')[0]" required />
+          <p class="text-xs text-app-text/40 mt-1">L'utilisateur pourra se connecter à partir de cette date.</p>
         </div>
         <div class="flex gap-3 justify-end">
           <button class="btn btn-outline btn-md" @click="showApproveModal = false">Annuler</button>
-          <button
-            class="btn btn-gold btn-md"
-            :disabled="savingApproval || !activationDate"
-            @click="submitApprove"
-          >
+          <button class="btn btn-gold btn-md" :disabled="savingApproval || !activationDate" @click="submitApprove">
             {{ savingApproval ? 'Enregistrement...' : '✓ Confirmer' }}
           </button>
         </div>
       </div>
     </div>
 
-    <!-- ════ Modal Rejeter ════════════════════════════════ -->
-    <div
-      v-if="showRejectModal"
-      class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
-      @click.self="showRejectModal = false"
-    >
+    <!-- Reject modal -->
+    <div v-if="showRejectModal" class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
+         @click.self="showRejectModal = false">
       <div class="card w-full max-w-sm p-6 space-y-5">
         <h2 class="font-serif text-xl">Rejeter le compte</h2>
         <p class="text-sm text-app-text/60">
@@ -342,20 +279,12 @@ async function submitReject(): Promise<void> {
         </p>
         <div>
           <label class="f-label">Raison du rejet *</label>
-          <textarea
-            v-model="rejectReason"
-            class="f-input min-h-[80px] resize-none"
-            placeholder="Ex: Dossier incomplet, informations non vérifiables..."
-            required
-          />
+          <textarea v-model="rejectReason" class="f-input min-h-[80px] resize-none"
+                    placeholder="Ex: Dossier incomplet, informations non vérifiables..." required />
         </div>
         <div class="flex gap-3 justify-end">
           <button class="btn btn-outline btn-md" @click="showRejectModal = false">Annuler</button>
-          <button
-            class="btn btn-danger btn-md"
-            :disabled="savingRejection || !rejectReason.trim()"
-            @click="submitReject"
-          >
+          <button class="btn btn-danger btn-md" :disabled="savingRejection || !rejectReason.trim()" @click="submitReject">
             {{ savingRejection ? 'Enregistrement...' : '✕ Confirmer le rejet' }}
           </button>
         </div>

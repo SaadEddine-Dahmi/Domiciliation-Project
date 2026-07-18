@@ -1,28 +1,20 @@
 <?php
-// database/factories/ArticleFactory.php
 
 namespace Database\Factories;
 
-use App\Models\Article;
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class ArticleFactory extends Factory
 {
-    protected $model = Article::class;
+    protected $model = \App\Models\Article::class;
 
     public function definition(): array
     {
         return [
-            'domiciliataire_id' => User::factory()->domiciliataire(),
-            'title'             => fake()->sentence(4),
-            'body'              => fake()->paragraph(),
-            'is_active'         => true,
+            'title'     => 'ARTICLE — ' . $this->faker->words(2, true),
+            'body'      => $this->faker->paragraph(),
+            'is_active' => true,
+            // domiciliataire_id always overridden explicitly in tests
         ];
-    }
-
-    public function inactive(): static
-    {
-        return $this->state(['is_active' => false]);
     }
 }

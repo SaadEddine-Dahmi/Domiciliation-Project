@@ -1,4 +1,10 @@
-<!-- app/pages/login.vue -->
+<!-- app/pages/login.vue
+  Login page.
+  Left panel no longer shows fabricated stats ("1200+ contrats générés" etc.)
+  — those numbers didn't come from anywhere real. Instead it shows a short,
+  honest value proposition. If real platform-wide stats become available
+  via a public endpoint later, they can be wired in here instead.
+-->
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
 
@@ -7,17 +13,34 @@ definePageMeta({ layout: 'default' })
 const auth   = useAuthStore()
 const router = useRouter()
 
+// Guard: an already-authenticated user shouldn't see the login form.
+if (auth.isAuthenticated) {
+  await navigateTo(auth.isAdmin || auth.isDomiciliataire ? '/admin/dashboard' : '/client/dashboard')
+}
+
+function getAppName(): string {
+  const config = useRuntimeConfig()
+  return (config.public.appName as string) ?? 'Domiciliation Manager'
+}
+const appName = getAppName()
+
 const form = reactive({ email: '', password: '' })
 
 async function submit() {
   const ok = await auth.login(form)
   if (!ok) return
 
-  // Route based on role
   if (auth.isAdmin)          return router.push('/admin/dashboard')
   if (auth.isDomiciliataire) return router.push('/admin/dashboard')
   if (auth.isClient)         return router.push('/client/dashboard')
 }
+
+// Real, non-numeric value points instead of invented statistics
+const valueProps = [
+  { icon: '📄', text: 'Génération de contrats PDF en quelques clics' },
+  { icon: '🔔', text: 'Alertes automatiques avant expiration' },
+  { icon: '🔒', text: 'Données isolées par domiciliataire' },
+]
 </script>
 
 <template>
@@ -26,19 +49,22 @@ async function submit() {
     <!-- Left panel -->
     <div
       class="hidden md:flex flex-col justify-between p-12"
-      style="border-right:1px solid rgba(200,169,110,0.2)"
+      style="border-right:1px solid var(--app-border-2)"
     >
-      <div class="font-serif text-2xl">
-        AST-FISC <span class="text-gold">Domiciliation</span>
-      </div>
+      <NuxtLink to="/" class="font-serif text-2xl">
+        {{ appName }}
+      </NuxtLink>
+
       <h2 class="font-serif text-5xl leading-tight">
         Gérez vos contrats<br>
         <em class="text-gold italic">en toute simplicité.</em>
       </h2>
+
       <div class="space-y-3">
-        <div class="card p-4">1 200+ Contrats générés</div>
-        <div class="card p-4">340+ Sociétés domiciliées</div>
-        <div class="card p-4">100% Conforme RC &amp; IF</div>
+        <div v-for="v in valueProps" :key="v.text" class="card p-4 flex items-center gap-3">
+          <span class="text-xl">{{ v.icon }}</span>
+          <span class="text-sm" style="color:var(--app-text-muted)">{{ v.text }}</span>
+        </div>
       </div>
     </div>
 
@@ -56,8 +82,9 @@ async function submit() {
             v-model="form.email"
             class="f-input"
             type="email"
-            placeholder="admin@astfisc.ma"
+            placeholder="vous@exemple.com"
             required
+            autocomplete="email"
           />
         </div>
         <div>
@@ -68,6 +95,7 @@ async function submit() {
             type="password"
             placeholder="••••••••"
             required
+            autocomplete="current-password"
           />
         </div>
 
@@ -78,19 +106,9 @@ async function submit() {
             'bg-red-400/10 text-red-400':       auth.error.includes('rejeté') || auth.error.includes('invalides') || auth.error.includes('refusé'),
           }"
         >
-          <!-- Pending -->
-          <p v-if="auth.error.includes('attente')">
-            ⏳ {{ auth.error }}
-          </p>
-          <!-- Approved but not yet active -->
-          <p v-else-if="auth.error.includes('activé le')">
-            📅 {{ auth.error }}
-          </p>
-          <!-- Rejected -->
-          <p v-else-if="auth.error.includes('rejeté')">
-            ❌ {{ auth.error }}
-          </p>
-          <!-- Generic error -->
+          <p v-if="auth.error.includes('attente')">⏳ {{ auth.error }}</p>
+          <p v-else-if="auth.error.includes('activé le')">📅 {{ auth.error }}</p>
+          <p v-else-if="auth.error.includes('rejeté')">❌ {{ auth.error }}</p>
           <p v-else>{{ auth.error }}</p>
         </div>
 

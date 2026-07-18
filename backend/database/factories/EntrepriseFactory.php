@@ -1,28 +1,26 @@
 <?php
-// database/factories/EntrepriseFactory.php
 
 namespace Database\Factories;
 
-use App\Models\Entreprise;
-use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
 
 class EntrepriseFactory extends Factory
 {
-    protected $model = Entreprise::class;
+    protected $model = \App\Models\Entreprise::class;
 
     public function definition(): array
     {
         return [
-            'domiciliataire_id' => User::factory()->domiciliataire(),
-            'raison_sociale' => fake()->company(),
-            'forme_juridique' => fake()->randomElement(['SARL', 'SA', 'SAS']),
-            'adresse' => fake()->streetAddress(),
-            'ville' => fake()->city(),
-            'pays' => 'Maroc',
-            'capital' => 100000.00,
-            'date_creation' => fake()->date(),
-            'statut' => 'actif',
+            'raison_sociale'  => $this->faker->company(),
+            'forme_juridique' => $this->faker->randomElement(['SARL', 'SA', 'SAS']),
+            'adresse'         => $this->faker->address(),
+            'ville'           => $this->faker->city(),
+            'pays'            => 'Maroc',
+            'capital'         => $this->faker->numberBetween(10000, 500000),
+            'date_creation'   => $this->faker->date(),
+            'statut'          => 'actif',
+            // domiciliataire_id is always overridden explicitly in tests via
+            // Entreprise::factory()->create(['domiciliataire_id' => $owner->id])
         ];
     }
 }

@@ -1,7 +1,5 @@
-<!-- ============================================================
-  pages/client/dashboard.vue — avec widget Messages reçus
-============================================================ -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
@@ -10,6 +8,7 @@ function getApiBase(): string {
   const config = useRuntimeConfig()
   return (config.public.apiBase as string) ?? ''
 }
+
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
@@ -17,22 +16,40 @@ function authHeaders(): Record<string, string> {
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
-  } catch { return {} }
+  } catch {
+    return {}
+  }
 }
 
-const loading    = ref(true)
-const data       = ref<any>(null)
-const messages   = ref<any[]>([])
-const loadError  = ref('')
+function filenameFromContentDisposition(cd: string | null): string {
+  if (!cd) return ''
+  const utf = cd.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (utf?.[1]) return decodeURIComponent(utf[1])
+  const ascii = cd.match(/filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i)
+  return (ascii?.[1] || ascii?.[2] || '').trim().replace(/^"|"$/g, '')
+}
+
+const loading = ref(true)
+const data = ref<any>(null)
+const messages = ref<any[]>([])
+const loadError = ref('')
+const downloadingContrat = ref(false)
 
 async function load(): Promise<void> {
   loading.value = true
   try {
     const [statsRes, msgsRes] = await Promise.all([
-      $fetch<{ success: boolean; data: any }>(`${getApiBase()}/api/dashboard/stats`, { headers: authHeaders() }),
-      $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/messages`, { headers: authHeaders() }),
+      $fetch<{ success: boolean; data: any }>(
+        `${getApiBase()}/api/dashboard/stats`,
+        { headers: authHeaders() }
+      ),
+      $fetch<{ success: boolean; data: any[] }>(
+        `${getApiBase()}/api/messages`,
+        { headers: authHeaders() }
+      ),
     ])
-    data.value     = statsRes.data
+
+    data.value = statsRes.data
     messages.value = (msgsRes.data ?? []).slice(0, 3)
   } catch (e: any) {
     loadError.value = e?.data?.message ?? 'Erreur de chargement'
@@ -44,13 +61,60 @@ async function load(): Promise<void> {
 async function downloadContrat(): Promise<void> {
   const url = data.value?.contrat?.pdf_url
   if (!url) return
-  const response = await fetch(url)
-  const blob     = await response.blob()
-  const blobUrl  = URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }))
-  const a = document.createElement('a')
-  a.href = blobUrl; a.download = 'mon-contrat.pdf'
-  document.body.appendChild(a); a.click(); document.body.removeChild(a)
-  setTimeout(() => URL.revokeObjectURL(blobUrl), 3000)
+
+  downloadingContrat.value = true
+  try {
+    // IMPORTANT: contract endpoint uses Bearer auth
+    const res = await fetch(url, {
+      method: 'GET',
+      headers: authHeaders(),
+    })
+
+    if (!res.ok) {
+      const txt = await res.text()
+      try {
+        const j = JSON.parse(txt)
+        loadError.value = j?.message || 'Erreur téléchargement contrat'
+      } catch {
+        loadError.value = 'Erreur téléchargement contrat'
+      }
+      return
+    }
+
+    const contentType = (res.headers.get('content-type') || '').toLowerCase()
+    if (
+      contentType.includes('application/json') ||
+      contentType.includes('text/plain') ||
+      contentType.includes('text/html')
+    ) {
+      const txt = await res.text()
+      try {
+        const j = JSON.parse(txt)
+        loadError.value = j?.message || 'Erreur téléchargement contrat'
+      } catch {
+        loadError.value = 'Erreur téléchargement contrat (réponse non fichier)'
+      }
+      return
+    }
+
+    const blob = await res.blob()
+    let filename = filenameFromContentDisposition(res.headers.get('content-disposition'))
+    if (!filename) filename = 'mon-contrat.pdf'
+    if (!filename.toLowerCase().endsWith('.pdf')) filename += '.pdf'
+
+    const blobUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = blobUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(blobUrl)
+  } catch {
+    loadError.value = 'Erreur téléchargement contrat'
+  } finally {
+    downloadingContrat.value = false
+  }
 }
 
 const unreadMessages = computed(() => messages.value.filter(m => !m.is_read).length)
@@ -66,7 +130,13 @@ const statutColor: Record<string, string> = {
 
 function formatDate(d: string | null): string {
   if (!d) return '-'
-  return new Date(d).toLocaleString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  return new Date(d).toLocaleString('fr-FR', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  })
 }
 
 onMounted(load)
@@ -74,7 +144,6 @@ onMounted(load)
 
 <template>
   <div class="space-y-5 animate-fade-up">
-
     <!-- Titre -->
     <div>
       <h2 class="font-serif text-[22px]">
@@ -94,7 +163,6 @@ onMounted(load)
 
     <!-- Contenu principal -->
     <div v-else-if="data" class="grid grid-cols-1 md:grid-cols-2 gap-5">
-
       <!-- Mon entreprise -->
       <div class="card p-5 space-y-3">
         <p class="text-xs uppercase text-gold tracking-widest font-bold">Mon entreprise</p>
@@ -130,8 +198,13 @@ onMounted(load)
             <p class="text-xs text-app-text/50">{{ data.contrat.date_debut }} → {{ data.contrat.date_fin }}</p>
           </div>
           <p v-if="data.contrat.prix_total" class="text-sm font-semibold text-gold">{{ data.contrat.prix_total }} DH</p>
-          <button v-if="data.contrat.pdf_url" class="btn btn-gold btn-sm" @click="downloadContrat">
-            ⬇ Télécharger le contrat PDF
+          <button
+            v-if="data.contrat.pdf_url"
+            class="btn btn-gold btn-sm"
+            :disabled="downloadingContrat"
+            @click="downloadContrat"
+          >
+            {{ downloadingContrat ? 'Téléchargement...' : '⬇ Télécharger le contrat PDF' }}
           </button>
           <p v-else class="text-xs text-app-text/40">PDF non disponible — contactez votre domiciliataire.</p>
         </div>
@@ -152,7 +225,8 @@ onMounted(load)
 
         <div v-if="messages.length" class="space-y-2">
           <NuxtLink
-            v-for="m in messages" :key="m.id"
+            v-for="m in messages"
+            :key="m.id"
             to="/client/messages"
             class="flex items-start gap-2 p-2 rounded-lg hover:bg-white/5 transition"
           >
@@ -171,7 +245,6 @@ onMounted(load)
           <p class="text-xs text-app-text/40">Aucun message reçu</p>
         </div>
       </div>
-
     </div>
 
     <!-- Accès rapides -->
@@ -190,6 +263,5 @@ onMounted(load)
         </div>
       </NuxtLink>
     </div>
-
   </div>
 </template>

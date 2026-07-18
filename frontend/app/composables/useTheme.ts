@@ -1,15 +1,15 @@
 // app/composables/useTheme.ts
-
 export type Theme = 'light' | 'gray' | 'dark'
 
-const STORAGE_KEY = 'astfisc_theme'
-
-// Shared reactive state across all useTheme() calls
 const current = ref<Theme>('light')
 
 export function useTheme() {
 
-  // Apply theme class to <html>
+  function getStorageKey(): string {
+    const config = useRuntimeConfig()
+    return (config.public.themeStorageKey as string) ?? 'astfisc_theme'
+  }
+
   function applyTheme(theme: Theme): void {
     if (!import.meta.client) return
     const html = document.documentElement
@@ -18,29 +18,22 @@ export function useTheme() {
     if (theme === 'dark') html.classList.add('dark')
   }
 
-  // Set a specific theme
   function setTheme(theme: Theme): void {
     current.value = theme
     applyTheme(theme)
     if (import.meta.client) {
-      localStorage.setItem(STORAGE_KEY, theme)
+      localStorage.setItem(getStorageKey(), theme)
     }
   }
 
-  // Cycle: light → gray → dark → light
   function toggle(): void {
-    const next: Record<Theme, Theme> = {
-      light: 'gray',
-      gray: 'dark',
-      dark: 'light',
-    }
+    const next: Record<Theme, Theme> = { light: 'gray', gray: 'dark', dark: 'light' }
     setTheme(next[current.value])
   }
 
-  // Restore saved preference on app load — default is light
   function init(): void {
     if (!import.meta.client) return
-    const saved = localStorage.getItem(STORAGE_KEY) as Theme | null
+    const saved = localStorage.getItem(getStorageKey()) as Theme | null
     const theme: Theme = saved === 'gray' || saved === 'dark' ? saved : 'light'
     current.value = theme
     applyTheme(theme)

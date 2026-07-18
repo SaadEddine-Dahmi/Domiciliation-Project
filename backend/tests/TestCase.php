@@ -1,47 +1,41 @@
 <?php
-// tests/TestCase.php
 
 namespace Tests;
 
-use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
-use Illuminate\Foundation\Testing\RefreshDatabase;
 use App\Models\User;
-use Laravel\Sanctum\Sanctum;
+use Illuminate\Foundation\Testing\TestCase as BaseTestCase;
 
 abstract class TestCase extends BaseTestCase
 {
-    use RefreshDatabase;
-
-    // ── Helpers ────────────────────────────────────────────
-
     /**
-     * Create and authenticate a user with a given role.
-     * Returns the user with Sanctum token set.
+     * Creates an admin user, authenticates as them via Sanctum, and returns
+     * the user instance so the test can use its id/attributes.
      */
-    protected function actingAsRole(string $role, array $overrides = []): User
+    protected function actingAsAdmin(array $attributes = []): User
     {
-        $user = User::factory()->create(array_merge([
-            'role'   => $role,
-            'status' => 'active',
-        ], $overrides));
-
-        Sanctum::actingAs($user);
-
+        $user = User::factory()->create(array_merge(['role' => 'admin', 'status' => 'active'], $attributes));
+        $this->actingAs($user, 'sanctum');
         return $user;
     }
 
-    protected function actingAsDomiciliataire(array $overrides = []): User
+    /**
+     * Creates a domiciliataire user, authenticates as them, and returns the instance.
+     * This is the "tenant owner" in most tests.
+     */
+    protected function actingAsDomiciliataire(array $attributes = []): User
     {
-        return $this->actingAsRole('domiciliataire', $overrides);
+        $user = User::factory()->create(array_merge(['role' => 'domiciliataire', 'status' => 'active'], $attributes));
+        $this->actingAs($user, 'sanctum');
+        return $user;
     }
 
-    protected function actingAsClient(array $overrides = []): User
+    /**
+     * Creates a client-role user, authenticates as them, and returns the instance.
+     */
+    protected function actingAsClient(array $attributes = []): User
     {
-        return $this->actingAsRole('client', $overrides);
-    }
-
-    protected function actingAsAdmin(array $overrides = []): User
-    {
-        return $this->actingAsRole('admin', $overrides);
+        $user = User::factory()->create(array_merge(['role' => 'client', 'status' => 'active'], $attributes));
+        $this->actingAs($user, 'sanctum');
+        return $user;
     }
 }

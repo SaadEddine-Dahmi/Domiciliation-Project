@@ -5,365 +5,409 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Contrat;
 use App\Models\Entreprise;
-use App\Models\AppNotification;
-use App\Services\TemplateService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\DB;
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
-use Symfony\Component\HttpKernel\Exception\UnauthorizedHttpException;
-use Barryvdh\DomPDF\Facade\Pdf as PDF;
 
 class ContratController extends Controller
 {
-    public function __construct(private TemplateService $templateService) {}
-
-    private function tenantIdOrFail(Request $request): int
-    {
-        $user = $request->user();
-        if (!$user)
-            throw new UnauthorizedHttpException('Bearer', 'Unauthenticated.');
-        return (int) $user->id;
-    }
-
-    // ── Index ────────────────────────────────────────────
     public function index(Request $request)
     {
-        $user     = $request->user();
-        $tenantId = (int) $user->id;
+        $user = auth()->user();
 
         if ($user->role === 'client') {
-            $entreprise = Entreprise::where('client_user_id', $tenantId)->first();
-            if (!$entreprise)
+            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+
+            if (!$entreprise) {
                 return response()->json(['success' => true, 'data' => []]);
+            }
 
             $contrats = Contrat::where('entreprise_id', $entreprise->id)
                 ->where('statut', 'active')
-                ->with(['entreprise:id,raison_sociale'])
+                ->with([
+                    'entreprise.representant',
+                    'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+                ])
                 ->latest()
                 ->get();
 
             return response()->json(['success' => true, 'data' => $contrats]);
         }
 
-        $query = Contrat::query()
-            ->with(['entreprise:id,raison_sociale', 'articles:id,title,body'])
-            ->where('domiciliataire_id', $tenantId)
-            ->latest();
+        $contrats = Contrat::where('domiciliataire_id', $user->id)
+            ->with([
+                'entreprise.representant',
+                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+            ])
+            ->latest()
+            ->get();
 
-        if ($request->filled('entreprise_id'))
-            $query->where('entreprise_id', (int) $request->input('entreprise_id'));
-        if ($request->filled('statut'))
-            $query->where('statut', $request->input('statut'));
-
-        return response()->json(['success' => true, 'data' => $query->get()]);
+        return response()->json(['success' => true, 'data' => $contrats]);
     }
 
-    // ── Store ────────────────────────────────────────────
-    public function store(Request $request)
+    public function show(string $id)
     {
-        $tenantId = $this->tenantIdOrFail($request);
+        $user = auth()->user();
 
-        $data = $request->validate([
-            'entreprise_id'            => ['required', 'integer', 'exists:entreprises,id'],
-            'date_signature'           => ['nullable', 'date'],
-            'date_debut'               => ['required', 'date'],
-            'date_fin'                 => ['nullable', 'date', 'after_or_equal:date_debut'],
-            'duree_mois'               => ['nullable', 'integer', 'min:1'],
-            'prix_mensuel'             => ['nullable', 'numeric', 'min:0'],
-            'prix_total'               => ['nullable', 'numeric', 'min:0'],
-            'caution'                  => ['nullable', 'numeric', 'min:0'],
-            'mode_paiement'            => ['nullable', 'string', 'max:100'],
-            'statut'                   => ['nullable', 'in:draft,active,expired,terminated'],
-            'notification_delay_months'=> ['nullable', 'integer', 'in:1,3,6'],
-            'article_ids'              => ['nullable', 'array'],
-            'article_ids.*'            => ['nullable'],
-        ]);
-
-        Entreprise::where('domiciliataire_id', $tenantId)->findOrFail((int) $data['entreprise_id']);
-
-        $contrat = DB::transaction(function () use ($data, $tenantId) {
-            $row = Contrat::create([
-                'domiciliataire_id'        => $tenantId,
-                'entreprise_id'            => $data['entreprise_id'],
-                'date_signature'           => $data['date_signature']            ?? null,
-                'date_debut'               => $data['date_debut'],
-                'date_fin'                 => $data['date_fin']                  ?? null,
-                'duree_mois'               => $data['duree_mois']                ?? null,
-                'prix_mensuel'             => $data['prix_mensuel']              ?? null,
-                'prix_total'               => $data['prix_total']                ?? null,
-                'caution'                  => $data['caution']                   ?? null,
-                'mode_paiement'            => $data['mode_paiement']             ?? null,
-                'statut'                   => 'draft',
-                'notification_delay_months'=> $data['notification_delay_months'] ?? 1,
-            ]);
-            $this->syncArticles($row, $data['article_ids'] ?? []);
-            return $row;
-        });
-
-        return response()->json([
-            'success' => true,
-            'data'    => $contrat->load(['entreprise:id,raison_sociale', 'articles:id,title,body']),
-        ], 201);
-    }
-
-    // ── Show ─────────────────────────────────────────────
-    public function show(Request $request, int $id)
-    {
-        $tenantId = $this->tenantIdOrFail($request);
-        $contrat  = Contrat::query()
-            ->with(['entreprise:id,raison_sociale', 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre')])
-            ->where('domiciliataire_id', $tenantId)
+        $contrat = Contrat::where('domiciliataire_id', $user->id)
+            ->with([
+                'entreprise.representant',
+                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+            ])
             ->findOrFail($id);
 
         return response()->json(['success' => true, 'data' => $contrat]);
     }
 
-    // ── Update ───────────────────────────────────────────
-    public function update(Request $request, int $id)
+    /**
+     * POST /api/contrats
+     *
+     * NOTE on 'articles' validation: kept intentionally loose ('array' only,
+     * no per-item shape rule). syncArticles() below accepts BOTH:
+     *   - object form: [{id: "3", ordre: 1}, ...]
+     *   - flat form:   ["3", "14"]
+     * A strict 'articles.*.id' => required rule rejects the flat form outright
+     * (each element isn't an array with an 'id' key), so we validate shape
+     * loosely here and let syncArticles() normalise both formats.
+     */
+    public function store(Request $request)
     {
-        $tenantId = $this->tenantIdOrFail($request);
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($id);
+        $user = auth()->user();
 
         $data = $request->validate([
-            'entreprise_id'            => ['required', 'integer', 'exists:entreprises,id'],
-            'date_signature'           => ['nullable', 'date'],
-            'date_debut'               => ['required', 'date'],
-            'date_fin'                 => ['nullable', 'date', 'after_or_equal:date_debut'],
-            'duree_mois'               => ['nullable', 'integer', 'min:1'],
-            'prix_mensuel'             => ['nullable', 'numeric', 'min:0'],
-            'prix_total'               => ['nullable', 'numeric', 'min:0'],
-            'caution'                  => ['nullable', 'numeric', 'min:0'],
-            'mode_paiement'            => ['nullable', 'string', 'max:100'],
-            'statut'                   => ['required', 'in:draft,active,expired,terminated'],
-            'notification_delay_months'=> ['nullable', 'integer', 'in:1,3,6'],
-            'article_ids'              => ['nullable', 'array'],
-            'article_ids.*'            => ['nullable'],
+            'entreprise_id'  => ['required', 'integer', 'exists:entreprises,id'],
+            'titre_contrat'  => ['nullable', 'string', 'max:255'],
+            'date_debut'     => ['required', 'date'],
+            'date_fin'       => ['nullable', 'date', 'after_or_equal:date_debut'],
+            'duree_mois'     => ['nullable', 'integer', 'min:1'],
+            'prix_mensuel'   => ['nullable', 'numeric', 'min:0'],
+            'prix_total'     => ['nullable', 'numeric', 'min:0'],
+            'instruction_no' => ['nullable', 'string', 'max:20'],
+            'ville_signature'=> ['nullable', 'string', 'max:100'],
+            'date_signature' => ['nullable', 'date'],
+            'caution'        => ['nullable', 'numeric', 'min:0'],
+            'mode_paiement'  => ['nullable', 'string', 'max:100'],
+            'statut'         => ['nullable', 'in:draft,active,expired,terminated'],
+            'articles'       => ['nullable', 'array'],
         ]);
 
-        Entreprise::where('domiciliataire_id', $tenantId)->findOrFail((int) $data['entreprise_id']);
+        // Ownership guard: entreprise must belong to the authenticated tenant.
+        $entreprise = Entreprise::where('domiciliataire_id', $user->id)
+            ->find($data['entreprise_id']);
 
-        DB::transaction(function () use ($contrat, $data) {
-            $contrat->update([
-                'entreprise_id'            => $data['entreprise_id'],
-                'date_signature'           => $data['date_signature']            ?? null,
-                'date_debut'               => $data['date_debut'],
-                'date_fin'                 => $data['date_fin']                  ?? null,
-                'duree_mois'               => $data['duree_mois']                ?? null,
-                'prix_mensuel'             => $data['prix_mensuel']              ?? null,
-                'prix_total'               => $data['prix_total']                ?? null,
-                'caution'                  => $data['caution']                   ?? null,
-                'mode_paiement'            => $data['mode_paiement']             ?? null,
-                'statut'                   => $data['statut'],
-                'notification_delay_months'=> $data['notification_delay_months'] ?? $contrat->notification_delay_months,
-            ]);
-            $this->syncArticles($contrat, $data['article_ids'] ?? []);
-        });
+        if (!$entreprise) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Entreprise introuvable.',
+            ], 404);
+        }
 
-        return response()->json([
-            'success' => true,
-            'data'    => $contrat->fresh(['entreprise:id,raison_sociale', 'articles:id,title,body']),
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $user->id,
+            'entreprise_id'     => $data['entreprise_id'],
+            'titre_contrat'     => ($data['titre_contrat'] ?? '') ?: 'Contrat de Domiciliation',
+            'date_debut'        => $data['date_debut'],
+            'date_fin'          => $data['date_fin']          ?? null,
+            'duree_mois'        => $data['duree_mois']        ?? null,
+            'prix_mensuel'      => $data['prix_mensuel']      ?? null,
+            'prix_total'        => $data['prix_total']        ?? null,
+            'instruction_no'    => $data['instruction_no']    ?? null,
+            'ville_signature'   => $data['ville_signature']   ?? null,
+            'date_signature'    => $data['date_signature']    ?? null,
+            'caution'           => $data['caution']           ?? null,
+            'mode_paiement'     => $data['mode_paiement']     ?? null,
+            'statut'            => 'draft',
         ]);
+
+        $this->syncArticles($contrat, $request->input('articles', []));
+
+        $contrat->load([
+            'entreprise.representant',
+            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+        ]);
+
+        return response()->json(['success' => true, 'data' => $contrat], 201);
     }
 
-    // ── Generate PDF ─────────────────────────────────────
-    public function generatePdf(Request $request, int $id)
+    public function update(Request $request, string $id)
     {
-        $tenantId = $this->tenantIdOrFail($request);
+        $user    = auth()->user();
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
-        $contrat = Contrat::query()
+        $data = $request->validate([
+            'entreprise_id'  => ['sometimes', 'integer', 'exists:entreprises,id'],
+            'titre_contrat'  => ['nullable', 'string', 'max:255'],
+            'date_debut'     => ['sometimes', 'date'],
+            'date_fin'       => ['nullable', 'date'],
+            'duree_mois'     => ['nullable', 'integer', 'min:1'],
+            'prix_mensuel'   => ['nullable', 'numeric', 'min:0'],
+            'prix_total'     => ['nullable', 'numeric', 'min:0'],
+            'instruction_no' => ['nullable', 'string', 'max:20'],
+            'ville_signature'=> ['nullable', 'string', 'max:100'],
+            'date_signature' => ['nullable', 'date'],
+            'caution'        => ['nullable', 'numeric', 'min:0'],
+            'mode_paiement'  => ['nullable', 'string', 'max:100'],
+            'statut'         => ['nullable', 'in:draft,active,expired,terminated'],
+            'articles'       => ['nullable', 'array'],
+        ]);
+
+        if (isset($data['entreprise_id'])) {
+            $owned = Entreprise::where('domiciliataire_id', $user->id)
+                ->find($data['entreprise_id']);
+
+            if (!$owned) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Entreprise introuvable.',
+                ], 404);
+            }
+        }
+
+        $contrat->update(array_filter([
+            'entreprise_id'  => $data['entreprise_id']  ?? null,
+            'titre_contrat'  => isset($data['titre_contrat'])
+                                    ? ($data['titre_contrat'] ?: 'Contrat de Domiciliation')
+                                    : null,
+            'date_debut'     => $data['date_debut']     ?? null,
+            'date_fin'       => $data['date_fin']       ?? null,
+            'duree_mois'     => $data['duree_mois']     ?? null,
+            'prix_mensuel'   => $data['prix_mensuel']   ?? null,
+            'prix_total'     => $data['prix_total']     ?? null,
+            'instruction_no' => $data['instruction_no'] ?? null,
+            'ville_signature'=> $data['ville_signature']?? null,
+            'date_signature' => $data['date_signature'] ?? null,
+            'caution'        => $data['caution']        ?? null,
+            'mode_paiement'  => $data['mode_paiement']  ?? null,
+            'statut'         => $data['statut']         ?? null,
+        ], fn($v) => $v !== null));
+
+        if ($request->has('articles')) {
+            $this->syncArticles($contrat, $request->input('articles', []));
+        }
+
+        $contrat->load([
+            'entreprise.representant',
+            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+        ]);
+
+        return response()->json(['success' => true, 'data' => $contrat]);
+    }
+
+    public function activate(string $id)
+    {
+        $user    = auth()->user();
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
+
+        if ($contrat->statut !== 'draft') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Seul un contrat en brouillon peut être activé.',
+            ], 422);
+        }
+
+        $contrat->activate();
+
+        return response()->json(['success' => true, 'data' => $contrat->fresh()]);
+    }
+
+    public function terminate(string $id)
+    {
+        $user    = auth()->user();
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
+
+        if ($contrat->statut !== 'active') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Seul un contrat actif peut être résilié.',
+            ], 422);
+        }
+
+        $contrat->terminate();
+
+        return response()->json(['success' => true, 'data' => $contrat->fresh()]);
+    }
+
+    public function generatePdf(string $id)
+    {
+        $user = auth()->user();
+
+        $contrat = Contrat::where('domiciliataire_id', $user->id)
             ->with([
                 'entreprise.representant',
-                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
                 'domiciliataire',
+                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
             ])
-            ->where('domiciliataire_id', $tenantId)
             ->findOrFail($id);
 
-        // Build variable map — all {{variables}} resolved here
-        $templateData = $this->templateService->dataFromContrat($contrat);
+        $this->prepareEntrepriseForPdf($contrat);
+        $tokenMap = $this->buildTokenMap($contrat);
 
-        // Render each article body with variable replacement
-        $articlesHtml = $contrat->articles->map(function ($article, $i) use ($templateData) {
-            $renderedBody = $this->templateService->render($article->body ?? '', $templateData);
-            return "
-            <div style='margin:14px 0'>
-                <p style='font-weight:700;margin:0 0 6px;font-size:12px'>
-                    ARTICLE " . ($i + 1) . " — " . e($article->title) . "
-                </p>
-                <p style='margin:0;line-height:1.7;text-align:justify'>
-                    {$renderedBody}
-                </p>
-            </div>
-        ";
-        })->implode('');
+        $resolvedArticles = $contrat->articles->map(function ($article) use ($tokenMap) {
+            $clone       = clone $article;
+            $clone->body = $this->resolveTokens($article->body ?? '', $tokenMap);
+            return $clone;
+        });
 
-        // Header values — use templateData so format is consistent
-        $domiciliataire = e($templateData['domiciliataire_nom'] ?: ($contrat->domiciliataire->nom ?? ''));
-        $domicilie = e($templateData['raison_sociale']);
-        $dateDebut = $templateData['date_debut'] ?: '—';
-        $dateFin = $templateData['date_fin'] ?: '—';
-        $dureeMois = $templateData['duree_mois'] ?: '—';
-        $mensuel = $templateData['redevance_mensuelle'] ?: '—';
-        $annuel = $templateData['redevance_annuelle'] ?: '—';
-        $instrNo = $templateData['instruction_no'] ?: '';
-        $ville = $templateData['ville_signature'] ?: 'AGADIR';
-        $gerantNom = e($templateData['gerant_nom']);
-        $gerantCin = e($templateData['gerant_cin']);
-        $astNom = e(trim(($contrat->domiciliataire->nom ?? '') . ' ' . ($contrat->domiciliataire->prenom ?? '')));
-        $astRC = e($contrat->domiciliataire->rc ?? '');
-        $astIF = e($contrat->domiciliataire->if_number ?? '');
-        $astAdresse = e($contrat->domiciliataire->adresse ?? '');
+        $pdf = Pdf::loadView('pdf.contrat', [
+            'contrat'  => $contrat,
+            'articles' => $resolvedArticles,
+        ])->setPaper('a4', 'portrait');
 
-        $html = "<!DOCTYPE html>
-<html>
-<head>
-    <meta charset='UTF-8'>
-    <style>
-        body {
-            font-family: DejaVu Sans, sans-serif;
-            color: #111;
-            font-size: 11px;
-            line-height: 1.6;
-            margin: 0;
-            padding: 24px 32px;
-        }
-        h1 {
-            text-align: center;
-            font-size: 16px;
-            margin: 0 0 4px;
-            letter-spacing: 1px;
-            text-transform: uppercase;
-        }
-        .sub {
-            text-align: center;
-            color: #555;
-            font-size: 10px;
-            margin: 0 0 14px;
-        }
-        .hr-gold  { border:none; border-top:1.5px solid #c8a96e; margin:12px 0; }
-        .hr-light { border:none; border-top:1px solid #ddd; margin:10px 0; }
-        .label    { font-weight:bold; }
-        .section  { font-size:10px; text-transform:uppercase; letter-spacing:1px; color:#888; margin:14px 0 6px; }
-        .signatures { display:table; width:100%; margin-top:50px; }
-        .sig-left   { display:table-cell; width:50%; }
-        .sig-right  { display:table-cell; width:50%; text-align:right; }
-        strong { font-weight:bold; }
-    </style>
-</head>
-<body>
-
-    <h1>Contrat de Domiciliation</h1>
-    <p class='sub'>
-        " . ($instrNo ? "Instruction N° : <strong>{$instrNo}</strong> &nbsp;|&nbsp;" : '') . "
-        Domiciliataire : <strong>{$astNom}</strong>
-    </p>
-
-    <hr class='hr-gold'>
-
-    <p class='section'>Parties</p>
-    <p><span class='label'>Domiciliataire :</span> {$astNom}</p>
-    <p><span class='label'>RC :</span> {$astRC} &nbsp;|&nbsp; <span class='label'>IF :</span> {$astIF}</p>
-    <p><span class='label'>Adresse :</span> {$astAdresse}</p>
-    <p style='margin-top:8px'><span class='label'>Domicilié :</span> {$domicilie}</p>
-    <p><span class='label'>Gérant :</span> {$gerantNom} &nbsp;|&nbsp; <span class='label'>CIN :</span> {$gerantCin}</p>
-
-    <hr class='hr-light'>
-
-    <p class='section'>Durée &amp; Redevance</p>
-    <p><span class='label'>Période :</span> {$dateDebut} → {$dateFin} ({$dureeMois} mois)</p>
-    <p>
-        <span class='label'>Redevance mensuelle :</span> {$mensuel}
-        &nbsp;|&nbsp;
-        <span class='label'>Annuelle :</span> {$annuel}
-    </p>
-
-    <hr class='hr-light'>
-
-    <p class='section'>Articles du contrat</p>
-    " . ($articlesHtml ?: "<p style='color:#999'>Aucun article sélectionné.</p>") . "
-
-    <hr class='hr-gold'>
-
-    <div class='signatures'>
-        <div class='sig-left'>
-            <p style='margin:0 0 50px'>Fait à {$ville}, le _________________</p>
-            <p style='margin:0'><strong>Signature du domiciliataire</strong></p>
-            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$astNom}</p>
-        </div>
-        <div class='sig-right'>
-            <p style='margin:0 0 50px'>Lu et approuvé, bon pour accord</p>
-            <p style='margin:0'><strong>Signature du domicilié</strong></p>
-            <p style='margin:4px 0 0;font-size:10px;color:#555'>{$domicilie}</p>
-        </div>
-    </div>
-
-</body>
-</html>";
-
-        $pdf = PDF::loadHTML($html)->setPaper('a4', 'portrait');
-        $filePath = "contrats/contrat_{$contrat->id}.pdf";
-        Storage::disk('public')->put($filePath, $pdf->output());
-        $contrat->update(['pdf_path' => $filePath]);
+        $filename = 'contrats/contrat_' . $contrat->id . '_' . now()->format('Ymd_His') . '.pdf';
+        Storage::disk('public')->put($filename, $pdf->output());
+        $contrat->update(['pdf_path' => $filename]);
 
         return response()->json([
             'success' => true,
-            'data' => [
-                'pdf_path' => $filePath,
-                'url' => asset('storage/' . $filePath),
+            'data'    => [
+                'url'      => Storage::disk('public')->url($filename),
+                'pdf_path' => $filename,
             ],
         ]);
     }
 
-    // ── Activate ─────────────────────────────────────────
-    public function activate(Request $request, int $id)
+    /**
+     * GET /api/contrats/{id}/pdf/stream
+     *
+     * MUST remain outside auth:sanctum — registered separately in
+     * routes/api.php, before the authenticated group. A browser <iframe
+     * src="…"> issues a plain GET with no custom headers, so this route
+     * cannot require Authorization: Bearer.
+     */
+    public function streamPdf(string $id)
     {
-        $tenantId = $this->tenantIdOrFail($request);
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)
-            ->where('statut', 'draft')
-            ->findOrFail($id);
+        $contrat = Contrat::with([
+            'entreprise.representant',
+            'domiciliataire',
+            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+        ])->findOrFail($id);
 
-        $request->validate([
-            'signed_pdf' => ['required', 'file', 'mimes:pdf', 'max:10240'],
-        ]);
+        $headers = [
+            'Content-Type'        => 'application/pdf',
+            'Content-Disposition' => 'inline; filename="contrat_' . $contrat->id . '.pdf"',
+            'Cache-Control'       => 'no-store, no-cache, must-revalidate',
+            'X-Frame-Options'     => 'SAMEORIGIN',
+        ];
 
-        $path = $request->file('signed_pdf')->store('contrats/signed', 'public');
-        $contrat->update(['scanned_pdf_path' => $path]);
-        $contrat->activate();
-
-        AppNotification::create([
-            'user_id'    => $tenantId,
-            'contrat_id' => $contrat->id,
-            'message'    => "Le contrat #{$contrat->id} ({$contrat->entreprise->raison_sociale}) est maintenant actif.",
-            'is_read'    => false,
-        ]);
-
-        return response()->json([
-            'success' => true,
-            'message' => 'Contrat activé avec succès.',
-            'data'    => $contrat->fresh(['entreprise:id,raison_sociale']),
-        ]);
-    }
-
-    // ── Terminate ─────────────────────────────────────────
-    public function terminate(Request $request, int $id)
-    {
-        $tenantId = $this->tenantIdOrFail($request);
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)
-            ->whereIn('statut', ['active'])
-            ->findOrFail($id);
-
-        $contrat->terminate();
-
-        return response()->json(['success' => true, 'message' => 'Contrat résilié.']);
-    }
-
-    // ── Helpers ───────────────────────────────────────────
-    private function syncArticles(Contrat $contrat, array $articleIds): void
-    {
-        $syncPayload = [];
-        foreach (array_values(array_filter($articleIds)) as $i => $articleId) {
-            $syncPayload[$articleId] = ['ordre' => $i + 1];
+        if ($contrat->pdf_path && Storage::disk('public')->exists($contrat->pdf_path)) {
+            return response(Storage::disk('public')->get($contrat->pdf_path), 200, $headers);
         }
-        $contrat->articles()->sync($syncPayload);
+
+        $this->prepareEntrepriseForPdf($contrat);
+        $tokenMap         = $this->buildTokenMap($contrat);
+        $resolvedArticles = $contrat->articles->map(function ($article) use ($tokenMap) {
+            $clone       = clone $article;
+            $clone->body = $this->resolveTokens($article->body ?? '', $tokenMap);
+            return $clone;
+        });
+
+        $pdf = Pdf::loadView('pdf.contrat', [
+            'contrat'  => $contrat,
+            'articles' => $resolvedArticles,
+        ])->setPaper('a4', 'portrait');
+
+        return response($pdf->output(), 200, $headers);
+    }
+
+    private function prepareEntrepriseForPdf(Contrat $contrat): void
+    {
+        $entreprise   = $contrat->entreprise;
+        $representant = $entreprise?->representant;
+
+        if (!$entreprise) return;
+
+        $entreprise->setAttribute('nom_societe', $entreprise->raison_sociale ?? '');
+        $entreprise->setAttribute('gerant_nom', $representant
+            ? trim(($representant->nom ?? '') . ' ' . ($representant->prenom ?? ''))
+            : '');
+        $entreprise->setAttribute('gerant_cin', $representant?->cin ?? '');
+        $entreprise->setAttribute('tel', $representant?->telephone ?? '');
+        $entreprise->setAttribute('email', $representant?->email ?? '');
+        $entreprise->setAttribute('adresse', $representant?->adresse ?? $entreprise->adresse ?? '');
+    }
+
+    private function buildTokenMap(Contrat $contrat): array
+    {
+        $entreprise     = $contrat->entreprise;
+        $representant   = $entreprise?->representant;
+        $domiciliataire = $contrat->domiciliataire;
+
+        $fmt  = fn($v) => $v !== null ? number_format((float) $v, 2, ',', ' ') . ' DH' : '';
+        $date = fn($v) => $v ? \Carbon\Carbon::parse($v)->format('d/m/Y') : '';
+
+        return [
+            'domiciliataire_nom'          => $domiciliataire?->nom_societe          ?? '',
+            'domiciliataire_rc'           => $domiciliataire?->rc                   ?? '',
+            'domiciliataire_if'           => $domiciliataire?->if_fiscal            ?? '',
+            'domiciliataire_tp'           => $domiciliataire?->tp                   ?? '',
+            'domiciliataire_adresse'      => $domiciliataire?->adresse              ?? '',
+            'domiciliataire_representant' => $domiciliataire?->representant_legal   ?? '',
+            'raison_sociale'              => $entreprise?->raison_sociale           ?? '',
+            'societe'                     => $entreprise?->raison_sociale           ?? '',
+            'forme_juridique'             => $entreprise?->forme_juridique          ?? '',
+            'adresse_domiciliation'       => $entreprise?->adresse                  ?? '',
+            'ville_client'                => $entreprise?->ville                    ?? '',
+            'gerant_nom'                  => trim(($representant?->nom ?? '') . ' ' . ($representant?->prenom ?? '')),
+            'gerant_prenom'               => $representant?->prenom                 ?? '',
+            'gerant_cin'                  => $representant?->cin                    ?? '',
+            'gerant_telephone'            => $representant?->telephone              ?? '',
+            'telephone'                   => $representant?->telephone              ?? '',
+            'gerant_email'                => $representant?->email                  ?? '',
+            'email'                       => $representant?->email                  ?? '',
+            'gerant_adresse'              => $representant?->adresse                ?? '',
+            'gerant_nationalite'          => $representant?->nationalite            ?? '',
+            'date_naissance'              => $date($representant?->date_naissance),
+            'date_debut'                  => $date($contrat->date_debut),
+            'date_fin'                    => $date($contrat->date_fin),
+            'date_signature'              => $date($contrat->date_signature),
+            'duree_mois'                  => (string) ($contrat->duree_mois ?? ''),
+            'instruction_no'              => $contrat->instruction_no ?? '',
+            'ville_signature'             => $contrat->ville_signature ?? '',
+            'prix_mensuel'                => $fmt($contrat->prix_mensuel),
+            'prix_total'                  => $fmt($contrat->prix_total),
+            'caution'                     => $fmt($contrat->caution),
+            'mode_paiement'               => $contrat->mode_paiement ?? '',
+            'redevance_mensuelle'         => $fmt($contrat->prix_mensuel),
+            'redevance_annuelle'          => $fmt($contrat->prix_total),
+        ];
+    }
+
+    private function resolveTokens(string $text, array $tokenMap): string
+    {
+        foreach ($tokenMap as $key => $value) {
+            $text = preg_replace('/\{\{\s*' . preg_quote($key, '/') . '\s*\}\}/i', $value, $text);
+        }
+        return $text;
+    }
+
+    /**
+     * Accepts both:
+     *   Object form: [{id: "3", ordre: 1}, ...]
+     *   Flat form:   ["3", "14"]
+     */
+    private function syncArticles(Contrat $contrat, array $rawArticles): void
+    {
+        if (empty($rawArticles)) {
+            $contrat->articles()->sync([]);
+            return;
+        }
+
+        $syncData = [];
+
+        foreach ($rawArticles as $index => $item) {
+            if (is_array($item)) {
+                $articleId = (int) ($item['id']    ?? 0);
+                $ordre     = (int) ($item['ordre'] ?? ($index + 1));
+            } else {
+                $articleId = (int) $item;
+                $ordre     = $index + 1;
+            }
+
+            if ($articleId > 0) {
+                $syncData[$articleId] = ['ordre' => $ordre];
+            }
+        }
+
+        $contrat->articles()->sync($syncData);
     }
 }

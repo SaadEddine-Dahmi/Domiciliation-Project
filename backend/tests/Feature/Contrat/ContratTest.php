@@ -111,8 +111,11 @@ class ContratTest extends TestCase
             'statut'            => 'draft',
         ]);
 
+        // Controller returns 422 (state-machine violation), not 404 —
+        // the contract exists and belongs to this tenant, it's just in
+        // the wrong state to be terminated.
         $this->postJson("/api/contrats/{$contrat->id}/terminate")
-            ->assertStatus(404);
+            ->assertStatus(422);
     }
 
     /** @test */

@@ -1,30 +1,35 @@
 // stores/clients.ts
+//
+// Pinia store for the clients (Entreprise) list.
+// Used by the contract wizard (step 2) and the clients management page.
+//
+// Data shape from GET /api/clients (ClientController::index()):
+//   Entreprise {
+//     representant  (hasOne)  — nom, prenom, cin, telephone, email, adresse,
+//                               date_naissance, nom_complet (accessor)
+//     clientUser    (hasOne)  — id, nom, prenom, email, telephone, role
+//     documents[]             — with documentType
+//   }
+//
+// Two-step client creation flow (wizard step 2 "nouveau client"):
+//   1. create()           → POST /api/clients         → creates Entreprise + User
+//   2. createRepresentant() → POST /api/entreprises/{id}/representant
+//                                                     → creates Representant
+//   Both must succeed for the PDF to render gérant fields. If step 2 fails,
+//   the wizard shows a toast but continues (the representant can be added later
+//   from the Clients management page).
+
 import { defineStore } from 'pinia'
+import type { Entreprise } from '~/types/entreprise'
 
-export interface ClientUser {
-    id: number
-    nom: string
-    prenom: string
-    email: string
-    telephone: string
-    role: string
+interface ApiSuccess<T> {
+    success: boolean
+    data: T
+    message?: string
 }
 
-export interface Client {
-    id: number
-    raison_sociale: string
-    forme_juridique: string | null
-    adresse: string | null
-    ville: string | null
-    pays: string | null
-    capital: string | null
-    date_creation: string | null
-    statut: string | null
-    client_user: ClientUser | null
-}
-
-export interface ClientCreatePayload {
-    // Entreprise
+// Shape expected by POST /api/clients
+interface ClientCreatePayload {
     raison_sociale: string
     forme_juridique?: string
     adresse?: string
@@ -33,100 +38,145 @@ export interface ClientCreatePayload {
     capital?: number
     date_creation?: string
     statut?: string
-    // Compte utilisateur client
-    client_nom: string
+    client_nom?: string
     client_prenom?: string
-    client_email: string
-    client_password: string
+    client_email?: string
+    client_password?: string
     client_telephone?: string
 }
 
+// Shape expected by POST /api/entreprises/{id}/representant
+interface RepresentantCreatePayload {
+    nom: string
+    prenom?: string
+    cin: string
+    nationalite?: string
+    date_naissance?: string
+    adresse?: string
+    telephone?: string
+    email?: string
+}
+
 export const useClientsStore = defineStore('clients', () => {
-    const items = ref<Client[]>([])
+
+    // ── State ─────────────────────────────────────────────────────────────────
+    const items = ref<Entreprise[]>([])
     const loading = ref(false)
     const error = ref('')
 
-    function getApiBase() {
+    // ── Private helpers ───────────────────────────────────────────────────────
+
+    function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
+    /**
+     * Authorization header from localStorage.
+     * Key: 'app_auth' — written by the auth store on login.
+     */
     function authHeaders(): Record<string, string> {
         if (!import.meta.client) return {}
         try {
-            const raw = localStorage.getItem('astfisc_auth')
+            const raw = localStorage.getItem('app_auth')
             if (!raw) return {}
             const parsed = JSON.parse(raw)
-            const token = parsed?.token ?? ''
-            return token ? { Authorization: `Bearer ${token}` } : {}
-        } catch {
-            return {}
-        }
+            return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
+        } catch { return {} }
     }
 
-    async function fetchAll() {
+    // ── Actions ───────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/clients
+     *
+     * Load all entreprises for the authenticated domiciliataire.
+     * Called on wizard mount so data is available immediately for step 2.
+     */
+    async function fetchAll(): Promise<void> {
         loading.value = true
         error.value = ''
         try {
-            const res = await $fetch<{ success: boolean; data: Client[] }>(
+            const res = await $fetch<ApiSuccess<Entreprise[]>>(
                 `${getApiBase()}/api/clients`,
                 { headers: authHeaders() }
             )
-            items.value = res.data
+            items.value = res.data ?? []
         } catch (e: any) {
             error.value = e?.data?.message ?? 'Erreur chargement clients'
+            items.value = []
         } finally {
             loading.value = false
         }
     }
 
-    async function create(payload: ClientCreatePayload): Promise<Client> {
-        // 1. Créer le compte user client
-        const userRes = await $fetch<{ success: boolean; data: { user: ClientUser; token: string } }>(
-            `${getApiBase()}/api/auth/register`,
+    /**
+     * POST /api/clients
+     *
+     * Create a new client (Entreprise + optional portal User account).
+     * Does NOT create the representant — call createRepresentant() after.
+     *
+     * Prepends the new entreprise to the local list for immediate UI feedback.
+     * Returns the full Entreprise object with representant = null initially.
+     */
+    async function create(payload: ClientCreatePayload): Promise<Entreprise> {
+        const res = await $fetch<ApiSuccess<Entreprise>>(
+            `${getApiBase()}/api/clients`,
             {
                 method: 'POST',
                 headers: authHeaders(),
-                body: {
-                    nom: payload.client_nom,
-                    prenom: payload.client_prenom ?? '',
-                    email: payload.client_email,
-                    password: payload.client_password,
-                    telephone: payload.client_telephone ?? '',
-                    role: 'client',
-                },
+                body: payload,
             }
         )
-
-        const clientUserId = userRes.data.user.id
-
-        // 2. Créer l'entreprise liée
-        const entRes = await $fetch<{ data: Client }>(
-            `${getApiBase()}/api/entreprises`,
-            {
-                method: 'POST',
-                headers: authHeaders(),
-                body: {
-                    raison_sociale: payload.raison_sociale,
-                    forme_juridique: payload.forme_juridique ?? null,
-                    adresse: payload.adresse ?? null,
-                    ville: payload.ville ?? null,
-                    pays: payload.pays ?? 'Maroc',
-                    capital: payload.capital ?? null,
-                    date_creation: payload.date_creation ?? null,
-                    statut: payload.statut ?? 'actif',
-                    client_user_id: clientUserId,
-                },
-            }
-        )
-
-        const newClient = entRes.data
-        items.value.unshift(newClient)
-        return newClient
+        const newEntreprise = res.data
+        items.value.unshift(newEntreprise)
+        return newEntreprise
     }
 
-    async function update(id: number, payload: Partial<Client> & { client_user?: Partial<ClientUser> }): Promise<Client> {
-        const res = await $fetch<{ success: boolean; data: Client }>(
+    /**
+     * POST /api/entreprises/{id}/representant
+     *
+     * Create the gérant (representant) for a freshly created client.
+     * Called immediately after create() in the wizard step 2 "nouveau client" flow.
+     *
+     * WHY this is separate from create():
+     *   The representant endpoint is also used by the Clients management page
+     *   to add or edit gérant details for existing clients. Keeping it separate
+     *   avoids duplicating that logic.
+     *
+     * On success, updates the matching item in the local list so the wizard's
+     * fillFromClient() can immediately read the representant data without
+     * a full re-fetch.
+     */
+    async function createRepresentant(
+        entrepriseId: number,
+        payload: RepresentantCreatePayload
+    ): Promise<void> {
+        const res = await $fetch<ApiSuccess<any>>(
+            `${getApiBase()}/api/entreprises/${entrepriseId}/representant`,
+            {
+                method: 'POST',
+                headers: authHeaders(),
+                body: payload,
+            }
+        )
+        // Update the local list so the wizard can read the representant immediately.
+        const idx = items.value.findIndex(e => e.id === entrepriseId)
+        if (idx !== -1) {
+            items.value[idx] = { ...items.value[idx], representant: res.data }
+        }
+    }
+
+    /**
+     * PUT /api/clients/{id}
+     *
+     * Update an existing entreprise's fields and optionally the linked User.
+     */
+    async function update(
+        id: number,
+        payload: Partial<ClientCreatePayload> & { client_user?: Record<string, string> }
+    ): Promise<Entreprise> {
+        const res = await $fetch<ApiSuccess<Entreprise>>(
             `${getApiBase()}/api/clients/${id}`,
             {
                 method: 'PUT',
@@ -134,18 +184,28 @@ export const useClientsStore = defineStore('clients', () => {
                 body: payload,
             }
         )
-        const idx = items.value.findIndex((c) => c.id === id)
+        const idx = items.value.findIndex(e => e.id === id)
         if (idx !== -1) items.value[idx] = res.data
         return res.data
     }
 
-    async function updatePassword(id: number, password: string, password_confirmation: string) {
+    /**
+     * PUT /api/clients/{id}/password
+     *
+     * Reset the portal account password for the linked client user.
+     * Sends both password and password_confirmation (required by backend).
+     */
+    async function updatePassword(
+        id: number,
+        password: string,
+        passwordConfirmation: string
+    ): Promise<void> {
         await $fetch(`${getApiBase()}/api/clients/${id}/password`, {
             method: 'PUT',
             headers: authHeaders(),
-            body: { password, password_confirmation },
+            body: { password, password_confirmation: passwordConfirmation },
         })
     }
 
-    return { items, loading, error, fetchAll, create, update, updatePassword }
+    return { items, loading, error, fetchAll, create, createRepresentant, update, updatePassword }
 })

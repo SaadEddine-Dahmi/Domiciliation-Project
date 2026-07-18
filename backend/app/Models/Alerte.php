@@ -9,7 +9,7 @@ class Alerte extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['contrat_id','date_alerte','envoye'];
+    protected $fillable = ['contrat_id', 'date_alerte', 'envoye'];
     protected $casts = ['date_alerte' => 'date', 'envoye' => 'boolean'];
 
     public function contrat() { return $this->belongsTo(Contrat::class); }

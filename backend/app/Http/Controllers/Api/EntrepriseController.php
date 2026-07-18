@@ -32,23 +32,24 @@ class EntrepriseController extends Controller
     }
 
     public function store(EntrepriseStoreRequest $request)
-    {
-        // SECURITY: only domiciliataires can create entreprises
-        if (auth()->user()->role !== 'domiciliataire') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
-        }
-
-        $data = $request->validated();
-
-        $row = Entreprise::create([
-            ...$data,
-            'domiciliataire_id' => auth()->id(),
-        ]);
-
-        return (new EntrepriseResource($row))
-            ->response()
-            ->setStatusCode(201);
+{
+    // Only domiciliataire (and admin, if you want admins to manage on behalf of tenants)
+    // may create entreprises. Clients are read-only consumers of their own entreprise.
+    if (!in_array(auth()->user()->role, ['domiciliataire', 'admin'], true)) {
+        return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
     }
+
+    $data = $request->validated();
+
+    $row = Entreprise::create([
+        ...$data,
+        'domiciliataire_id' => auth()->id(), // force tenant
+    ]);
+
+    return (new EntrepriseResource($row))
+        ->response()
+        ->setStatusCode(201);
+}
 
     public function show(int $id)
     {
