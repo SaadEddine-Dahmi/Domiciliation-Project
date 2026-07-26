@@ -27,19 +27,13 @@
 </template>
 
 <script setup lang="ts">
-<<<<<<< HEAD
-import { useSidebar } from '~/composables/useSidebar'
 
-const props   = defineProps<{ nav?: any[] }>()
-const nav     = computed(() => props.nav ?? [])
-const route   = useRoute()
-const sidebar = useSidebar()
-=======
+
 const props = defineProps<{ nav?: any[] }>()
 const nav   = computed(() => props.nav ?? [])
 const route = useRoute()
 const { isOpen, isMobileOpen } = useSidebar()
->>>>>>> dev-Saad
+
 
 const pageTitle = computed(() => ({
   '/admin/dashboard':       'Tableau de bord',
