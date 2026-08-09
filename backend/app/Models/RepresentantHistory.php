@@ -10,22 +10,25 @@ class RepresentantHistory extends Model
 
     protected $fillable = [
         'representant_id',
-        'changed_by',     // user who made the change
-        'data',           // full snapshot of old record
-        'changed_fields', // array of field names that changed
-        'action',         // 'update' or 'delete'
+        'domiciliataire_id', // denormalised tenant owner, for scoped queries
+        'changed_by',
+        'data',
+        'changed_fields',
+        'action',
     ];
 
     protected $casts = [
-        'data'           => 'array',
+        'data' => 'array',
         'changed_fields' => 'array',
     ];
 
+    // The representant this snapshot was taken from.
     public function representant()
     {
         return $this->belongsTo(Representant::class);
     }
 
+    // The user who made the change captured in this snapshot.
     public function changedBy()
     {
         return $this->belongsTo(User::class, 'changed_by');

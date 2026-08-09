@@ -22,21 +22,25 @@ class Document extends Model
         'date_expiration' => 'date',
     ];
 
+    // The entreprise this document belongs to.
     public function entreprise()
     {
         return $this->belongsTo(Entreprise::class);
     }
 
+    // The catalog type of this document (e.g. "Extrait RC").
     public function documentType()
     {
         return $this->belongsTo(DocumentType::class, 'document_type_id');
     }
 
+    // The user (domiciliataire or admin) who uploaded this document.
     public function uploadedBy()
     {
         return $this->belongsTo(User::class, 'uploaded_by_user');
     }
 
+    // The prior version this document replaces, if any (version chain).
     public function previousVersion()
     {
         return $this->belongsTo(Document::class, 'previous_version_id');

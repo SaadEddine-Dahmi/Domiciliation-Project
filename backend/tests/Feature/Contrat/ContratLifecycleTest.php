@@ -4,6 +4,7 @@ namespace Tests\Feature\Contrat;
 
 use App\Models\Article;
 use App\Models\Contrat;
+use App\Models\DomiciliaireProfile;
 use App\Models\Entreprise;
 use App\Models\Representant;
 use App\Models\User;
@@ -14,37 +15,45 @@ class ContratLifecycleTest extends TestCase
 {
     use RefreshDatabase;
 
+    // Creates a domiciliataire (tenant) with a company profile row,
+    // one client entreprise with its representant, and two article
+    // clause templates. The company fields (nom_societe, rc, if_fiscal)
+    // now live on domiciliataire_profiles, not on the users table, so
+    // they're created via a separate DomiciliaireProfile row rather
+    // than passed to User::factory()->create().
     private function setupTenantClientArticles(): array
     {
-        $tenant = User::factory()->create([
-            'role' => 'domiciliataire',
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+
+        DomiciliaireProfile::create([
+            'user_id'     => $tenant->id,
             'nom_societe' => 'Ma Société',
-            'rc' => 'RC123',
-            'if_fiscal' => 'IF456',
+            'rc'          => 'RC123',
+            'if_fiscal'   => 'IF456',
         ]);
 
         $entreprise = Entreprise::create([
             'domiciliataire_id' => $tenant->id,
-            'raison_sociale' => 'CLIENT SARL',
+            'raison_sociale'    => 'CLIENT SARL',
         ]);
 
         Representant::create([
             'entreprise_id' => $entreprise->id,
-            'nom' => 'Gerant',
-            'cin' => 'XY123456',
+            'nom'           => 'Gerant',
+            'cin'           => 'XY123456',
         ]);
 
         $article1 = Article::create([
             'domiciliataire_id' => $tenant->id,
-            'title' => 'Article 1',
-            'body' => 'Durée: {{duree_mois}} mois',
-            'is_active' => true,
+            'title'             => 'Article 1',
+            'body'              => 'Durée: {{duree_mois}} mois',
+            'is_active'         => true,
         ]);
         $article2 = Article::create([
             'domiciliataire_id' => $tenant->id,
-            'title' => 'Article 2',
-            'body' => 'Prix: {{prix_mensuel}}',
-            'is_active' => true,
+            'title'             => 'Article 2',
+            'body'              => 'Prix: {{prix_mensuel}}',
+            'is_active'         => true,
         ]);
 
         return [$tenant, $entreprise, $article1, $article2];
@@ -58,7 +67,7 @@ class ContratLifecycleTest extends TestCase
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
             'titre_contrat' => 'Convention de Domiciliation Commerciale',
-            'date_debut' => now()->toDateString(),
+            'date_debut'    => now()->toDateString(),
         ]);
 
         $res->assertCreated();
@@ -76,7 +85,7 @@ class ContratLifecycleTest extends TestCase
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
             'titre_contrat' => '',
-            'date_debut' => now()->toDateString(),
+            'date_debut'    => now()->toDateString(),
         ]);
 
         $res->assertCreated();
@@ -90,7 +99,7 @@ class ContratLifecycleTest extends TestCase
 
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
-            'date_debut' => now()->toDateString(),
+            'date_debut'    => now()->toDateString(),
             'articles' => [
                 ['id' => (string) $article2->id, 'ordre' => 1],
                 ['id' => (string) $article1->id, 'ordre' => 2],
@@ -103,12 +112,12 @@ class ContratLifecycleTest extends TestCase
         $this->assertDatabaseHas('contrat_articles', [
             'contrat_id' => $contratId,
             'article_id' => $article2->id,
-            'ordre' => 1,
+            'ordre'      => 1,
         ]);
         $this->assertDatabaseHas('contrat_articles', [
             'contrat_id' => $contratId,
             'article_id' => $article1->id,
-            'ordre' => 2,
+            'ordre'      => 2,
         ]);
     }
 
@@ -119,8 +128,8 @@ class ContratLifecycleTest extends TestCase
 
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
-            'date_debut' => now()->toDateString(),
-            'articles' => [(string) $article1->id],
+            'date_debut'    => now()->toDateString(),
+            'articles'      => [(string) $article1->id],
         ]);
 
         $res->assertCreated();
@@ -137,9 +146,9 @@ class ContratLifecycleTest extends TestCase
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
-            'entreprise_id' => $entreprise->id,
-            'titre_contrat' => 'Contrat de Domiciliation',
-            'date_debut' => now(),
+            'entreprise_id'     => $entreprise->id,
+            'titre_contrat'     => 'Contrat de Domiciliation',
+            'date_debut'        => now(),
         ]);
         $contrat->articles()->sync([$article1->id => ['ordre' => 1]]);
 
@@ -165,13 +174,13 @@ class ContratLifecycleTest extends TestCase
         [$tenant, $entreprise] = $this->setupTenantClientArticles();
 
         $contrat = Contrat::create([
-            'domiciliataire_id' => $tenant->id,
-            'entreprise_id' => $entreprise->id,
-            'titre_contrat' => 'Contrat de Domiciliation',
-            'date_debut' => now(),
-            'date_fin' => now()->addMonths(12),
+            'domiciliataire_id'         => $tenant->id,
+            'entreprise_id'             => $entreprise->id,
+            'titre_contrat'             => 'Contrat de Domiciliation',
+            'date_debut'                => now(),
+            'date_fin'                  => now()->addMonths(12),
             'notification_delay_months' => 1,
-            'statut' => 'draft',
+            'statut'                    => 'draft',
         ]);
 
         $res = $this->actingAs($tenant, 'sanctum')
@@ -188,9 +197,9 @@ class ContratLifecycleTest extends TestCase
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
-            'entreprise_id' => $entreprise->id,
-            'date_debut' => now(),
-            'statut' => 'active',
+            'entreprise_id'     => $entreprise->id,
+            'date_debut'        => now(),
+            'statut'            => 'active',
         ]);
 
         $this->actingAs($tenant, 'sanctum')
@@ -205,9 +214,9 @@ class ContratLifecycleTest extends TestCase
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
-            'entreprise_id' => $entreprise->id,
-            'date_debut' => now(),
-            'statut' => 'active',
+            'entreprise_id'     => $entreprise->id,
+            'date_debut'        => now(),
+            'statut'            => 'active',
         ]);
 
         $this->actingAs($tenant, 'sanctum')
@@ -223,9 +232,9 @@ class ContratLifecycleTest extends TestCase
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
-            'entreprise_id' => $entreprise->id,
-            'date_debut' => now(),
-            'statut' => 'draft',
+            'entreprise_id'     => $entreprise->id,
+            'date_debut'        => now(),
+            'statut'            => 'draft',
         ]);
 
         $this->actingAs($tenant, 'sanctum')
@@ -241,8 +250,8 @@ class ContratLifecycleTest extends TestCase
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenantA->id,
-            'entreprise_id' => $entrepriseA->id,
-            'date_debut' => now(),
+            'entreprise_id'     => $entrepriseA->id,
+            'date_debut'        => now(),
         ]);
 
         $this->actingAs($tenantB, 'sanctum')

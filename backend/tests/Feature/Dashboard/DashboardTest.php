@@ -7,9 +7,12 @@ use Tests\TestCase;
 use App\Models\Contrat;
 use App\Models\Entreprise;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class DashboardTest extends TestCase
 {
+    use RefreshDatabase;
+
     /** @test */
     public function admin_dashboard_returns_global_stats(): void
     {

@@ -6,9 +6,12 @@ namespace Tests\Feature\Entreprise;
 use Tests\TestCase;
 use App\Models\Entreprise;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class EntrepriseTest extends TestCase
 {
+    use RefreshDatabase;
+
     /** @test */
     public function domiciliataire_can_list_only_their_entreprises(): void
     {
@@ -38,7 +41,6 @@ class EntrepriseTest extends TestCase
             'date_creation' => '2020-01-01',
             'statut' => 'actif',
         ])->assertStatus(201)
-            // FIX: EntrepriseResource wraps in 'data'
             ->assertJsonPath('data.raison_sociale', 'BRONX IMMOBILIER');
 
         $this->assertDatabaseHas('entreprises', [
@@ -62,7 +64,6 @@ class EntrepriseTest extends TestCase
             'capital' => 100000,
             'date_creation' => '2020-01-01',
         ])->assertStatus(200)
-            // FIX: EntrepriseResource wraps in 'data'
             ->assertJsonPath('data.raison_sociale', 'New Name');
     }
 
@@ -72,34 +73,33 @@ class EntrepriseTest extends TestCase
         $this->actingAsDomiciliataire();
 
         $this->postJson('/api/entreprises', [
-            'adresse'       => '123 Rue',
-            'capital'       => 100000,
+            'adresse' => '123 Rue',
+            'capital' => 100000,
             'date_creation' => '2020-01-01',
         ])->assertStatus(422)
-          ->assertJsonValidationErrors(['raison_sociale']);
+            ->assertJsonValidationErrors(['raison_sociale']);
     }
 
-   
     /** @test */
     public function domiciliataire_cannot_update_another_tenants_entreprise(): void
     {
         $this->actingAsDomiciliataire();
 
-        $other      = User::factory()->domiciliataire()->create();
+        $other = User::factory()->domiciliataire()->create();
         $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $other->id]);
 
         $this->putJson("/api/entreprises/{$entreprise->id}", [
             'raison_sociale' => 'Hacked',
-            'adresse'        => '123 Rue',
-            'capital'        => 100000,
-            'date_creation'  => '2020-01-01',
+            'adresse' => '123 Rue',
+            'capital' => 100000,
+            'date_creation' => '2020-01-01',
         ])->assertStatus(404);
     }
 
     /** @test */
     public function domiciliataire_can_delete_their_entreprise(): void
     {
-        $owner      = $this->actingAsDomiciliataire();
+        $owner = $this->actingAsDomiciliataire();
         $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $owner->id]);
 
         $this->deleteJson("/api/entreprises/{$entreprise->id}")

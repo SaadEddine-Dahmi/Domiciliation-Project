@@ -1,28 +1,4 @@
 <?php
-// app/Models/Contrat.php
-//
-// Represents a domiciliation contract between the service provider
-// (domiciliataire) and a client company (entreprise).
-//
-// titre_contrat is in $fillable so the dynamic title typed by the person
-// creating the contract actually persists — every create()/update() call
-// in the controller writes this field via mass assignment, and Eloquent
-// silently drops any field missing from $fillable.
-//
-// This file also implements the renewal feature on top of the existing
-// state machine (draft -> active -> expired / terminated):
-//
-//   renewedFrom()  - belongsTo: the contract this one was renewed from
-//   renewedTo()    - hasOne: the contract that renewed THIS one, if any
-//   isRenewable()  - business rule used by the controller and the UI
-//   isRenewal()    - true if this contract itself is the result of a renewal
-//
-// titre_contrat:
-//   Fully dynamic. The person creating the contract types the exact title
-//   printed at the top of the PDF. No title is hardcoded — only a neutral
-//   fallback string ('Contrat de Domiciliation', the generic French legal
-//   name for this document type, not a product or brand name) is applied
-//   when the field arrives empty.
 
 namespace App\Models;
 
@@ -33,12 +9,16 @@ class Contrat extends Model
 {
     use HasFactory;
 
+    // NOTE: pdf_path is intentionally NOT fillable anymore. Contracts are no
+    // longer persisted to disk as PDF files — every preview/download request
+    // renders the document live from current database state. See
+    // ContratController::streamPdf(). scanned_pdf_path is kept: it stores the
+    // signed/legalised paper contract once the domiciliataire scans it back in.
     protected $fillable = [
-        'renewed_from_id',          // set only by ContratController::renew()
         'domiciliataire_id',
         'entreprise_id',
         'instruction_no',
-        'titre_contrat',            // dynamic title chosen by the person creating the contract
+        'titre_contrat',
         'date_signature',
         'ville_signature',
         'date_debut',
@@ -49,7 +29,6 @@ class Contrat extends Model
         'caution',
         'mode_paiement',
         'statut',
-        'pdf_path',
         'scanned_pdf_path',
         'notification_delay_months',
         'next_alert_date',
@@ -65,7 +44,7 @@ class Contrat extends Model
         'caution' => 'decimal:2',
     ];
 
-    // ── Relations ────────────────────────────────────────────────────────
+    // ── Relations ──────────────────────────────────────────
 
     public function domiciliataire()
     {
@@ -95,32 +74,61 @@ class Contrat extends Model
     }
 
     /**
-     * The contract this one was renewed FROM (the predecessor).
-     * Null on an original, non-renewed contract.
+     * Chronological audit trail of every create/update/delete performed
+     * on this contract. Newest entries first.
      */
-    public function renewedFrom()
+    public function history()
     {
-        return $this->belongsTo(Contrat::class, 'renewed_from_id');
+        return $this->hasMany(ContratHistory::class, 'contrat_id')
+            ->orderByDesc('created_at');
     }
 
+    // ── Audit trail hook ───────────────────────────────────
+
     /**
-     * The contract that renewed THIS one (the successor).
-     * Null if this contract has not been renewed yet.
+     * Writes a ContratHistory snapshot before every update and delete.
      *
-     * hasOne is correct here because isRenewable() enforces "a contract
-     * can be renewed at most once".
+     * updating(): captures getOriginal() — the row's DB state right before
+     * the new values are written — plus getDirty() to know exactly which
+     * columns changed in this request.
+     *
+     * deleting(): captures the full current attribute set, since after
+     * deletion there is nothing left to compare against.
      */
-    public function renewedTo()
+    protected static function booted(): void
     {
-        return $this->hasOne(Contrat::class, 'renewed_from_id');
+        static::updating(function (Contrat $contrat) {
+            $changed = array_keys($contrat->getDirty());
+            if (empty($changed)) {
+                return;
+            }
+
+            ContratHistory::create([
+                'contrat_id' => $contrat->id,
+                'changed_by' => auth()->id(),
+                'data' => $contrat->getOriginal(),
+                'changed_fields' => $changed,
+                'action' => 'update',
+            ]);
+        });
+
+        static::deleting(function (Contrat $contrat) {
+            ContratHistory::create([
+                'contrat_id' => $contrat->id,
+                'changed_by' => auth()->id(),
+                'data' => $contrat->getAttributes(),
+                'changed_fields' => array_keys($contrat->getAttributes()),
+                'action' => 'delete',
+            ]);
+        });
     }
 
-    // ── State machine ────────────────────────────────────────────────────
+    // ── State machine ──────────────────────────────────────
 
     /**
-     * Transition draft -> active.
-     * Calculates next_alert_date based on notification_delay_months and
-     * creates an alerte record consumed by the notification cron job.
+     * Transition draft → active.
+     * Calculates next_alert_date based on notification_delay_months.
+     * Creates an alerte record for the cron job.
      */
     public function activate(): void
     {
@@ -143,10 +151,8 @@ class Contrat extends Model
     }
 
     /**
-     * Transition active -> expired.
-     * Called exclusively by ExpireContractsCommand (scheduled daily in
-     * routes/console.php) — never triggered manually from a controller,
-     * since expiration is a time-based fact, not a user action.
+     * Transition active → expired.
+     * Called by the daily cron job.
      */
     public function expire(): void
     {
@@ -154,8 +160,8 @@ class Contrat extends Model
     }
 
     /**
-     * Transition active -> terminated.
-     * Called manually by the domiciliataire (early termination).
+     * Transition active → terminated.
+     * Called manually by the domiciliataire.
      */
     public function terminate(): void
     {
@@ -163,34 +169,20 @@ class Contrat extends Model
     }
 
     /**
-     * Only active contracts are visible to the client portal.
+     * True once the domiciliataire has uploaded the scanned, legally signed
+     * copy of this contract. From this point on, the contract's data fields
+     * are frozen — see ContratController::assertEditable().
+     */
+    public function isLegalised(): bool
+    {
+        return !empty($this->scanned_pdf_path);
+    }
+
+    /**
+     * Only active contrats are visible to clients.
      */
     public function isVisibleToClient(): bool
     {
         return $this->statut === 'active';
-    }
-
-    // ── Renewal guards ───────────────────────────────────────────────────
-
-    /**
-     * Business rule consulted by both the "Renew" button in the UI and
-     * the renew() endpoint before creating a new contract.
-     *
-     * A contract can be renewed only if:
-     *   - its status is active or expired (a draft has no completed
-     *     period to continue from, and a terminated contract was ended
-     *     early by choice, not naturally expired)
-     *   - it has not already been renewed (renewedTo does not exist yet)
-     */
-    public function isRenewable(): bool
-    {
-        return in_array($this->statut, ['active', 'expired'], true)
-            && $this->renewedTo()->doesntExist();
-    }
-
-    /** True if this contract itself is the result of a renewal. */
-    public function isRenewal(): bool
-    {
-        return $this->renewed_from_id !== null;
     }
 }

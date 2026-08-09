@@ -119,4 +119,22 @@ class AuthenticationTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true]);
     }
+
+    /** Passing role=admin on registration is rejected — admin accounts
+     *  can only be created internally (seeder/admin route), never via
+     *  public self-registration. */
+    public function test_cannot_self_register_as_admin(): void
+    {
+        $res = $this->postJson('/api/auth/register', [
+            'nom' => 'Attacker',
+            'email' => 'attacker2@example.com',
+            'password' => 'password123',
+            'role' => 'admin',
+        ]);
+
+        $res->assertStatus(422)
+            ->assertJsonValidationErrors(['role']);
+
+        $this->assertDatabaseMissing('users', ['email' => 'attacker2@example.com']);
+    }
 }

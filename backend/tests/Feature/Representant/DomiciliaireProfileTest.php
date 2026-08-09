@@ -20,7 +20,10 @@ class DomiciliaireProfileTest extends TestCase
             ->assertStatus(403);
     }
 
-    /** Domiciliataire can update the company profile, including the dynamic addresses array. */
+    // Domiciliataire can update the company profile, including the
+    // dynamic addresses array. The assertion now checks
+    // domiciliataire_profiles (not users), since that's where
+    // nom_societe/rc/if_fiscal/etc. actually persist after the split.
     public function test_domiciliataire_can_update_profile_with_addresses(): void
     {
         $user = User::factory()->create(['role' => 'domiciliataire']);
@@ -42,8 +45,8 @@ class DomiciliaireProfileTest extends TestCase
             ->assertOk()
             ->assertJson(['success' => true, 'profile_complete' => true]);
 
-        $this->assertDatabaseHas('users', [
-            'id' => $user->id,
+        $this->assertDatabaseHas('domiciliataire_profiles', [
+            'user_id' => $user->id,
             'nom_societe' => 'Ma Société de Domiciliation',
         ]);
     }

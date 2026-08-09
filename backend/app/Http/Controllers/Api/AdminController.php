@@ -1,9 +1,4 @@
 <?php
-// ============================================================
-// app/Http/Controllers/Api/AdminController.php
-// Endpoints réservés au rôle admin
-// Lecture seule — pas de données sensibles (CIN, mdp, docs)
-// ============================================================
 
 namespace App\Http\Controllers\Api;
 
@@ -13,15 +8,13 @@ use Illuminate\Http\Request;
 
 class AdminController extends Controller
 {
-    /**
-     * Liste tous les domiciliataires avec leurs stats
-     * Sans données sensibles
-     */
+    // Lists all domiciliataire accounts with client/contract counts.
+    // Admin-only; deliberately excludes sensitive fields (CIN, password,
+    // documents) even though it returns cross-tenant data.
     public function domiciliataires()
     {
         $user = auth()->user();
 
-        // Seulement accessible par l'admin
         if ($user->role !== 'admin') {
             return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
         }
@@ -29,7 +22,6 @@ class AdminController extends Controller
         $rows = User::where('role', 'domiciliataire')
             ->withCount(['entreprises', 'contrats'])
             ->with([
-                // Noms entreprises uniquement — pas d'infos sensibles
                 'entreprises:id,domiciliataire_id,raison_sociale,statut,ville',
             ])
             ->get()
@@ -47,7 +39,6 @@ class AdminController extends Controller
                     'statut'         => $e->statut,
                     'ville'          => $e->ville,
                 ]),
-                // PAS de : CIN, mot de passe, documents, données personnelles
             ]);
 
         return response()->json(['success' => true, 'data' => $rows]);

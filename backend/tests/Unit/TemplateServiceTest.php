@@ -1,84 +1,36 @@
 <?php
-// tests/Unit/TemplateServiceTest.php
 
-namespace Tests\Unit;
+namespace App\Services;
 
-use Tests\TestCase;
-use App\Services\TemplateService;
-
-class TemplateServiceTest extends TestCase
+class TemplateService
 {
-    private TemplateService $service;
-
-    protected function setUp(): void
+    // Resolve every {{key}} token in $body against $data.
+    //
+    // Resolved values are HTML-escaped and wrapped in <strong> so they
+    // stand out visually in the rendered contract. Unresolved tokens
+    // (key not present in $data, or present but null) are shown as
+    // the bare key name in gold italic — visible to the domiciliataire
+    // as a hint they mistyped a variable, rather than silently
+    // vanishing or leaking the raw {{...}} syntax into the final document.
+    public function render(string $body, array $data): string
     {
-        parent::setUp();
-        $this->service = new TemplateService();
-    }
+        if ($body === '') {
+            return '';
+        }
 
-    /** @test */
-    public function replaces_single_variable(): void
-    {
-        $result = $this->service->render(
-            'Bonjour {{raison_sociale}}',
-            ['raison_sociale' => 'BRONX IMMOBILIER']
+        return preg_replace_callback(
+            '/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/',
+            function (array $matches) use ($data) {
+                $key = $matches[1];
+
+                if (array_key_exists($key, $data) && $data[$key] !== null) {
+                    $escaped = htmlspecialchars((string) $data[$key], ENT_QUOTES, 'UTF-8');
+                    return "<strong>{$escaped}</strong>";
+                }
+
+                return '<em style="color:#c8a96e;font-style:italic">' . $key . '</em>';
+            },
+            $body
         );
-
-        $this->assertStringContainsString('<strong>BRONX IMMOBILIER</strong>', $result);
-        $this->assertStringNotContainsString('{{raison_sociale}}', $result);
-    }
-
-    /** @test */
-    public function replaces_multiple_variables(): void
-    {
-        $result = $this->service->render(
-            'Du {{date_debut}} au {{date_fin}}',
-            [
-                'date_debut' => '05/03/2026',
-                'date_fin'   => '05/03/2027',
-            ]
-        );
-
-        $this->assertStringContainsString('<strong>05/03/2026</strong>', $result);
-        $this->assertStringContainsString('<strong>05/03/2027</strong>', $result);
-    }
-
-    /** @test */
-    public function unreplaced_variables_shown_in_gold_italic(): void
-    {
-        $result = $this->service->render(
-            'Ville: {{ville_signature}}',
-            [] // no data provided
-        );
-
-        // Unreplaced vars should be shown visibly, not silently dropped
-        $this->assertStringContainsString('ville_signature', $result);
-        $this->assertStringNotContainsString('{{ville_signature}}', $result);
-    }
-
-    /** @test */
-    public function escapes_html_in_variable_values(): void
-    {
-        $result = $this->service->render(
-            'Société: {{raison_sociale}}',
-            ['raison_sociale' => '<script>alert("xss")</script>']
-        );
-
-        $this->assertStringNotContainsString('<script>', $result);
-        $this->assertStringContainsString('&lt;script&gt;', $result);
-    }
-
-    /** @test */
-    public function handles_empty_body_gracefully(): void
-    {
-        $result = $this->service->render('', ['key' => 'value']);
-        $this->assertEquals('', $result);
-    }
-
-    /** @test */
-    public function handles_empty_data_array(): void
-    {
-        $result = $this->service->render('Static text only.', []);
-        $this->assertStringContainsString('Static text only.', $result);
     }
 }

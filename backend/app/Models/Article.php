@@ -10,6 +10,9 @@ class Article extends Model
 {
     use HasFactory;
 
+    protected $keyType = 'int';
+    public $incrementing = true;
+
     protected $fillable = [
         'domiciliataire_id',
         'title',
@@ -18,28 +21,17 @@ class Article extends Model
     ];
 
     protected $casts = [
-        'is_active' => 'boolean',
         'id' => 'integer',
+        'is_active' => 'boolean',
     ];
 
+    // The domiciliataire (tenant) who owns this clause template.
     public function domiciliataire()
     {
         return $this->belongsTo(User::class, 'domiciliataire_id');
     }
 
-    /**
-     * Contracts that include this article clause.
-     * Required by ArticleController::destroy(), which checks this relation
-     * before allowing deletion (or detaches it) so removing an article
-     * doesn't silently corrupt existing contract snapshots.
-     */
-    public function contrats()
-    {
-        return $this->belongsToMany(Contrat::class, 'contrat_articles')
-            ->withPivot('ordre')
-            ->withTimestamps();
-    }
-
+    // Scope: restrict the query to articles owned by the given tenant.
     public function scopeForTenant(Builder $query, int $tenantId): Builder
     {
         return $query->where('domiciliataire_id', $tenantId);

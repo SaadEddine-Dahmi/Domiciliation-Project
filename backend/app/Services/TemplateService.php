@@ -2,96 +2,37 @@
 
 namespace App\Services;
 
-use App\Models\Contrat;
-
 class TemplateService
 {
     /**
-     * Replace {{variable}} placeholders with real values.
-     * Each replaced value is wrapped in <strong> so it
-     * appears bold in the PDF — matching the contract style.
+     * Resolve every {{key}} token in $body against $data.
      *
-     * @param string $content  Article body with {{placeholders}}
-     * @param array  $data     ['variable_key' => 'real value']
-     * @return string          Rendered HTML
+     * Resolved values are HTML-escaped and wrapped in <strong> so they
+     * stand out visually in the rendered contract. Unresolved tokens
+     * (key not present in $data) are shown as the bare key name in
+     * gold italic — visible to the domiciliataire as a hint they
+     * mistyped a variable, rather than silently vanishing or leaking
+     * the raw {{...}} syntax into the final document.
      */
-    public function render(string $content, array $data): string
+    public function render(string $body, array $data): string
     {
-        foreach ($data as $key => $value) {
-            $content = str_replace(
-                '{{' . $key . '}}',
-                '<strong>' . e((string) ($value ?? '')) . '</strong>',
-                $content
-            );
+        if ($body === '') {
+            return '';
         }
 
-        // Clean up any unreplaced variables — show them visibly
-        // so the domiciliataire knows which data is missing
-        $content = preg_replace_callback(
-            '/\{\{([a-z_]+)\}\}/',
-            fn($m) => '<span style="color:#c8a96e;font-style:italic">[' . $m[1] . ']</span>',
-            $content
+        return preg_replace_callback(
+            '/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/',
+            function (array $matches) use ($data) {
+                $key = $matches[1];
+
+                if (array_key_exists($key, $data) && $data[$key] !== null) {
+                    $escaped = htmlspecialchars((string) $data[$key], ENT_QUOTES, 'UTF-8');
+                    return "<strong>{$escaped}</strong>";
+                }
+
+                return '<em style="color:#c8a96e;font-style:italic">' . $key . '</em>';
+            },
+            $body
         );
-
-        return $content;
-    }
-
-    /**
-     * Build the full variable map from a Contrat instance.
-     * Covers ALL variables available in the VariablePanel component.
-     */
-    public function dataFromContrat(Contrat $contrat): array
-    {
-        $entreprise        = $contrat->entreprise;
-        $representant      = $entreprise?->representant;
-        $domiciliataire    = $contrat->domiciliataire;
-
-        return [
-            // ── Domiciliataire ─────────────────────────────
-            'domiciliataire_nom'     => trim(($domiciliataire?->nom ?? '') . ' ' . ($domiciliataire?->prenom ?? '')),
-            'domiciliataire_rc'      => $domiciliataire?->rc      ?? '',
-            'domiciliataire_if'      => $domiciliataire?->if_number ?? '',
-            'domiciliataire_adresse' => $domiciliataire?->adresse ?? '',
-
-            // ── Entreprise ─────────────────────────────────
-            'raison_sociale'     => $entreprise?->raison_sociale    ?? '',
-            'forme_juridique'    => $entreprise?->forme_juridique   ?? '',
-            'adresse_entreprise' => $entreprise?->adresse           ?? '',
-            'ville'              => $entreprise?->ville             ?? '',
-            'pays'               => $entreprise?->pays              ?? '',
-            'capital'            => $entreprise?->capital
-                ? number_format((float) $entreprise->capital, 2, '.', ' ') . ' DH'
-                : '',
-
-            // ── Représentant ───────────────────────────────
-            'gerant_nom'         => $representant?->nom_complet                                          ?? '',
-            'gerant_cin'         => $representant?->cin                                                  ?? '',
-            'gerant_naissance'   => optional($representant?->date_naissance)->format('d/m/Y')            ?? '',
-            'gerant_adresse'     => $representant?->adresse                                              ?? '',
-            'gerant_telephone'   => $representant?->telephone                                            ?? '',
-            'gerant_email'       => $representant?->email                                                ?? '',
-            'gerant_nationalite' => $representant?->nationalite                                          ?? '',
-
-            // ── Contrat ────────────────────────────────────
-            'numero_contrat'   => (string) ($contrat->id             ?? ''),
-            'instruction_no'   => $contrat->instruction_no           ?? '',
-            'date_debut'       => optional($contrat->date_debut)->format('d/m/Y')       ?? '',
-            'date_fin'         => optional($contrat->date_fin)->format('d/m/Y')         ?? '',
-            'duree_mois'       => (string) ($contrat->duree_mois     ?? ''),
-            'date_signature'   => optional($contrat->date_signature)->format('d/m/Y')   ?? '',
-            'ville_signature'  => $contrat->ville_signature          ?? '',
-
-            // ── Financier ──────────────────────────────────
-            'redevance_mensuelle' => $contrat->prix_mensuel
-                ? number_format((float) $contrat->prix_mensuel, 2, '.', ' ') . ' DH'
-                : '',
-            'redevance_annuelle'  => $contrat->prix_total
-                ? number_format((float) $contrat->prix_total, 2, '.', ' ') . ' DH'
-                : '',
-            'caution'             => $contrat->caution
-                ? number_format((float) $contrat->caution, 2, '.', ' ') . ' DH'
-                : '',
-            'mode_paiement'       => $contrat->mode_paiement ?? '',
-        ];
     }
 }

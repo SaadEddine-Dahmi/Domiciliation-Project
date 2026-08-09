@@ -1,9 +1,4 @@
 <?php
-// ============================================================
-// app/Http/Controllers/Api/PaiementController.php
-// Gestion des paiements liés aux contrats
-// ============================================================
-
 
 namespace App\Http\Controllers\Api;
 
@@ -17,17 +12,15 @@ use Illuminate\Support\Facades\DB;
 
 class PaiementController extends Controller
 {
-    /** * Liste les paiements d'un contrat 
-     * UPDATED: Added 'numero_facture' to the select constraints
-     */
+    // Lists all payments recorded against a contract's invoices, most
+    // recent first, with the parent invoice's key fields eager-loaded.
     public function index(int $contratId)
     {
         $tenantId = auth()->id();
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
+        $contrat = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
 
         $paiements = Paiement::query()
             ->whereHas('facture', fn($q) => $q->where('contrat_id', $contrat->id))
-            // Important: 'numero_facture' must be in this list to show in Nuxt
             ->with('facture:id,numero_facture,montant_total,statut,date_facture')
             ->latest('date_paiement')
             ->get();
@@ -35,45 +28,43 @@ class PaiementController extends Controller
         return response()->json(['success' => true, 'data' => $paiements]);
     }
 
-    /** Crée une facture + enregistre un paiement */
+    // Creates a new invoice and payment record in a single transaction,
+    // then notifies the domiciliataire that a payment was received.
     public function store(Request $request, int $contratId)
     {
         $tenantId = auth()->id();
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)
+        $contrat = Contrat::where('domiciliataire_id', $tenantId)
             ->whereIn('statut', ['active', 'draft'])
             ->findOrFail($contratId);
 
         $data = $request->validate([
-            'montant'       => ['required', 'numeric', 'min:0'],
+            'montant' => ['required', 'numeric', 'min:0'],
             'date_paiement' => ['required', 'date'],
             'mode_paiement' => ['required', 'string', 'max:100'],
-            'note'          => ['nullable', 'string', 'max:500'],
+            'note' => ['nullable', 'string', 'max:500'],
         ]);
 
         $paiement = DB::transaction(function () use ($data, $contrat, $tenantId) {
-            // Créer une facture liée (Le numero_facture est généré par le Model)
             $facture = Facture::create([
-                'contrat_id'    => $contrat->id,
+                'contrat_id' => $contrat->id,
                 'entreprise_id' => $contrat->entreprise_id,
                 'montant_total' => $data['montant'],
-                'statut'        => 'paid',
-                'date_facture'  => $data['date_paiement'],
+                'statut' => 'paid',
+                'date_facture' => $data['date_paiement'],
             ]);
 
-            // Enregistrer le paiement
             $p = Paiement::create([
-                'facture_id'    => $facture->id,
-                'montant'       => $data['montant'],
+                'facture_id' => $facture->id,
+                'montant' => $data['montant'],
                 'date_paiement' => $data['date_paiement'],
                 'mode_paiement' => $data['mode_paiement'],
             ]);
 
-            // Notifier le domiciliataire
             AppNotification::create([
-                'user_id'    => $tenantId,
+                'user_id' => $tenantId,
                 'contrat_id' => $contrat->id,
-                'message'    => "💳 Paiement de {$data['montant']} DH enregistré pour {$contrat->entreprise->raison_sociale}.",
-                'is_read'    => false,
+                'message' => "💳 Paiement de {$data['montant']} DH enregistré pour {$contrat->entreprise->raison_sociale}.",
+                'is_read' => false,
             ]);
 
             return $p;
@@ -81,29 +72,30 @@ class PaiementController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $paiement->load('facture'),
+            'data' => $paiement->load('facture'),
         ], 201);
     }
 
-    /** Résumé des paiements pour un contrat */
+    // Returns the payment summary for a contract: total due, total
+    // paid, remaining balance, and completion percentage.
     public function summary(int $contratId)
     {
         $tenantId = auth()->id();
-        $contrat  = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
+        $contrat = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
 
         $totalPaye = Paiement::query()
             ->whereHas('facture', fn($q) => $q->where('contrat_id', $contrat->id))
             ->sum('montant');
 
-        $prixTotal  = (float) ($contrat->prix_total ?? 0);
-        $restant    = max(0, $prixTotal - (float) $totalPaye);
+        $prixTotal = (float) ($contrat->prix_total ?? 0);
+        $restant = max(0, $prixTotal - (float) $totalPaye);
 
         return response()->json([
             'success' => true,
-            'data'    => [
-                'prix_total'  => $prixTotal,
-                'total_paye'  => (float) $totalPaye,
-                'restant'     => $restant,
+            'data' => [
+                'prix_total' => $prixTotal,
+                'total_paye' => (float) $totalPaye,
+                'restant' => $restant,
                 'pourcentage' => $prixTotal > 0 ? round(($totalPaye / $prixTotal) * 100) : 0,
             ],
         ]);

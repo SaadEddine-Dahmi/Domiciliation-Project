@@ -9,9 +9,12 @@ class Paiement extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['facture_id','montant','date_paiement','mode_paiement'];
+    protected $fillable = ['facture_id', 'montant', 'date_paiement', 'mode_paiement'];
     protected $casts = ['date_paiement' => 'date', 'montant' => 'decimal:2'];
 
-    public function facture() { return $this->belongsTo(Facture::class); }
+    // The invoice this payment was made against.
+    public function facture()
+    {
+        return $this->belongsTo(Facture::class);
+    }
 }
-

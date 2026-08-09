@@ -20,7 +20,7 @@ class Entreprise extends Model
         'pays',
         'capital',
         'date_creation',
-        'statut',
+        'statut', // 'actif' | 'inactif' — controls client portal access, see AuthController::login()
     ];
 
     protected $casts = [
@@ -73,5 +73,50 @@ class Entreprise extends Model
     public function factures()
     {
         return $this->hasMany(Facture::class);
+    }
+
+    // ── Audit trail hook ───────────────────────────────────
+
+    /**
+     * Writes an EntrepriseHistory snapshot before every update and delete.
+     * See Contrat::booted() for the full explanation of this pattern.
+     */
+    protected static function booted(): void
+    {
+        static::updating(function (Entreprise $entreprise) {
+            $changed = array_keys($entreprise->getDirty());
+            if (empty($changed)) {
+                return;
+            }
+
+            EntrepriseHistory::create([
+                'entreprise_id' => $entreprise->id,
+                'changed_by' => auth()->id(),
+                'data' => $entreprise->getOriginal(),
+                'changed_fields' => $changed,
+                'action' => 'update',
+            ]);
+        });
+
+        static::deleting(function (Entreprise $entreprise) {
+            EntrepriseHistory::create([
+                'entreprise_id' => $entreprise->id,
+                'changed_by' => auth()->id(),
+                'data' => $entreprise->getAttributes(),
+                'changed_fields' => array_keys($entreprise->getAttributes()),
+                'action' => 'delete',
+            ]);
+        });
+    }
+
+    // ── Helpers ────────────────────────────────────────────
+
+    /**
+     * Whether the linked client user is currently allowed to log in.
+     * Checked in AuthController::login() before issuing a token.
+     */
+    public function isActiveForClient(): bool
+    {
+        return $this->statut === 'actif';
     }
 }

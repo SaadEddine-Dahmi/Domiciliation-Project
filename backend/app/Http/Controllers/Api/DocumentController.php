@@ -12,12 +12,17 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DocumentController extends Controller
 {
+    // Picks the private storage disk if configured, otherwise falls
+    // back to 'local' — used consistently for every file operation below.
     private function disk(): string
     {
         $disks = array_keys(config('filesystems.disks', []));
         return in_array('private', $disks, true) ? 'private' : 'local';
     }
 
+    // Resolves a user from a ?token= query param instead of an
+    // Authorization header, since browsers cannot attach custom
+    // headers to direct navigation/iframe requests.
     private function authenticateViaToken(Request $request): ?\App\Models\User
     {
         $tokenValue = $request->query('token');
@@ -34,6 +39,9 @@ class DocumentController extends Controller
         return $token->tokenable;
     }
 
+    // Lists documents scoped by role: a client sees only their own
+    // entreprise's documents; a domiciliataire sees only their tenant's;
+    // an admin sees everything, optionally filtered by entreprise_id.
     public function index(Request $request)
     {
         $user = auth()->user();
@@ -84,6 +92,8 @@ class DocumentController extends Controller
         ]);
     }
 
+    // Uploads a new document and links it to an entreprise. A
+    // domiciliataire can only upload for their own tenant's entreprises.
     public function store(Request $request)
     {
         $user = auth()->user();
@@ -127,6 +137,7 @@ class DocumentController extends Controller
         ], 201);
     }
 
+    // Updates a document's metadata (type, expiration, version link).
     public function update(Request $request, int $id)
     {
         $user = auth()->user();
@@ -164,6 +175,7 @@ class DocumentController extends Controller
         ]);
     }
 
+    // Deletes a document's file from disk and its database record.
     public function destroy(int $id)
     {
         $user = auth()->user();
@@ -188,6 +200,8 @@ class DocumentController extends Controller
         return response()->json(['success' => true, 'message' => 'Document supprimé.']);
     }
 
+    // Streams a document as a forced download, authenticated via the
+    // ?token= query param (see authenticateViaToken()).
     public function download(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
         $user = $this->authenticateViaToken($request);
@@ -217,6 +231,7 @@ class DocumentController extends Controller
         ]);
     }
 
+    // Streams a document inline for browser preview (no download prompt).
     public function preview(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
         $user = $this->authenticateViaToken($request);
@@ -246,6 +261,9 @@ class DocumentController extends Controller
         ]);
     }
 
+    // Resolves a document by ID, scoped to what the given user is
+    // allowed to see (own entreprise for client, own tenant for
+    // domiciliataire, unrestricted for admin).
     private function resolveDocForUser(int $id, \App\Models\User $user): ?Document
     {
         $query = Document::with(['documentType', 'entreprise:id,raison_sociale']);
@@ -262,14 +280,14 @@ class DocumentController extends Controller
         return $query->find($id);
     }
 
+    // Maps a file extension to its MIME type for response headers.
     private function mimeType(string $path): string
     {
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
 
         return match ($ext) {
             'pdf' => 'application/pdf',
-            'jpg',
-            'jpeg' => 'image/jpeg',
+            'jpg', 'jpeg' => 'image/jpeg',
             'png' => 'image/png',
             'doc' => 'application/msword',
             'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
@@ -277,6 +295,8 @@ class DocumentController extends Controller
         };
     }
 
+    // Shapes a Document model into the JSON structure the frontend
+    // expects, including download/preview URLs and optional entreprise info.
     private function formatDoc(Document $doc, \App\Models\User $user, bool $withEntreprise = false): array
     {
         $ext = strtolower(pathinfo($doc->file_path ?? '', PATHINFO_EXTENSION));

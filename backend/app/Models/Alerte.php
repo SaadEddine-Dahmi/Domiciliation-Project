@@ -12,6 +12,15 @@ class Alerte extends Model
     protected $fillable = ['contrat_id', 'date_alerte', 'envoye'];
     protected $casts = ['date_alerte' => 'date', 'envoye' => 'boolean'];
 
-    public function contrat() { return $this->belongsTo(Contrat::class); }
-    public function notifications() { return $this->hasMany(AppNotification::class, 'alert_id'); }
+    // The contract this expiry alert was scheduled for.
+    public function contrat()
+    {
+        return $this->belongsTo(Contrat::class);
+    }
+
+    // Notifications generated from this alert (usually one, sent when due).
+    public function notifications()
+    {
+        return $this->hasMany(AppNotification::class, 'alert_id');
+    }
 }

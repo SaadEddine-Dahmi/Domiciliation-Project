@@ -4,6 +4,7 @@ namespace Tests\Feature\Contrat;
 
 use App\Models\Article;
 use App\Models\Contrat;
+use App\Models\DomiciliaireProfile;
 use App\Models\Entreprise;
 use App\Models\Representant;
 use App\Models\User;
@@ -14,9 +15,15 @@ class ContratPdfTest extends TestCase
 {
     use RefreshDatabase;
 
+    // Streaming the PDF requires an authenticated tenant. Company
+    // profile fields now live on domiciliataire_profiles, so nom_societe
+    // is set via a separate DomiciliaireProfile row rather than passed
+    // to User::factory()->create().
     public function test_pdf_stream_requires_authentication(): void
     {
-        $tenant = User::factory()->create(['role' => 'domiciliataire', 'nom_societe' => 'Ma Société']);
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        DomiciliaireProfile::create(['user_id' => $tenant->id, 'nom_societe' => 'Ma Société']);
+
         $entreprise = Entreprise::create([
             'domiciliataire_id' => $tenant->id,
             'raison_sociale' => 'CLIENT SARL',
@@ -41,7 +48,9 @@ class ContratPdfTest extends TestCase
 
     public function test_token_resolution_pulls_from_representant_not_entreprise(): void
     {
-        $tenant = User::factory()->create(['role' => 'domiciliataire', 'nom_societe' => 'Ma Société']);
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        DomiciliaireProfile::create(['user_id' => $tenant->id, 'nom_societe' => 'Ma Société']);
+
         $entreprise = Entreprise::create([
             'domiciliataire_id' => $tenant->id,
             'raison_sociale' => 'CLIENT SARL',
@@ -82,7 +91,9 @@ class ContratPdfTest extends TestCase
     {
         \Illuminate\Support\Facades\Storage::fake('public');
 
-        $tenant = User::factory()->create(['role' => 'domiciliataire', 'nom_societe' => 'Ma Société']);
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        DomiciliaireProfile::create(['user_id' => $tenant->id, 'nom_societe' => 'Ma Société']);
+
         $entreprise = Entreprise::create([
             'domiciliataire_id' => $tenant->id,
             'raison_sociale' => 'CLIENT SARL',

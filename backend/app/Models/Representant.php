@@ -25,25 +25,21 @@ class Representant extends Model
         'date_naissance' => 'date',
     ];
 
-    // ── Relations ──────────────────────────────────────────
-
+    // The entreprise this person represents. Enforced 1-to-1 by a
+    // unique index on representants.entreprise_id.
     public function entreprise()
     {
         return $this->belongsTo(Entreprise::class);
     }
 
+    // Audit trail of changes to this representant, newest first.
     public function history()
     {
         return $this->hasMany(RepresentantHistory::class, 'representant_id')
             ->orderByDesc('created_at');
     }
 
-    // ── Accessors ──────────────────────────────────────────
-
-    /**
-     * Full name used in PDF template rendering.
-     * e.g. "YOUSSEF EL JADIANI"
-     */
+    // Full name for PDF/signature rendering, e.g. "YOUSSEF EL JADIANI".
     public function getNomCompletAttribute(): string
     {
         return trim($this->prenom . ' ' . $this->nom);

@@ -7,9 +7,12 @@ use Tests\TestCase;
 use App\Models\Contrat;
 use App\Models\Entreprise;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class ContratModelTest extends TestCase
 {
+    use RefreshDatabase;
+
     private function makeContrat(array $attrs = []): Contrat
     {
         $owner = User::factory()->domiciliataire()->create();

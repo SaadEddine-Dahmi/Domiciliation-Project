@@ -1,14 +1,16 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
-use App\Models\User;
+use App\Support\DatabaseErrorHelper;
 use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
-    /** Notifications système (sans messages directs) */
+    // Lists system notifications for the authenticated user (excludes
+    // direct messages, which have their own endpoint via MessageController).
     public function index()
     {
         $rows = AppNotification::query()
@@ -20,6 +22,7 @@ class NotificationController extends Controller
         return response()->json(['success' => true, 'data' => $rows]);
     }
 
+    // Marks a single notification as read.
     public function read(int $id)
     {
         $row = AppNotification::where('user_id', auth()->id())->findOrFail($id);
@@ -27,6 +30,7 @@ class NotificationController extends Controller
         return response()->json(['success' => true, 'data' => $row->fresh()]);
     }
 
+    // Marks every unread system notification as read in one query.
     public function readAll()
     {
         AppNotification::where('user_id', auth()->id())
@@ -37,10 +41,8 @@ class NotificationController extends Controller
         return response()->json(['success' => true]);
     }
 
-    /**
-     * Préférences : lit depuis JSON en DB
-     * Si colonne absente, retourne défaut [1]
-     */
+    // Returns the user's expiry-alert delay preferences, defaulting to
+    // 1 month if none are set or the stored JSON fails to decode.
     public function preferences()
     {
         $user = auth()->user();
@@ -55,43 +57,37 @@ class NotificationController extends Controller
         return response()->json(['success' => true, 'data' => $prefs]);
     }
 
-    /**
-     * Sauvegarde les délais choisis
-     * Crée la colonne si elle n'existe pas encore (fallback silencieux)
-     */
+    // Saves the user's chosen alert delays as sorted, deduplicated
+    // months. Swallows only genuine "column doesn't exist" errors
+    // (via DatabaseErrorHelper, which checks SQLSTATE codes so this
+    // works correctly on both MySQL and PostgreSQL); all other DB
+    // errors are surfaced as a real 500.
     public function updatePreferences(Request $request)
-{
-    $data = $request->validate([
-        'delays'   => ['required', 'array'],
-        'delays.*' => ['integer', 'min:1', 'max:24'],
-    ]);
-
-    $delays = array_values(array_unique($data['delays']));
-    sort($delays);
-
-    try {
-        auth()->user()->update([
-            'notification_preferences' => json_encode(['delays' => $delays]),
+    {
+        $data = $request->validate([
+            'delays'   => ['required', 'array'],
+            'delays.*' => ['integer', 'min:1', 'max:24'],
         ]);
-    } catch (\Throwable $e) {
-        // FIX: only swallow the specific "unknown column" error that occurs
-        // when the migration hasn't run yet. All other DB errors are real
-        // failures and must be returned to the client.
-        $isUnknownColumn = str_contains($e->getMessage(), 'notification_preferences')
-            && str_contains($e->getMessage(), 'Unknown column');
 
-        if (!$isUnknownColumn) {
-            return response()->json([
-                'success' => false,
-                'message' => 'Erreur lors de la sauvegarde des préférences.',
-            ], 500);
+        $delays = array_values(array_unique($data['delays']));
+        sort($delays);
+
+        try {
+            auth()->user()->update([
+                'notification_preferences' => json_encode(['delays' => $delays]),
+            ]);
+        } catch (\Throwable $e) {
+            if (!DatabaseErrorHelper::isUndefinedColumnError($e)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Erreur lors de la sauvegarde des préférences.',
+                ], 500);
+            }
         }
 
+        return response()->json([
+            'success' => true,
+            'data'    => ['delays' => $delays],
+        ]);
     }
-
-    return response()->json([
-        'success' => true,
-        'data'    => ['delays' => $delays],
-    ]);
-}
 }

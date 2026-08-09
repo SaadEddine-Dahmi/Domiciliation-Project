@@ -9,11 +9,14 @@ use Illuminate\Http\Request;
 
 class ActivationController extends Controller
 {
-    public function __construct(private ActivationService $service) {}
+    public function __construct(private ActivationService $service)
+    {
+    }
 
+    // Lists all domiciliataire accounts awaiting admin approval,
+    // newest first. Admin-only.
     public function pending()
     {
-        // Guard: only admin can call this
         if (auth()->user()->role !== 'admin') {
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
@@ -26,6 +29,10 @@ class ActivationController extends Controller
         return response()->json(['success' => true, 'data' => $users]);
     }
 
+    // Approves a pending domiciliataire account with a future-or-today
+    // activation date. Rejects if the account isn't actually pending
+    // or isn't a domiciliataire, preventing re-approval or misuse on
+    // clients/admins.
     public function approve(Request $request, int $id)
     {
         if (auth()->user()->role !== 'admin') {
@@ -38,7 +45,6 @@ class ActivationController extends Controller
 
         $user = User::findOrFail($id);
 
-        // FIX: guard — only pending domiciliataires can be approved
         if ($user->status !== 'pending' || $user->role !== 'domiciliataire') {
             return response()->json([
                 'message' => 'Ce compte ne peut pas être approuvé. Statut actuel : ' . $user->status,
@@ -50,6 +56,9 @@ class ActivationController extends Controller
         return response()->json(['success' => true, 'message' => 'Compte approuvé.']);
     }
 
+    // Rejects a pending domiciliataire account with a required reason.
+    // Same guard as approve() — only pending domiciliataire accounts
+    // can be rejected.
     public function reject(Request $request, int $id)
     {
         if (auth()->user()->role !== 'admin') {
@@ -62,7 +71,6 @@ class ActivationController extends Controller
 
         $user = User::findOrFail($id);
 
-        // FIX: guard — only pending domiciliataires can be rejected
         if ($user->status !== 'pending' || $user->role !== 'domiciliataire') {
             return response()->json([
                 'message' => 'Ce compte ne peut pas être rejeté. Statut actuel : ' . $user->status,

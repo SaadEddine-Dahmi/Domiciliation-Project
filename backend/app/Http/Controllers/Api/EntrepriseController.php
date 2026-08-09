@@ -11,6 +11,8 @@ use Illuminate\Http\Request;
 
 class EntrepriseController extends Controller
 {
+    // Lists tenant-scoped entreprises with optional search across
+    // raison_sociale, ville, and statut, paginated (max 100/page).
     public function index(Request $request)
     {
         $tenantId = auth()->id();
@@ -31,52 +33,47 @@ class EntrepriseController extends Controller
         return EntrepriseResource::collection($rows);
     }
 
+    // Creates a new entreprise, forcing domiciliataire_id to the
+    // authenticated tenant regardless of what the request sends.
+    // Creates a new entreprise, forcing domiciliataire_id to the
+    // authenticated tenant. Domiciliataire-only — clients and admins
+    // do not manage entreprises directly through this endpoint.
     public function store(EntrepriseStoreRequest $request)
-{
-    // Only domiciliataire (and admin, if you want admins to manage on behalf of tenants)
-    // may create entreprises. Clients are read-only consumers of their own entreprise.
-    if (!in_array(auth()->user()->role, ['domiciliataire', 'admin'], true)) {
-        return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
+    {
+        if (auth()->user()->role !== 'domiciliataire') {
+            return response()->json(['message' => 'Non autorisé.'], 403);
+        }
+
+        $data = $request->validated();
+
+        $row = Entreprise::create([
+            ...$data,
+            'domiciliataire_id' => auth()->id(),
+        ]);
+
+        return (new EntrepriseResource($row))
+            ->response()
+            ->setStatusCode(201);
     }
-
-    $data = $request->validated();
-
-    $row = Entreprise::create([
-        ...$data,
-        'domiciliataire_id' => auth()->id(), // force tenant
-    ]);
-
-    return (new EntrepriseResource($row))
-        ->response()
-        ->setStatusCode(201);
-}
-
+    // Returns a single entreprise, tenant-scoped.
     public function show(int $id)
     {
         $row = Entreprise::forTenant(auth()->id())->findOrFail($id);
         return new EntrepriseResource($row);
     }
 
+    // Updates an entreprise, tenant-scoped.
     public function update(EntrepriseUpdateRequest $request, int $id)
     {
-        // SECURITY: only domiciliataires can update entreprises
-        if (auth()->user()->role !== 'domiciliataire') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
-        }
-
         $row = Entreprise::forTenant(auth()->id())->findOrFail($id);
         $row->update($request->validated());
 
         return new EntrepriseResource($row->fresh());
     }
 
+    // Deletes an entreprise, tenant-scoped.
     public function destroy(int $id)
     {
-        // SECURITY: only domiciliataires can delete entreprises
-        if (auth()->user()->role !== 'domiciliataire') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
-        }
-
         $row = Entreprise::forTenant(auth()->id())->findOrFail($id);
         $row->delete();
 

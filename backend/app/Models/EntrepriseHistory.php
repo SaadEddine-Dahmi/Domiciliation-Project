@@ -10,14 +10,14 @@ class EntrepriseHistory extends Model
 
     protected $fillable = [
         'entreprise_id',
-        'changed_by',     // user who made the change
-        'data',           // full snapshot of old record
-        'changed_fields', // array of field names that changed
-        'action',         // 'update' or 'delete'
+        'changed_by',
+        'data',
+        'changed_fields',
+        'action',
     ];
 
     protected $casts = [
-        'data'           => 'array',
+        'data' => 'array',
         'changed_fields' => 'array',
     ];
 

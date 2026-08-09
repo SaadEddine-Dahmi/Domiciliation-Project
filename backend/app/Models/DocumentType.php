@@ -9,8 +9,12 @@ class DocumentType extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['name','is_required','has_expiration','description'];
+    protected $fillable = ['name', 'is_required', 'has_expiration', 'description'];
     protected $casts = ['is_required' => 'boolean', 'has_expiration' => 'boolean'];
 
-    public function documents() { return $this->hasMany(Document::class); }
+    // All documents ever uploaded under this type.
+    public function documents()
+    {
+        return $this->hasMany(Document::class);
+    }
 }

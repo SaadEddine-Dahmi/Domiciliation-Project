@@ -1,11 +1,4 @@
 <?php
-// ============================================================
-// app/Http/Controllers/Api/DashboardController.php
-// Stats adaptées selon le rôle :
-//   admin          → stats globales (tous domiciliataires)
-//   domiciliataire → ses propres stats
-//   client         → son contrat et ses infos
-// ============================================================
 
 namespace App\Http\Controllers\Api;
 
@@ -16,12 +9,14 @@ use App\Models\User;
 
 class DashboardController extends Controller
 {
+    // Returns role-appropriate stats: platform-wide for admin,
+    // tenant-scoped for domiciliataire, and personal contract/company
+    // info for client.
     public function stats()
     {
         $user = auth()->user();
         $role = $user->role;
 
-        // ── Admin : stats globales ────────────────────────
         if ($role === 'admin') {
             return response()->json([
                 'success' => true,
@@ -38,7 +33,6 @@ class DashboardController extends Controller
             ]);
         }
 
-        // ── Domiciliataire : ses propres stats ────────────
         if ($role === 'domiciliataire') {
             $tenantId = $user->id;
 
@@ -62,8 +56,6 @@ class DashboardController extends Controller
             ]);
         }
 
-        // ── Client : son contrat et son domiciliataire ────
-        // Trouver l'entreprise liée au client connecté
         $entreprise = Entreprise::where('client_user_id', $user->id)
             ->with(['domiciliataire:id,nom,prenom,email,telephone', 'contrats' => fn($q) => $q->latest()->limit(1)])
             ->first();

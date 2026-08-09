@@ -1,4 +1,5 @@
 <?php
+
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
@@ -8,12 +9,13 @@ use Illuminate\Http\Request;
 
 class MessageController extends Controller
 {
+    // Lists direct messages, scoped by role: a client sees messages
+    // received; a domiciliataire sees messages they sent.
     public function index()
     {
         $user = auth()->user();
 
         if ($user->role === 'client') {
-            // Client : messages REÇUS — user_id = son id ET from_user_id non null
             $messages = AppNotification::query()
                 ->where('user_id', $user->id)
                 ->whereNotNull('from_user_id')
@@ -21,7 +23,6 @@ class MessageController extends Controller
                 ->latest()
                 ->get();
         } else {
-            // Domiciliataire : messages ENVOYÉS — from_user_id = son id
             $messages = AppNotification::query()
                 ->where('from_user_id', $user->id)
                 ->with('toUser:id,nom,prenom,email')
@@ -32,6 +33,9 @@ class MessageController extends Controller
         return response()->json(['success' => true, 'data' => $messages]);
     }
 
+    // Sends a direct message from a domiciliataire to one of their
+    // clients. Verifies the target client actually belongs to this
+    // tenant before allowing the send.
     public function send(Request $request)
     {
         $sender = auth()->user();
@@ -69,6 +73,7 @@ class MessageController extends Controller
         ], 201);
     }
 
+    // Marks a received message as read (client side).
     public function markRead(int $id)
     {
         $user = auth()->user();
@@ -81,6 +86,7 @@ class MessageController extends Controller
         return response()->json(['success' => true, 'data' => $notification->fresh()]);
     }
 
+    // Returns the read-receipt status of a sent message (domiciliataire side).
     public function receipt(int $id)
     {
         $sender = auth()->user();

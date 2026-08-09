@@ -24,15 +24,16 @@ class Facture extends Model
         'montant_total' => 'decimal:2',
     ];
 
+    // On creation: backfills domiciliataire_id from the parent contract
+    // (denormalised for fast tenant-scoped queries), and generates a
+    // unique sequential invoice number in the format FAC-YYYY-###.
     protected static function booted(): void
     {
         static::creating(function (Facture $facture) {
-            // Ensure tenant id is stored for fast filtering (optional but recommended)
             if (!$facture->domiciliataire_id && $facture->contrat_id) {
                 $facture->domiciliataire_id = Contrat::whereKey($facture->contrat_id)->value('domiciliataire_id');
             }
 
-            // Generate unique invoice number: FAC-YYYY-###
             $facture->numero_facture = DB::transaction(function () {
                 $year = date('Y');
 
@@ -51,21 +52,25 @@ class Facture extends Model
         });
     }
 
+    // The contract this invoice was generated for.
     public function contrat()
     {
         return $this->belongsTo(Contrat::class);
     }
 
+    // The client entreprise being billed.
     public function entreprise()
     {
         return $this->belongsTo(Entreprise::class);
     }
 
+    // The domiciliataire (tenant) this invoice belongs to.
     public function domiciliataire()
     {
         return $this->belongsTo(User::class, 'domiciliataire_id');
     }
 
+    // Individual payment records made against this invoice.
     public function paiements()
     {
         return $this->hasMany(Paiement::class);

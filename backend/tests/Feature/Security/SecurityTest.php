@@ -7,9 +7,12 @@ use Tests\TestCase;
 use App\Models\Article;
 use App\Models\Entreprise;
 use App\Models\User;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 
 class SecurityTest extends TestCase
 {
+    use RefreshDatabase;
+
     // ── IDOR Tests ─────────────────────────────────────────
 
     /** @test */
@@ -70,8 +73,6 @@ class SecurityTest extends TestCase
     {
         $this->actingAsClient();
 
-        // FIX: send all required fields so validation passes
-        // and the role check (403) is actually reached
         $this->postJson('/api/entreprises', [
             'raison_sociale' => 'Hack Attempt',
             'forme_juridique' => 'SARL',
@@ -83,7 +84,7 @@ class SecurityTest extends TestCase
             'statut' => 'actif',
         ])->assertStatus(403);
     }
-    
+
     /** @test */
     public function client_cannot_create_article(): void
     {
@@ -125,7 +126,7 @@ class SecurityTest extends TestCase
         $this->postJson('/api/auth/login', [
             'email' => "' OR '1'='1",
             'password' => 'anything',
-        ])->assertStatus(422); // validation rejects invalid email format
+        ])->assertStatus(422);
     }
 
     /** @test */
@@ -138,11 +139,28 @@ class SecurityTest extends TestCase
             'body' => '<script>alert("xss")</script>',
         ])->assertStatus(201);
 
-        // The payload is stored — but TemplateService uses e() on output
-        // so it will be escaped when rendered in PDF
         $this->assertDatabaseHas('articles', [
             'domiciliataire_id' => $owner->id,
             'title' => 'XSS Test',
+        ]);
+    }
+
+    // ── New: Phase 2 hardening tests ───────────────────────
+
+    /** @test */
+    public function self_registration_cannot_grant_admin_role(): void
+    {
+        $res = $this->postJson('/api/auth/register', [
+            'nom' => 'Attacker',
+            'email' => 'attacker@example.com',
+            'password' => 'password123',
+            'role' => 'admin',
+        ]);
+
+        $res->assertStatus(422);
+        $this->assertDatabaseMissing('users', [
+            'email' => 'attacker@example.com',
+            'role' => 'admin',
         ]);
     }
 }
