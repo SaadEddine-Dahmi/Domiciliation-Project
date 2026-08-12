@@ -3,14 +3,18 @@
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\DomiciliaireProfile;
+use App\Models\DomiciliataireProfile;
 use Illuminate\Http\Request;
 
-class DomiciliaireProfileController extends Controller
+class DomiciliataireProfileController extends Controller
 {
-    // Returns the authenticated domiciliataire's company profile. The
-    // profile relation may be null if it was never saved — every field
-    // falls back to null/empty in that case rather than erroring.
+    /**
+     * GET /api/profile
+     *
+     * Returns the authenticated domiciliataire's company profile. The
+     * profile relation may be null if it was never saved — every field
+     * falls back to null/empty in that case rather than erroring.
+     */
     public function show()
     {
         $user = auth()->user();
@@ -27,21 +31,38 @@ class DomiciliaireProfileController extends Controller
                 'nom' => $user->nom,
                 'prenom' => $user->prenom,
                 'telephone' => $user->telephone,
+
                 'nom_societe' => $profile?->nom_societe,
                 'representant_legal' => $profile?->representant_legal,
                 'identite_representant' => $profile?->identite_representant,
+
+                // Contact details of the domiciliataire's legal representative —
+                // shown on the contract's "D'une part" block when filled.
+                'representant_email' => $profile?->representant_email,
+                'representant_telephone' => $profile?->representant_telephone,
+
                 'rc' => $profile?->rc,
                 'if_fiscal' => $profile?->if_fiscal,
                 'tp' => $profile?->tp,
+
+                // Array of {label, value}. First entry is treated as the siège
+                // social; every entry after it as a succursale — see
+                // ContratController::buildTokenMap() for how these are
+                // formatted onto the contract PDF.
                 'adresses' => $profile?->adresses_list ?? [],
+
                 'profile_complete' => $user->hasCompleteProfile(),
             ],
         ]);
     }
 
-    // Saves the company profile. Contact fields (nom/prenom/telephone)
-    // update the users row; everything else is upserted into
-    // domiciliataire_profiles, created on first save.
+    /**
+     * PUT /api/profile
+     *
+     * Saves the company profile. Contact fields (nom/prenom/telephone)
+     * update the users row; everything else is upserted into
+     * domiciliataire_profiles, created on first save.
+     */
     public function update(Request $request)
     {
         $user = auth()->user();
@@ -58,10 +79,20 @@ class DomiciliaireProfileController extends Controller
             'nom_societe' => ['nullable', 'string', 'max:255'],
             'representant_legal' => ['nullable', 'string', 'max:255'],
             'identite_representant' => ['nullable', 'string', 'max:100'],
+
+            // Nullable — the domiciliataire can save a partial profile and
+            // complete contact info later. Neither is required to reach
+            // hasCompleteProfile() (see User::hasCompleteProfile()).
+            'representant_email' => ['nullable', 'email', 'max:150'],
+            'representant_telephone' => ['nullable', 'string', 'max:50'],
+
             'rc' => ['nullable', 'string', 'max:100'],
             'if_fiscal' => ['nullable', 'string', 'max:100'],
             'tp' => ['nullable', 'string', 'max:100'],
 
+            // First address in the array = siège social.
+            // Every subsequent address = a succursale.
+            // Order is preserved as submitted — the frontend controls it.
             'adresses' => ['nullable', 'array'],
             'adresses.*.label' => ['required_with:adresses', 'string', 'max:100'],
             'adresses.*.value' => ['required_with:adresses', 'string', 'max:500'],
@@ -74,7 +105,7 @@ class DomiciliaireProfileController extends Controller
 
         $profileFields = array_diff_key($data, $userFields);
 
-        DomiciliaireProfile::updateOrCreate(
+        DomiciliataireProfile::updateOrCreate(
             ['user_id' => $user->id],
             $profileFields
         );

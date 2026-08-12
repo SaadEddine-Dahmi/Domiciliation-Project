@@ -4,7 +4,7 @@ namespace Tests\Feature\Contrat;
 
 use App\Models\Article;
 use App\Models\Contrat;
-use App\Models\DomiciliaireProfile;
+use App\Models\DomiciliataireProfile;
 use App\Models\Entreprise;
 use App\Models\Representant;
 use App\Models\User;
@@ -19,13 +19,13 @@ class ContratLifecycleTest extends TestCase
     // one client entreprise with its representant, and two article
     // clause templates. The company fields (nom_societe, rc, if_fiscal)
     // now live on domiciliataire_profiles, not on the users table, so
-    // they're created via a separate DomiciliaireProfile row rather
+    // they're created via a separate DomiciliataireProfile row rather
     // than passed to User::factory()->create().
     private function setupTenantClientArticles(): array
     {
         $tenant = User::factory()->create(['role' => 'domiciliataire']);
 
-        DomiciliaireProfile::create([
+        DomiciliataireProfile::create([
             'user_id'     => $tenant->id,
             'nom_societe' => 'Ma Société',
             'rc'          => 'RC123',

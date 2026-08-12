@@ -32,7 +32,7 @@ use App\Http\Controllers\Api\ContratController;
 use App\Http\Controllers\Api\EntrepriseController;
 use App\Http\Controllers\Api\RepresentantController;
 use App\Http\Controllers\Api\AdminController;
-use App\Http\Controllers\Api\DomiciliaireProfileController;
+use App\Http\Controllers\Api\DomiciliataireProfileController;
 use App\Http\Controllers\Api\ActivationController;
 use App\Http\Controllers\Api\PaiementController;
 use App\Http\Controllers\Api\MessageController;
@@ -72,8 +72,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // ── Dashboard and profile ─────────────────────────────────────────────────
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
-    Route::get('/profile', [DomiciliaireProfileController::class, 'show']);
-    Route::put('/profile', [DomiciliaireProfileController::class, 'update']);
+    Route::get('/profile', [DomiciliataireProfileController::class, 'show']);
+    Route::put('/profile', [DomiciliataireProfileController::class, 'update']);
 
     // ── Admin ─────────────────────────────────────────────────────────────────
     Route::get('/admin/domiciliataires', [AdminController::class, 'domiciliataires']);
