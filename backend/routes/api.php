@@ -3,12 +3,6 @@
 //
 // All API routes for the application.
 //
-// PDF strategy: the contract PDF stream route (GET /contrats/{id}/pdf/stream)
-// is the ONLY way to obtain a contract PDF/preview — there is no separate
-// "generate and save" endpoint. It always renders live from current database
-// state. mode=preview returns HTML (fast, no DomPDF), mode=download returns
-// an actual PDF (DomPDF). See ContratController::streamPdf().
-//
 // Route grouping strategy:
 //
 //   PUBLIC (no Sanctum auth):
@@ -39,7 +33,7 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\FactureController;
 use App\Http\Controllers\Api\TemplateController;
 
-// ── Public auth endpoints ──────────────────────────────────────────────────────
+// ── Public auth endpoints ────────────────────────────────────────────────
 
 Route::middleware('throttle:auth')->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
@@ -54,34 +48,42 @@ Route::get('/documents/{id}/download', [DocumentController::class, 'download'])
 Route::get('/documents/{id}/preview', [DocumentController::class, 'preview'])
     ->name('documents.preview');
 
-// Contract PDF/preview — always live-rendered. mode=preview → HTML, mode=download → PDF.
-// MUST remain outside auth:sanctum for the same reason as document endpoints.
+// Contract document stream — used by BOTH the preview <iframe> AND the
+// download button (mode=preview|download). MUST stay outside auth:sanctum —
+// see ContratController::streamPdf() for details.
 Route::get('/contrats/{id}/pdf/stream', [ContratController::class, 'streamPdf'])
     ->name('contrats.pdf.stream');
 
 Route::get('/factures/{id}/pdf', [FactureController::class, 'pdf'])
     ->name('factures.pdf');
 
-// ── Authenticated routes ───────────────────────────────────────────────────────
+// Profile photo stream — <img> tags can't attach an Authorization header.
+Route::get('/users/{id}/photo', [DomiciliataireProfileController::class, 'photo'])
+    ->name('users.photo');
+
+// ── Authenticated routes ─────────────────────────────────────────────────
 
 Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
-    // ── Auth ──────────────────────────────────────────────────────────────────
+    // ── Auth ─────────────────────────────────────────────────────────────
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
 
-    // ── Dashboard and profile ─────────────────────────────────────────────────
+    // ── Dashboard and profile ───────────────────────────────────────────
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
     Route::get('/profile', [DomiciliataireProfileController::class, 'show']);
     Route::put('/profile', [DomiciliataireProfileController::class, 'update']);
 
-    // ── Admin ─────────────────────────────────────────────────────────────────
+    Route::post('/profile/photo', [DomiciliataireProfileController::class, 'uploadPhoto']);
+    Route::delete('/profile/photo', [DomiciliataireProfileController::class, 'deletePhoto']);
+
+    // ── Admin ────────────────────────────────────────────────────────────
     Route::get('/admin/domiciliataires', [AdminController::class, 'domiciliataires']);
     Route::get('/admin/users/pending', [ActivationController::class, 'pending']);
     Route::post('/admin/users/{id}/approve', [ActivationController::class, 'approve']);
     Route::post('/admin/users/{id}/reject', [ActivationController::class, 'reject']);
 
-    // ── Entreprises and nested representant (1-to-1) ──────────────────────────
+    // ── Entreprises and nested representant (1-to-1) ────────────────────
     Route::apiResource('entreprises', EntrepriseController::class);
     Route::get('entreprises/{entreprise}/representant', [RepresentantController::class, 'show']);
     Route::post('entreprises/{entreprise}/representant', [RepresentantController::class, 'store']);
@@ -89,40 +91,38 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::delete('entreprises/{entreprise}/representant', [RepresentantController::class, 'destroy']);
     Route::get('entreprises/{entreprise}/representant/history', [RepresentantController::class, 'history']);
 
-    // ── Contracts ─────────────────────────────────────────────────────────────
+    // ── Contracts ────────────────────────────────────────────────────────
     Route::get('/contrats', [ContratController::class, 'index']);
     Route::post('/contrats', [ContratController::class, 'store']);
     Route::get('/contrats/{id}', [ContratController::class, 'show']);
     Route::put('/contrats/{id}', [ContratController::class, 'update']);
     Route::post('/contrats/{id}/activate', [ContratController::class, 'activate']);
     Route::post('/contrats/{id}/terminate', [ContratController::class, 'terminate']);
-    Route::post('/contrats/{id}/legalize', [ContratController::class, 'legalize'])
-        ->middleware('throttle:heavy');
-    Route::get('/contrats/{id}/history', [ContratController::class, 'history']);
-    Route::get('/contrats/{id}/preview', [ContratController::class, 'previewHtml'])
-        ->name('contrats.preview');
+    Route::post('/contrats/{id}/renew', [ContratController::class, 'renew']);
 
-    // ── Payments ──────────────────────────────────────────────────────────────
+    // ── Payments ─────────────────────────────────────────────────────────
     Route::get('/contrats/{contrat}/paiements', [PaiementController::class, 'index']);
     Route::post('/contrats/{contrat}/paiements', [PaiementController::class, 'store']);
     Route::get('/contrats/{contrat}/paiements/summary', [PaiementController::class, 'summary']);
 
-    // ── Invoices ──────────────────────────────────────────────────────────────
+    // ── Invoices ─────────────────────────────────────────────────────────
     Route::get('/factures', [FactureController::class, 'index']);
 
-    // ── Articles (clause library) ─────────────────────────────────────────────
+    // ── Articles (clause library) ───────────────────────────────────────
     Route::get('/articles', [ArticleController::class, 'index']);
     Route::post('/articles', [ArticleController::class, 'store']);
     Route::put('/articles/{id}', [ArticleController::class, 'update']);
     Route::delete('/articles/{id}', [ArticleController::class, 'destroy']);
 
-    // ── Templates (reusable article sets) ─────────────────────────────────────
+    // ── Contract templates ───────────────────────────────────────────────
     Route::get('/templates', [TemplateController::class, 'index']);
     Route::post('/templates', [TemplateController::class, 'store']);
     Route::put('/templates/{id}', [TemplateController::class, 'update']);
     Route::delete('/templates/{id}', [TemplateController::class, 'destroy']);
 
-    // ── Clients ───────────────────────────────────────────────────────────────
+    // ── Clients ──────────────────────────────────────────────────────────
+    // POST was missing — this is what caused "The POST method is not
+    // supported for route api/clients" when creating a new client.
     Route::get('/clients', [ClientController::class, 'index']);
     Route::post('/clients', [ClientController::class, 'store']);
     Route::get('/clients/{id}', [ClientController::class, 'show']);
@@ -131,25 +131,25 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::patch('/clients/{id}/status', [ClientController::class, 'toggleStatus']);
     Route::get('/clients/{id}/history', [ClientController::class, 'history']);
 
-    // ── Documents ─────────────────────────────────────────────────────────────
+    // ── Documents ────────────────────────────────────────────────────────
     Route::get('/documents', [DocumentController::class, 'index']);
     Route::post('/documents', [DocumentController::class, 'store'])
         ->middleware('throttle:heavy');
     Route::put('/documents/{id}', [DocumentController::class, 'update']);
     Route::delete('/documents/{id}', [DocumentController::class, 'destroy']);
 
-    // ── Document types ────────────────────────────────────────────────────────
+    // ── Document types ───────────────────────────────────────────────────
     Route::get('/document-types', [DocumentTypeController::class, 'index']);
     Route::post('/document-types', [DocumentTypeController::class, 'store']);
 
-    // ── Notifications ─────────────────────────────────────────────────────────
+    // ── Notifications ────────────────────────────────────────────────────
     Route::get('/notifications', [NotificationController::class, 'index']);
     Route::post('/notifications/{id}/read', [NotificationController::class, 'read']);
     Route::post('/notifications/read-all', [NotificationController::class, 'readAll']);
     Route::get('/notifications/preferences', [NotificationController::class, 'preferences']);
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
 
-    // ── Messages ──────────────────────────────────────────────────────────────
+    // ── Messages ─────────────────────────────────────────────────────────
     Route::get('/messages', [MessageController::class, 'index']);
     Route::post('/messages', [MessageController::class, 'send']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markRead']);

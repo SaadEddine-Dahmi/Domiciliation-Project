@@ -1,6 +1,6 @@
 // app/types/user.ts
 
-export type UserRole   = 'admin' | 'domiciliataire' | 'client'
+export type UserRole = 'admin' | 'domiciliataire' | 'client'
 export type UserStatus = 'pending' | 'approved' | 'active' | 'rejected'
 
 export interface User {
@@ -16,6 +16,11 @@ export interface User {
   approved_at?: string | null
   rejection_reason?: string | null
   created_at?: string
+
+  // Profile photo — null/undefined means "no photo uploaded", the UI
+  // should render initials instead (see auth.ts buildUser()).
+  photo_url?: string | null
+  initials?: string
 }
 
 // Used in the admin pending list

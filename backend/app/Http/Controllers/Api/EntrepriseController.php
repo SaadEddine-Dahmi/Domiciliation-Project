@@ -34,10 +34,7 @@ class EntrepriseController extends Controller
     }
 
     // Creates a new entreprise, forcing domiciliataire_id to the
-    // authenticated tenant regardless of what the request sends.
-    // Creates a new entreprise, forcing domiciliataire_id to the
-    // authenticated tenant. Domiciliataire-only — clients and admins
-    // do not manage entreprises directly through this endpoint.
+    // authenticated tenant. Domiciliataire-only.
     public function store(EntrepriseStoreRequest $request)
     {
         if (auth()->user()->role !== 'domiciliataire') {
@@ -55,6 +52,7 @@ class EntrepriseController extends Controller
             ->response()
             ->setStatusCode(201);
     }
+
     // Returns a single entreprise, tenant-scoped.
     public function show(int $id)
     {

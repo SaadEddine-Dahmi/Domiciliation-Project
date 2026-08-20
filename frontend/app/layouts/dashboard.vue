@@ -3,6 +3,7 @@
   <div class="flex min-h-screen" style="background: var(--app-bg)">
 
     <AppSidebar :nav="nav" />
+    
 
     <!-- Main content -->
     <!-- FIX: blur is purely visual (CSS filter), content is always scrollable and
@@ -28,12 +29,11 @@
 
 <script setup lang="ts">
 
-
-const props = defineProps<{ nav?: any[] }>()
-const nav   = computed(() => props.nav ?? [])
-const route = useRoute()
+const props  = defineProps<{ nav?: any[] }>()
+const nav    = computed(() => props.nav ?? [])
+const route  = useRoute()
+const config = useRuntimeConfig()
 const { isOpen, isMobileOpen } = useSidebar()
-
 
 const pageTitle = computed(() => ({
   '/admin/dashboard':       'Tableau de bord',
@@ -55,5 +55,7 @@ const pageTitle = computed(() => ({
   '/client/contrat':        'Mon Contrat',
   '/client/messages':       'Messages',
   '/client/notifs':         'Notifications',
-}[route.path] ?? 'AST-FISC'))
+  // Fallback for any route not listed above uses the configured product
+  // name instead of a hardcoded brand string.
+}[route.path] ?? config.public.appName))
 </script>

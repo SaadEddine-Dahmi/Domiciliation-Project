@@ -26,18 +26,23 @@ class AdminController extends Controller
             ])
             ->get()
             ->map(fn($u) => [
-                'id'                => $u->id,
-                'nom'               => $u->nom,
-                'prenom'            => $u->prenom,
-                'email'             => $u->email,
-                'telephone'         => $u->telephone,
+                'id' => $u->id,
+                'nom' => $u->nom,
+                'prenom' => $u->prenom,
+                'email' => $u->email,
+                'telephone' => $u->telephone,
+                // Free from the User model's $appends — lets the admin
+                // list show a real photo or the same initials fallback
+                // used everywhere else in the app.
+                'photo_url' => $u->photo_url,
+                'initials' => $u->initials,
                 'entreprises_count' => $u->entreprises_count,
-                'contrats_count'    => $u->contrats_count,
-                'entreprises'       => $u->entreprises->map(fn($e) => [
-                    'id'             => $e->id,
+                'contrats_count' => $u->contrats_count,
+                'entreprises' => $u->entreprises->map(fn($e) => [
+                    'id' => $e->id,
                     'raison_sociale' => $e->raison_sociale,
-                    'statut'         => $e->statut,
-                    'ville'          => $e->ville,
+                    'statut' => $e->statut,
+                    'ville' => $e->ville,
                 ]),
             ]);
 

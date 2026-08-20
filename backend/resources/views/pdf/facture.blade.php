@@ -175,9 +175,9 @@
     <tr>
       <td><div class="logo-box">AF</div></td>
       <td class="company-info">
-        <strong>{{ $domiciliataire?->nom ?? 'AST-FISC SARL AU' }}</strong><br>
+        {{-- <strong>{{ $domiciliataire?->nom }}</strong><br> --}}
+        <strong style="color:#c8a96e">{{ $domiciliataire?->nom }}</strong>
         {{ $domiciliataire?->email }}<br>
-        <strong style="color:#c8a96e">AST-FISC Domiciliation</strong>
       </td>
     </tr>
   </table>

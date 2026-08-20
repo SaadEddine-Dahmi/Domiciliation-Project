@@ -43,6 +43,17 @@ const form = reactive({
 
 const modeOptions = ['virement', 'espèces', 'chèque', 'carte bancaire', 'autre']
 
+// ── Balance guard ─────────────────────────────────────────
+// Mirrors the backend's remainingBalance() check so the domiciliataire
+// gets instant feedback instead of a round-trip 422. The backend remains
+// the source of truth — this is a UX convenience, not the real guard.
+const remainingBalance = computed<number>(() => summary.value?.restant ?? Infinity)
+
+const montantExceedsBalance = computed<boolean>(() => {
+  const v = Number(form.montant)
+  return Number.isFinite(v) && v > remainingBalance.value + 0.01
+})
+
 async function loadContrats(): Promise<void> {
   loading.value = true
   try {
@@ -57,10 +68,10 @@ async function loadContrats(): Promise<void> {
 }
 
 async function selectContrat(id: number): Promise<void> {
-  selectedId.value    = id
+  selectedId.value      = id
   loadingPayments.value = true
-  paiements.value     = []
-  summary.value       = null
+  paiements.value       = []
+  summary.value         = null
   try {
     const [pRes, sRes] = await Promise.all([
       $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/contrats/${id}/paiements`, { headers: authHeaders() }),
@@ -75,10 +86,25 @@ async function selectContrat(id: number): Promise<void> {
   }
 }
 
+/**
+ * Submit a new payment.
+ *
+ * Client-side balance check runs first (fast feedback, no request sent).
+ * The backend re-validates independently — this guard is a convenience,
+ * never the sole line of defence against over-payment.
+ */
 async function submitPaiement(): Promise<void> {
   if (!selectedId.value) return
   if (!form.montant || Number(form.montant) <= 0) return toastError?.('Montant invalide')
   if (!form.date_paiement) return toastError?.('Date requise')
+
+  if (montantExceedsBalance.value) {
+    toastError?.(
+      `Le montant dépasse le solde restant (${remainingBalance.value.toLocaleString('fr-MA')} DH).`
+    )
+    return
+  }
+
   saving.value = true
   try {
     const res = await $fetch<{ success: boolean; data: any }>(
@@ -99,6 +125,8 @@ async function submitPaiement(): Promise<void> {
     await selectContrat(selectedId.value)
     Object.assign(form, { montant: '', mode_paiement: 'virement', note: '' })
   } catch (e: any) {
+    // Backend rejection (422 over-payment or otherwise) surfaces here too,
+    // covering any case the client-side check might have missed.
     toastError?.(e?.data?.message ?? 'Erreur enregistrement')
   } finally {
     saving.value = false
@@ -173,7 +201,14 @@ onMounted(loadContrats)
           <div v-if="summary" class="card p-4 space-y-3">
             <div class="flex items-center justify-between">
               <p class="font-semibold">{{ selectedContrat?.entreprise?.raison_sociale }}</p>
-              <button class="btn btn-gold btn-sm" @click="showModal = true">+ Enregistrer un paiement</button>
+              <button
+                class="btn btn-gold btn-sm"
+                :disabled="summary.restant <= 0"
+                :title="summary.restant <= 0 ? 'Contrat déjà soldé' : ''"
+                @click="showModal = true"
+              >
+                + Enregistrer un paiement
+              </button>
             </div>
             <div class="grid grid-cols-3 gap-3 text-center">
               <div class="rounded-xl bg-white/5 p-3">
@@ -198,6 +233,9 @@ onMounted(loadContrats)
                      :style="`width:${summary.pourcentage}%`"/>
               </div>
             </div>
+            <p v-if="summary.restant <= 0" class="text-xs text-green-400 text-center">
+              ✓ Ce contrat est entièrement soldé.
+            </p>
           </div>
 
           <div class="card p-4 space-y-3">
@@ -252,10 +290,24 @@ onMounted(loadContrats)
           <button class="text-app-text/40 hover:text-white text-xl" @click="showModal = false">✕</button>
         </div>
         <p class="text-sm text-app-text/50">Contrat : <b>{{ selectedContrat?.entreprise?.raison_sociale }}</b></p>
+
+        <!-- Remaining balance banner — sets clear expectations before typing -->
+        <div class="rounded-xl px-3 py-2 text-sm"
+             style="background:rgba(200,169,110,0.08);border:1px solid rgba(200,169,110,0.2);color:#c8a96e">
+          Solde restant : <b>{{ remainingBalance.toLocaleString('fr-MA') }} DH</b>
+        </div>
+
         <div class="space-y-3">
           <div>
             <label class="f-label">Montant (DH) *</label>
-            <input v-model="form.montant" class="f-input" type="number" min="0" step="0.01" placeholder="0.00"/>
+            <input
+              v-model="form.montant" class="f-input" type="number" min="0" step="0.01"
+              :max="Number.isFinite(remainingBalance) ? remainingBalance : undefined"
+              placeholder="0.00"
+            />
+            <p v-if="montantExceedsBalance" class="text-xs text-red-400 mt-1">
+              ⚠ Le montant dépasse le solde restant ({{ remainingBalance.toLocaleString('fr-MA') }} DH).
+            </p>
           </div>
           <div>
             <label class="f-label">Date du paiement *</label>
@@ -274,7 +326,11 @@ onMounted(loadContrats)
         </div>
         <div class="flex gap-3 justify-end">
           <button class="btn btn-outline btn-md" @click="showModal = false">Annuler</button>
-          <button class="btn btn-gold btn-md" :disabled="saving" @click="submitPaiement">
+          <button
+            class="btn btn-gold btn-md"
+            :disabled="saving || montantExceedsBalance || !form.montant"
+            @click="submitPaiement"
+          >
             {{ saving ? 'Enregistrement...' : '💳 Enregistrer' }}
           </button>
         </div>

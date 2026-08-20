@@ -149,7 +149,7 @@ onMounted(fetchProfile)
 
 <template>
   <div class="space-y-6 animate-fade-up max-w-3xl">
-
+<ProfilePhotoUpload />
     <div class="flex items-start justify-between flex-wrap gap-4">
       <div>
         <h1 class="font-serif text-2xl" style="color:var(--app-text)">

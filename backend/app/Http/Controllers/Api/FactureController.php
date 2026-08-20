@@ -1,4 +1,11 @@
 <?php
+// app/Http/Controllers/Api/FactureController.php
+//
+// Read-only access to invoices: listing and PDF generation.
+// Invoices themselves are only ever created by PaiementController::store(),
+// which enforces that montant never exceeds the contract's remaining balance
+// (see remainingBalance() there) — this controller does not duplicate that
+// check since it never writes a Facture row.
 
 namespace App\Http\Controllers\Api;
 
@@ -10,24 +17,33 @@ use Laravel\Sanctum\PersonalAccessToken;
 
 class FactureController extends Controller
 {
-    // Resolves a user from a ?token= query param — required for PDF
-    // endpoints opened directly in the browser, which cannot set an
-    // Authorization header on plain navigation.
+    // ── Private helpers ────────────────────────────────────────────────────────
+
+    /**
+     * Resolve a user from a ?token= query param.
+     *
+     * Required for PDF endpoints opened directly in the browser or an
+     * <iframe>/<a href> — those requests cannot carry an Authorization header.
+     */
     private function authenticateViaToken(Request $request): ?\App\Models\User
     {
         $value = $request->query('token');
         if (!$value)
             return null;
+
         $token = PersonalAccessToken::findToken($value);
         if (!$token)
             return null;
         if ($token->expires_at && $token->expires_at->isPast())
             return null;
+
         return $token->tokenable;
     }
 
-    // Resolves an invoice by ID, tenant-scoped to the given user, with
-    // all relations needed for PDF rendering eager-loaded.
+    /**
+     * Resolve an invoice by ID, tenant-scoped to the given user, with all
+     * relations needed for PDF rendering eager-loaded.
+     */
     private function resolveFacture(int $id, \App\Models\User $user): ?Facture
     {
         return Facture::with(['entreprise', 'contrat', 'domiciliataire', 'paiements'])
@@ -35,7 +51,14 @@ class FactureController extends Controller
             ->find($id);
     }
 
-    // Lists all invoices for the authenticated domiciliataire.
+    // ── Index ──────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/factures
+     *
+     * Lists all invoices for the authenticated domiciliataire, newest first,
+     * with the fields the invoices list page needs already eager-loaded.
+     */
     public function index()
     {
         $tenantId = auth()->id();
@@ -53,9 +76,18 @@ class FactureController extends Controller
         return response()->json(['success' => true, 'data' => $factures]);
     }
 
-    // Generates the invoice PDF, authenticated via ?token= since this
-    // URL is opened directly in a browser tab or iframe. ?mode=download
-    // forces attachment disposition; default is inline preview.
+    // ── PDF ────────────────────────────────────────────────────────────────────
+
+    /**
+     * GET /api/factures/{id}/pdf?token=xxx&mode=preview|download
+     *
+     * Generates the invoice PDF. Auth is via ?token= query param (not the
+     * Authorization header) because this URL is opened directly in a browser
+     * tab or <iframe>.
+     *
+     *   ?mode=preview  (default) → inline, opens in the tab/iframe
+     *   ?mode=download            → attachment, triggers a file download
+     */
     public function pdf(Request $request, int $id)
     {
         $user = $this->authenticateViaToken($request);

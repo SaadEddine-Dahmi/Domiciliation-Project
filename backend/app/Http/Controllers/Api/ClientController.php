@@ -3,12 +3,10 @@
 //
 // Manages the client (Entreprise-based) resource for the domiciliataire.
 //
-// FEATURE ADDED: store(). clients/index.vue creates a client in two steps
-// (create the entreprise, then create its representant via
-// RepresentantController), so this only needs to accept the entreprise
-// fields — the representative is attached separately, and 'statut' is
-// deliberately excluded here too, same as update(), since it has its own
-// dedicated endpoint (toggleStatus).
+// The representative is attached separately via RepresentantController,
+// so store() only needs the entreprise fields. 'statut' is deliberately
+// excluded from store() and update() — it has its own dedicated endpoint
+// (toggleStatus) so it can never be overwritten by an unrelated profile edit.
 //
 // Routes (auth:sanctum):
 //   GET    /api/clients                  → index
@@ -31,10 +29,9 @@ class ClientController extends Controller
 {
     /**
      * GET /api/clients
-     *
      * Returns all entreprises (clients) belonging to the authenticated
-     * domiciliataire, with their representant, linked user account,
-     * and documents eager-loaded.
+     * domiciliataire, with representant, linked user account, and
+     * documents eager-loaded.
      */
     public function index()
     {
@@ -58,27 +55,21 @@ class ClientController extends Controller
 
     /**
      * POST /api/clients
-     *
      * Creates a new entreprise (client) for the authenticated domiciliataire.
-     * The representant is NOT created here — the frontend calls
-     * RepresentantController::store() right after with the returned id.
-     *
-     * 'statut' is intentionally NOT accepted here — new clients start with
-     * whatever default the entreprises table applies, and are switched to
-     * 'actif'/'inactif' only through toggleStatus(), same rule as update().
-     *
-     * Tenant ID is forced from the authenticated user, never from the request.
+     * The representant is created afterwards by a separate call to
+     * RepresentantController::store(). Tenant ID is always forced from the
+     * authenticated user, never trusted from the request body.
      */
     public function store(Request $request)
     {
         $data = $request->validate([
-            'raison_sociale'  => ['required', 'string', 'max:255'],
+            'raison_sociale' => ['required', 'string', 'max:255'],
             'forme_juridique' => ['nullable', 'string', 'max:100'],
-            'adresse'         => ['nullable', 'string'],
-            'ville'           => ['nullable', 'string', 'max:100'],
-            'pays'            => ['nullable', 'string', 'max:100'],
-            'capital'         => ['nullable', 'numeric'],
-            'date_creation'   => ['nullable', 'date'],
+            'adresse' => ['nullable', 'string'],
+            'ville' => ['nullable', 'string', 'max:100'],
+            'pays' => ['nullable', 'string', 'max:100'],
+            'capital' => ['nullable', 'numeric'],
+            'date_creation' => ['nullable', 'date'],
         ]);
 
         $entreprise = Entreprise::create([
@@ -97,7 +88,6 @@ class ClientController extends Controller
 
     /**
      * GET /api/clients/{id}
-     *
      * Returns a single entreprise by ID, tenant-scoped.
      */
     public function show(int $id)
@@ -119,12 +109,8 @@ class ClientController extends Controller
 
     /**
      * PUT /api/clients/{id}
-     *
-     * Update entreprise fields and optionally the linked client user account.
+     * Updates entreprise fields and optionally the linked client user account.
      * The representant is managed separately via RepresentantController.
-     * Note: 'statut' (actif/inactif) is intentionally excluded from this bulk
-     * update — it has its own dedicated endpoint, toggleStatus(), so it can
-     * never be silently overwritten by an unrelated profile edit.
      */
     public function update(Request $request, int $id)
     {
@@ -133,28 +119,28 @@ class ClientController extends Controller
             ->findOrFail($id);
 
         $data = $request->validate([
-            'raison_sociale'  => ['required', 'string', 'max:255'],
+            'raison_sociale' => ['required', 'string', 'max:255'],
             'forme_juridique' => ['nullable', 'string', 'max:100'],
-            'adresse'         => ['nullable', 'string'],
-            'ville'           => ['nullable', 'string', 'max:100'],
-            'pays'            => ['nullable', 'string', 'max:100'],
-            'capital'         => ['nullable', 'numeric'],
-            'date_creation'   => ['nullable', 'date'],
+            'adresse' => ['nullable', 'string'],
+            'ville' => ['nullable', 'string', 'max:100'],
+            'pays' => ['nullable', 'string', 'max:100'],
+            'capital' => ['nullable', 'numeric'],
+            'date_creation' => ['nullable', 'date'],
 
-            'client_user.nom'       => ['nullable', 'string', 'max:20'],
-            'client_user.prenom'    => ['nullable', 'string', 'max:20'],
-            'client_user.email'     => ['nullable', 'email', 'max:50'],
+            'client_user.nom' => ['nullable', 'string', 'max:20'],
+            'client_user.prenom' => ['nullable', 'string', 'max:20'],
+            'client_user.email' => ['nullable', 'email', 'max:50'],
             'client_user.telephone' => ['nullable', 'string', 'max:13'],
         ]);
 
         $entreprise->update([
-            'raison_sociale'  => $data['raison_sociale'],
+            'raison_sociale' => $data['raison_sociale'],
             'forme_juridique' => $data['forme_juridique'] ?? null,
-            'adresse'         => $data['adresse'] ?? null,
-            'ville'           => $data['ville'] ?? null,
-            'pays'            => $data['pays'] ?? null,
-            'capital'         => $data['capital'] ?? null,
-            'date_creation'   => $data['date_creation'] ?? null,
+            'adresse' => $data['adresse'] ?? null,
+            'ville' => $data['ville'] ?? null,
+            'pays' => $data['pays'] ?? null,
+            'capital' => $data['capital'] ?? null,
+            'date_creation' => $data['date_creation'] ?? null,
         ]);
 
         if ($entreprise->client_user_id && isset($data['client_user'])) {
@@ -174,9 +160,9 @@ class ClientController extends Controller
                 }
 
                 $user->update([
-                    'nom'       => $data['client_user']['nom'] ?? $user->nom,
-                    'prenom'    => $data['client_user']['prenom'] ?? $user->prenom,
-                    'email'     => $newEmail,
+                    'nom' => $data['client_user']['nom'] ?? $user->nom,
+                    'prenom' => $data['client_user']['prenom'] ?? $user->prenom,
+                    'email' => $newEmail,
                     'telephone' => $data['client_user']['telephone'] ?? $user->telephone,
                 ]);
             }
@@ -194,11 +180,9 @@ class ClientController extends Controller
 
     /**
      * PATCH /api/clients/{id}/status
-     *
-     * Toggles the client between 'actif' and 'inactif'. An 'inactif' client's
-     * linked user account is refused login by AuthController::login().
-     * This is the ONLY place statut is written, kept deliberately separate
-     * from update() so it cannot be changed accidentally in a profile edit.
+     * Toggles the client between 'actif' and 'inactif'. An 'inactif'
+     * client's linked user account is refused login by AuthController::login().
+     * This is the only place statut is written.
      */
     public function toggleStatus(Request $request, int $id)
     {
@@ -220,8 +204,7 @@ class ClientController extends Controller
 
     /**
      * PUT /api/clients/{id}/password
-     *
-     * Reset the password for the linked client user account.
+     * Resets the password for the linked client user account.
      */
     public function updatePassword(Request $request, int $id)
     {
@@ -251,9 +234,7 @@ class ClientController extends Controller
 
     /**
      * GET /api/clients/{id}/history
-     *
-     * Returns the full audit trail for this client, newest first, with the
-     * user who made each change eager-loaded.
+     * Returns the full audit trail for this client, newest first.
      */
     public function history(int $id)
     {
@@ -263,7 +244,7 @@ class ClientController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $entreprise->history()->with('changedBy:id,nom,prenom')->get(),
+            'data' => $entreprise->history()->with('changedBy:id,nom,prenom')->get(),
         ]);
     }
 }

@@ -85,6 +85,7 @@ class DashboardController extends Controller
                     'prix_total' => $contrat->prix_total,
                     'pdf_path' => $contrat->pdf_path,
                     'pdf_url' => $contrat->pdf_path ? asset('storage/' . $contrat->pdf_path) : null,
+                    'has_open_renewal' => $contrat?->hasOpenRenewal() ?? false,
                 ] : null,
                 'role' => 'client',
             ],

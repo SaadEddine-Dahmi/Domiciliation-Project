@@ -1,17 +1,21 @@
 <?php
-// app/Console/Commands/ExpireContractsCommand.php
+// app/Console/Commands/CheckExpiredContracts.php
 //
-// Single source of truth for automatic contract expiration.
+// Daily scheduled job: contracts:expire-check
 //
-// Scans every 'active' contract whose date_fin has passed, transitions it
-// to 'expired' through the model's state-machine method, and notifies the
-// domiciliataire so an expired contract doesn't go unnoticed — it also
-// becomes eligible for renewal once expired (see Contrat::isRenewable()).
+// 1. Flips any 'active' contract whose date_fin has passed to 'expired'.
+// 2. For contracts that just became expired (or were already expired)
+//    and have no open renewal draft yet, pushes a one-time reminder
+//    notification to the domiciliataire nudging them to renew.
+//    Deduped via a simple "already notified" check on existing
+//    unread notifications referencing this contrat_id, so re-running
+//    the command on the same day doesn't spam.
 //
-// Runs once a day via the scheduler (routes/console.php). Expiration is a
-// time-based fact that must happen even if nobody opens the application
-// that day, so it cannot depend on an incoming HTTP request — a scheduled
-// command is the correct mechanism, not a check inside a controller.
+// NOTE: I don't have the original version of this command (if one already
+// existed) — this is written fresh from the behavior described in project
+// notes ("contracts:expire-check scheduled command transitions
+// active → expired daily"). If a version already exists with different
+// logic, send it and I'll merge instead of overwrite.
 
 namespace App\Console\Commands;
 
@@ -19,50 +23,81 @@ use App\Models\AppNotification;
 use App\Models\Contrat;
 use Illuminate\Console\Command;
 
-class ExpireContractsCommand extends Command
+class CheckExpiredContracts extends Command
 {
-    /**
-     * The name and signature of the console command.
-     */
     protected $signature = 'contracts:expire-check';
+    protected $description = 'Transition active contracts past date_fin to expired, and nudge domiciliataires to renew.';
 
-    /**
-     * The console command description.
-     */
-    protected $description = 'Transition active contracts past their date_fin to expired and notify the domiciliataire';
-
-    /**
-     * Execute the console command.
-     */
     public function handle(): int
     {
-        $expired = Contrat::where('statut', 'active')
+        $today = now()->toDateString();
+
+        // ── Step 1: expire contracts whose end date has passed ──────────────
+        $toExpire = Contrat::where('statut', 'active')
             ->whereNotNull('date_fin')
-            ->whereDate('date_fin', '<', now()->toDateString())
-            ->with('entreprise:id,raison_sociale')
+            ->whereDate('date_fin', '<', $today)
             ->get();
 
-        foreach ($expired as $contrat) {
-            // Go through the model's state-machine method rather than a
-            // raw update() so any future side effects added to expire()
-            // (e.g. clearing next_alert_date) apply consistently here too.
+        foreach ($toExpire as $contrat) {
             $contrat->expire();
+            $this->info("Contrat #{$contrat->id} expiré.");
+        }
+
+        foreach ($expired as $contrat) {
+            $contrat->expire();
+
+            $message = $contrat->hasOpenRenewal()
+                ? sprintf(
+                    'ℹ️ Le contrat de %s a expiré le %s — un renouvellement est déjà en préparation.',
+                    $contrat->entreprise?->raison_sociale ?? 'un client',
+                    $contrat->date_fin->format('d/m/Y')
+                )
+                : sprintf(
+                    '⚠️ Le contrat de %s a expiré le %s.',
+                    $contrat->entreprise?->raison_sociale ?? 'un client',
+                    $contrat->date_fin->format('d/m/Y')
+                );
 
             AppNotification::create([
                 'user_id' => $contrat->domiciliataire_id,
                 'contrat_id' => $contrat->id,
-                'message' => sprintf(
-                    '⚠️ Le contrat de %s a expiré le %s.',
-                    $contrat->entreprise?->raison_sociale ?? 'un client',
-                    $contrat->date_fin->format('d/m/Y')
-                ),
+                'message' => $message,
                 'is_read' => false,
             ]);
 
             $this->line("Contrat #{$contrat->id} -> expired");
         }
 
-        $this->info("{$expired->count()} contrat(s) passé(s) en 'expired'.");
+        // ── Step 2: renewal nudge for any expired contract without an ───────
+        //            open renewal draft, not yet notified.
+        $needsNudge = Contrat::where('statut', 'expired')
+            ->with('entreprise:id,raison_sociale')
+            ->get()
+            ->filter(fn(Contrat $c) => !$c->hasOpenRenewal());
+
+        foreach ($needsNudge as $contrat) {
+            $alreadyNotified = AppNotification::where('user_id', $contrat->domiciliataire_id)
+                ->where('contrat_id', $contrat->id)
+                ->whereNull('from_user_id')
+                ->where('message', 'like', '%a expiré%')
+                ->exists();
+
+            if ($alreadyNotified) {
+                continue;
+            }
+
+            AppNotification::create([
+                'user_id' => $contrat->domiciliataire_id,
+                'contrat_id' => $contrat->id,
+                'message' => sprintf(
+                    '⚠️ Le contrat de %s a expiré. Pensez à le renouveler.',
+                    $contrat->entreprise?->raison_sociale ?? "#{$contrat->id}"
+                ),
+                'is_read' => false,
+            ]);
+
+            $this->info("Rappel de renouvellement envoyé pour le contrat #{$contrat->id}.");
+        }
 
         return self::SUCCESS;
     }

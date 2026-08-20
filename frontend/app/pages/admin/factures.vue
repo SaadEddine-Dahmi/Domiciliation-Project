@@ -28,6 +28,9 @@ function getToken(): string {
   } catch { return '' }
 }
 
+// Builds a signed URL for PDF endpoints — these are opened directly by
+// the browser (new tab / iframe / <a href>) so a Bearer header can't be
+// attached; the token travels as a query param instead.
 function tokenUrl(url: string, mode: 'preview' | 'download' = 'preview'): string {
   const token = getToken()
   if (!token) return url

@@ -29,6 +29,12 @@ export default defineNuxtConfig({
       // Product name — set NUXT_PUBLIC_APP_NAME in .env once the name
       // is chosen. Placeholder below is intentionally generic.
       appName: process.env.NUXT_PUBLIC_APP_NAME ?? 'Domiciliation Manager',
+
+      // Short 2-3 letter mark shown in the sidebar logo badge. Set
+      // NUXT_PUBLIC_APP_SHORT_CODE alongside appName once the final
+      // name/branding is chosen — falls back to the first two letters
+      // of appName if not set.
+      appShortCode: process.env.NUXT_PUBLIC_APP_SHORT_CODE ?? 'DM',
     },
   },
 

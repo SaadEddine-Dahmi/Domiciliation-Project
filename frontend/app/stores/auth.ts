@@ -8,33 +8,34 @@
 
 import { defineStore } from 'pinia'
 
-export type Role   = 'admin' | 'domiciliataire' | 'client'
+export type Role = 'admin' | 'domiciliataire' | 'client'
 export type Status = 'pending' | 'approved' | 'active' | 'rejected'
 
 export interface AuthUser {
-    id:      number
-    name:    string
-    email:   string
-    role:    Role
-    status:  Status
+    id: number
+    name: string
+    email: string
+    role: Role
+    status: Status
     company: string
-    avatar:  string
-    color:   string
+    avatar: string        // initials fallback, e.g. "JD"
+    photoUrl: string | null // profile photo URL, null when none is set
+    color: string
 }
 
 export const useAuthStore = defineStore('auth', () => {
 
-    const user              = ref<AuthUser | null>(null)
-    const token             = ref<string>('')
-    const loading           = ref<boolean>(false)
-    const error             = ref<string>('')
+    const user = ref<AuthUser | null>(null)
+    const token = ref<string>('')
+    const loading = ref<boolean>(false)
+    const error = ref<string>('')
     const isPendingApproval = ref<boolean>(false)
 
-    const isAuthenticated  = computed(() => !!user.value && !!token.value)
-    const isAdmin          = computed(() => user.value?.role === 'admin')
+    const isAuthenticated = computed(() => !!user.value && !!token.value)
+    const isAdmin = computed(() => user.value?.role === 'admin')
     const isDomiciliataire = computed(() => user.value?.role === 'domiciliataire')
-    const isClient         = computed(() => user.value?.role === 'client')
-    const isInternal       = computed(() => isAdmin.value || isDomiciliataire.value)
+    const isClient = computed(() => user.value?.role === 'client')
+    const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
     // ── Config helpers ─────────────────────────────────────────────────────────
 
@@ -55,24 +56,39 @@ export const useAuthStore = defineStore('auth', () => {
 
     function getMaxAgeMs(): number {
         const config = useRuntimeConfig()
-        const days   = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
+        const days = parseInt(config.public.sessionMaxAgeDays as string ?? '7', 10)
         return days * 24 * 60 * 60 * 1000
+    }
+
+    /**
+     * Local fallback for initials, mirroring the backend's
+     * User::getInitialsAttribute(): first letter of nom + first letter
+     * of prenom. Only used if the API response is missing "initials"
+     * (e.g. an older cached payload) — normally the backend value is used
+     * directly so both stay perfectly in sync.
+     */
+    function buildInitialsFallback(u: any): string {
+        const first = (u.nom ?? '').trim().charAt(0).toUpperCase()
+        const second = (u.prenom ?? '').trim().charAt(0).toUpperCase()
+        const initials = `${first}${second}`
+        return initials || (u.email ?? 'U').charAt(0).toUpperCase()
     }
 
     // ── buildUser ──────────────────────────────────────────────────────────────
 
     function buildUser(u: any): AuthUser {
         return {
-            id:      u.id,
-            name:    `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
-            email:   u.email,
-            role:    u.role   ?? 'client',
-            status:  u.status ?? 'active',
+            id: u.id,
+            name: `${u.nom ?? ''} ${u.prenom ?? ''}`.trim() || u.email,
+            email: u.email,
+            role: u.role ?? 'client',
+            status: u.status ?? 'active',
             company: u.company ?? '',
-            avatar:  (u.nom ?? u.email ?? 'U').slice(0, 2).toUpperCase(),
+            avatar: u.initials ?? buildInitialsFallback(u),
+            photoUrl: u.photo_url ?? null,
             color:
-                u.role === 'admin'          ? '#ef4444' :
-                u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
+                u.role === 'admin' ? '#ef4444' :
+                    u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
         }
     }
 
@@ -81,8 +97,8 @@ export const useAuthStore = defineStore('auth', () => {
     function saveToStorage(): void {
         if (!import.meta.client) return
         localStorage.setItem(getStorageKey(), JSON.stringify({
-            user:    user.value,
-            token:   token.value,
+            user: user.value,
+            token: token.value,
             savedAt: Date.now(),
         }))
     }
@@ -91,19 +107,19 @@ export const useAuthStore = defineStore('auth', () => {
 
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
-        error.value   = ''
+        error.value = ''
         try {
             const res = await $fetch<{ success: boolean; data: { user: any; token: string } }>(
                 `${getApiBase()}/api/auth/login`,
                 { method: 'POST', body: payload }
             )
-            user.value  = buildUser(res.data.user)
+            user.value = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
             return true
         } catch (e: any) {
             error.value =
-                e?.data?.message          ??
+                e?.data?.message ??
                 e?.data?.errors?.email?.[0] ??
                 'Identifiants invalides'
             return false
@@ -118,8 +134,8 @@ export const useAuthStore = defineStore('auth', () => {
         nom: string; prenom?: string; email: string
         password: string; telephone?: string
     }): Promise<boolean> {
-        loading.value           = true
-        error.value             = ''
+        loading.value = true
+        error.value = ''
         isPendingApproval.value = false
         try {
             const res = await $fetch<{
@@ -133,7 +149,7 @@ export const useAuthStore = defineStore('auth', () => {
                 isPendingApproval.value = true
                 return true
             }
-            user.value  = buildUser(res.data.user)
+            user.value = buildUser(res.data.user)
             token.value = res.data.token
             saveToStorage()
             return true
@@ -150,9 +166,9 @@ export const useAuthStore = defineStore('auth', () => {
     // ── logout ─────────────────────────────────────────────────────────────────
 
     function logout(): void {
-        user.value              = null
-        token.value             = ''
-        error.value             = ''
+        user.value = null
+        token.value = ''
+        error.value = ''
         isPendingApproval.value = false
         if (import.meta.client) {
             localStorage.removeItem(getStorageKey())
@@ -162,27 +178,40 @@ export const useAuthStore = defineStore('auth', () => {
     // ── restoreSession ─────────────────────────────────────────────────────────
 
     function restoreSession(): void {
-        if (!import.meta.client)       return
+        if (!import.meta.client) return
         if (user.value && token.value) return
         try {
             const raw = localStorage.getItem(getStorageKey())
             if (!raw) return
             const parsed = JSON.parse(raw)
-            const ageMs  = Date.now() - (parsed.savedAt ?? 0)
+            const ageMs = Date.now() - (parsed.savedAt ?? 0)
             if (ageMs > getMaxAgeMs()) {
                 localStorage.removeItem(getStorageKey())
                 return
             }
-            user.value  = parsed.user  ?? null
+            user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
         } catch {
             localStorage.removeItem(getStorageKey())
         }
     }
 
+    // ── setPhoto ───────────────────────────────────────────────────────────────
+
+    /**
+     * Updates just the photo on the currently logged-in user, then
+     * persists it — used after a successful upload/delete so the sidebar
+     * and topbar avatars refresh instantly without a full re-login.
+     */
+    function setPhoto(photoUrl: string | null): void {
+        if (!user.value) return
+        user.value = { ...user.value, photoUrl }
+        saveToStorage()
+    }
+
     return {
         user, token, loading, error, isPendingApproval,
         isAuthenticated, isAdmin, isDomiciliataire, isClient, isInternal,
-        login, register, logout, restoreSession, saveToStorage,
+        login, register, logout, restoreSession, saveToStorage, setPhoto,
     }
 })

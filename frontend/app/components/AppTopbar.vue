@@ -39,12 +39,9 @@
         </svg>
       </NuxtLink>
 
-
+      <!-- Shows the uploaded photo when set, otherwise nom+prenom initials -->
       <NuxtLink :to="auth.isInternal ? '/admin/settings' : '/client/settings'">
-        <div
-          class="w-9 h-9 rounded-xl flex items-center justify-center text-[12px] font-bold"
-          :style="`background:${auth.user?.color}22;color:${auth.user?.color}`"
-        >{{ auth.user?.avatar }}</div>
+        <UserAvatar :size="36" font-size="12px" />
       </NuxtLink>
     </div>
   </header>

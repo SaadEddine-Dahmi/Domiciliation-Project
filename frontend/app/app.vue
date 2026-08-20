@@ -136,6 +136,18 @@ const IcoArticles = defineComponent({ render: () => h('svg', {
   h('path', { d: 'M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z' }),
 ]) })
 
+const IcoTemplates = defineComponent({
+  render: () => h('svg', {
+    width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none',
+    stroke: 'currentColor', 'stroke-width': '1.8',
+    'stroke-linecap': 'round', 'stroke-linejoin': 'round',
+  }, [
+    h('path', { d: 'm12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83z' }),
+    h('path', { d: 'm22 12.5-8.58 3.91a2 2 0 0 1-1.66 0L3.18 12.5' }),
+    h('path', { d: 'm22 17.5-8.58 3.91a2 2 0 0 1-1.66 0L3.18 17.5' }),
+  ])
+})
+
 const IcoMessages = defineComponent({ render: () => h('svg', {
   width: 16, height: 16, viewBox: '0 0 24 24', fill: 'none',
   stroke: 'currentColor', 'stroke-width': '1.8',
@@ -193,6 +205,7 @@ const domiciNav = computed(() => [
   { icon: IcoScan,       label: 'Scanner / Importer',
     action: () => router.push('/admin/scan') },
   { icon: IcoArticles,   label: 'Articles',             to: '/admin/articles' },
+  { icon: IcoTemplates,   label: 'Templates',            to: '/admin/templates' },
 
   { section: 'Communication' },
   { icon: IcoMessages,   label: 'Messages clients',     to: '/admin/messages' },
