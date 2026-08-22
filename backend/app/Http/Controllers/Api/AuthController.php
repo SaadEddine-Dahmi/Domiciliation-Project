@@ -40,12 +40,6 @@ class AuthController extends Controller
             'status' => $role === 'domiciliataire' ? 'pending' : 'active',
         ]);
 
-        // Seeds the REDEVANCE/CONTACT starter clauses for a brand-new
-        // domiciliataire account, so their article library isn't empty
-        // and the contract wizard behaves consistently from day one.
-        // Must run BEFORE the response is returned, and is scoped to
-        // 'domiciliataire' only — client/admin accounts never own an
-        // article library.
         if ($role === 'domiciliataire') {
             (new DefaultArticlesSeeder())->run($user->id);
         }
@@ -96,9 +90,6 @@ class AuthController extends Controller
             ], 403);
         }
 
-        // Client-role users are additionally gated by their linked entreprise's
-        // status. A domiciliataire can suspend a client's portal access by
-        // marking the entreprise 'inactif' — see ClientController::toggleStatus().
         if ($user->role === 'client') {
             $entreprise = Entreprise::where('client_user_id', $user->id)->first();
 
@@ -112,6 +103,9 @@ class AuthController extends Controller
 
         $token = $user->createToken('api-token')->plainTextToken;
 
+        // $user->must_change_password is serialised automatically since
+        // it isn't in $hidden — the frontend reads it to decide whether
+        // to show the "change your password?" prompt after login.
         return response()->json([
             'success' => true,
             'data' => compact('user', 'token'),
@@ -127,5 +121,40 @@ class AuthController extends Controller
     {
         $request->user()?->currentAccessToken()?->delete();
         return response()->json(['success' => true, 'message' => 'Déconnecté.']);
+    }
+
+    /**
+     * PUT /api/account/password
+     *
+     * Lets the currently authenticated user set their own password.
+     * Used by the "change password" prompt shown to anyone whose
+     * account still carries a system-generated password
+     * (must_change_password === true), and reusable from account
+     * settings at any other time too.
+     */
+    public function changePassword(Request $request)
+    {
+        $user = $request->user();
+
+        $data = $request->validate([
+            'current_password' => ['required', 'string'],
+            'password'         => ['required', 'string', 'min:8', 'confirmed'],
+        ]);
+
+        if (!Hash::check($data['current_password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'current_password' => ['Mot de passe actuel incorrect.'],
+            ]);
+        }
+
+        $user->update([
+            'password'             => Hash::make($data['password']),
+            'must_change_password' => false,
+        ]);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Mot de passe mis à jour.',
+        ]);
     }
 }

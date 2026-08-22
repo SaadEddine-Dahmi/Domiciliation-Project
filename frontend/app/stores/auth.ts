@@ -1,10 +1,6 @@
 // stores/auth.ts
 // Central authentication store.
 // Manages login, register, logout, and session restoration.
-//
-// Storage key: read from nuxt.config runtimeConfig.public.authStorageKey.
-// Falls back to the generic 'app_auth' key used across all pages.
-// No brand-specific name is hardcoded anywhere in this file.
 
 import { defineStore } from 'pinia'
 
@@ -18,8 +14,10 @@ export interface AuthUser {
     role: Role
     status: Status
     company: string
-    avatar: string        // initials fallback, e.g. "JD"
-    photoUrl: string | null // profile photo URL, null when none is set
+    avatar: string
+    photoUrl: string | null
+    // Drives the "change your password?" prompt shown after login.
+    mustChangePassword: boolean
     color: string
 }
 
@@ -37,18 +35,11 @@ export const useAuthStore = defineStore('auth', () => {
     const isClient = computed(() => user.value?.role === 'client')
     const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
-    // ── Config helpers ─────────────────────────────────────────────────────────
-
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
     }
 
-    /**
-     * The localStorage key used to persist the session.
-     * Configured via nuxt.config: runtimeConfig.public.authStorageKey.
-     * Defaults to 'app_auth' — no brand name hardcoded here.
-     */
     function getStorageKey(): string {
         const config = useRuntimeConfig()
         return (config.public.authStorageKey as string) ?? 'app_auth'
@@ -60,21 +51,12 @@ export const useAuthStore = defineStore('auth', () => {
         return days * 24 * 60 * 60 * 1000
     }
 
-    /**
-     * Local fallback for initials, mirroring the backend's
-     * User::getInitialsAttribute(): first letter of nom + first letter
-     * of prenom. Only used if the API response is missing "initials"
-     * (e.g. an older cached payload) — normally the backend value is used
-     * directly so both stay perfectly in sync.
-     */
     function buildInitialsFallback(u: any): string {
         const first = (u.nom ?? '').trim().charAt(0).toUpperCase()
         const second = (u.prenom ?? '').trim().charAt(0).toUpperCase()
         const initials = `${first}${second}`
         return initials || (u.email ?? 'U').charAt(0).toUpperCase()
     }
-
-    // ── buildUser ──────────────────────────────────────────────────────────────
 
     function buildUser(u: any): AuthUser {
         return {
@@ -86,13 +68,12 @@ export const useAuthStore = defineStore('auth', () => {
             company: u.company ?? '',
             avatar: u.initials ?? buildInitialsFallback(u),
             photoUrl: u.photo_url ?? null,
+            mustChangePassword: u.must_change_password ?? false,
             color:
                 u.role === 'admin' ? '#ef4444' :
                     u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
         }
     }
-
-    // ── saveToStorage ──────────────────────────────────────────────────────────
 
     function saveToStorage(): void {
         if (!import.meta.client) return
@@ -102,8 +83,6 @@ export const useAuthStore = defineStore('auth', () => {
             savedAt: Date.now(),
         }))
     }
-
-    // ── login ──────────────────────────────────────────────────────────────────
 
     async function login(payload: { email: string; password: string }): Promise<boolean> {
         loading.value = true
@@ -127,8 +106,6 @@ export const useAuthStore = defineStore('auth', () => {
             loading.value = false
         }
     }
-
-    // ── register ───────────────────────────────────────────────────────────────
 
     async function register(payload: {
         nom: string; prenom?: string; email: string
@@ -163,8 +140,6 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // ── logout ─────────────────────────────────────────────────────────────────
-
     function logout(): void {
         user.value = null
         token.value = ''
@@ -174,8 +149,6 @@ export const useAuthStore = defineStore('auth', () => {
             localStorage.removeItem(getStorageKey())
         }
     }
-
-    // ── restoreSession ─────────────────────────────────────────────────────────
 
     function restoreSession(): void {
         if (!import.meta.client) return
@@ -196,22 +169,27 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    // ── setPhoto ───────────────────────────────────────────────────────────────
-
-    /**
-     * Updates just the photo on the currently logged-in user, then
-     * persists it — used after a successful upload/delete so the sidebar
-     * and topbar avatars refresh instantly without a full re-login.
-     */
     function setPhoto(photoUrl: string | null): void {
         if (!user.value) return
         user.value = { ...user.value, photoUrl }
         saveToStorage()
     }
 
+    /**
+     * Called right after a successful password change so the "change
+     * your password?" prompt never shows again for this account until
+     * a future reset sets must_change_password back to true server-side.
+     */
+    function clearMustChangePassword(): void {
+        if (!user.value) return
+        user.value = { ...user.value, mustChangePassword: false }
+        saveToStorage()
+    }
+
     return {
         user, token, loading, error, isPendingApproval,
         isAuthenticated, isAdmin, isDomiciliataire, isClient, isInternal,
-        login, register, logout, restoreSession, saveToStorage, setPhoto,
+        login, register, logout, restoreSession, saveToStorage,
+        setPhoto, clearMustChangePassword,
     }
 })

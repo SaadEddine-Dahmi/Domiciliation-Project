@@ -283,29 +283,51 @@ onBeforeUnmount(() => {
       </button>
     </div>
 
-    <div class="flex flex-col sm:flex-row gap-3">
-      <div class="relative group w-full sm:w-64 focus-within:sm:w-125 transition-all duration-500 ease-in-out">
-        <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400 group-focus-within:text-amber-300 transition-colors"
-             width="15" height="15" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <circle cx="11" cy="11" r="8"/>
-          <path d="M21 21l-4.35-4.35"/>
-        </svg>
-        <input
-          v-model="search" type="text" autocomplete="off"
-          placeholder="Rechercher un document..."
-          class="w-full h-11 rounded-xl pl-9 pr-3 bg-slate-900/70 text-slate-100!
-                 border border-slate-700/70 outline-none transition-all duration-500 ease-in-out
-                 group-focus-within:border-amber-400/60 group-focus-within:ring-2
-                 group-focus-within:ring-amber-400/20
-                 group-focus-within:shadow-[0_0_0_3px_rgba(251,191,36,0.08)]"
-        />
-      </div>
-      <select v-model="filterClient" class="f-input sm:w-64 text-(--app-text) bg-(--app-surface-2) border border-(--app-border-2)">
-        <option value="">Tous les clients</option>
-        <option v-for="c in clients" :key="c.id" :value="c.id">{{ c.raison_sociale }}</option>
-      </select>
+    <div class="card p-4 rounded-xl border border-[var(--app-border,#212936)] bg-[var(--app-card-bg,#131822)] space-y-3">
+  <!-- Controls Row -->
+  <div class="flex flex-wrap items-center gap-3">
+    
+    <!-- Search Input -->
+    <div class="relative flex-1 min-w-[220px]">
+      <svg 
+        class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+        width="15" height="15" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        style="color: var(--app-text-faint, #8A94A6)"
+      >
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input
+        v-model="search"
+        type="text"
+        autocomplete="off"
+        class="w-full pl-9 pr-3 py-2 bg-[var(--app-bg,#0B0E14)] border border-[var(--app-border,#212936)] rounded-lg text-sm text-[var(--app-text,#FFF)] placeholder:text-[var(--app-text-faint,#8A94A6)] focus:outline-none focus:border-[#E5C158] transition"
+        placeholder="Rechercher un document..."
+      />
     </div>
+
+    <!-- Client Filter Dropdown (Right-Aligned) -->
+    <div class="relative sm:w-64 ml-auto">
+      <select 
+        v-model="filterClient" 
+        class="w-full appearance-none bg-[var(--app-bg,#0B0E14)] border border-[var(--app-border,#212936)] rounded-lg pl-3 pr-8 py-2 text-xs text-[var(--app-text-faint,#8A94A6)] focus:outline-none focus:border-[#E5C158] cursor-pointer"
+      >
+        <option value="">Tous les clients</option>
+        <option v-for="c in clients" :key="c.id" :value="c.id">
+          {{ c.raison_sociale }}
+        </option>
+      </select>
+      <svg 
+        class="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-[var(--app-text-faint,#8A94A6)]" 
+        width="10" height="6" viewBox="0 0 10 6" fill="none"
+      >
+        <path d="M1 1L5 5L9 1" stroke="currentColor" stroke-width="1.5"/>
+      </svg>
+    </div>
+
+  </div>
+</div>
 
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 4" :key="i" class="card p-4 animate-pulse">

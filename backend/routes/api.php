@@ -70,6 +70,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     // ── Auth ─────────────────────────────────────────────────────────────
     Route::get('/auth/me', [AuthController::class, 'me']);
     Route::post('/auth/logout', [AuthController::class, 'logout']);
+    Route::patch('/clients/{id}/reset-password', [ClientController::class, 'resetPassword']);
+    Route::put('/account/password', [AuthController::class, 'changePassword']);
 
     // ── Dashboard and profile ───────────────────────────────────────────
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
@@ -86,7 +88,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/admin/users/{id}/reject', [ActivationController::class, 'reject']);
 
     Route::get('/profile/representant', [DomiciliataireRepresentantController::class, 'show']);
-Route::put('/profile/representant', [DomiciliataireRepresentantController::class, 'update']);
+    Route::put('/profile/representant', [DomiciliataireRepresentantController::class, 'update']);
 
     // ── Entreprises and nested representant (1-to-1) ────────────────────
     Route::apiResource('entreprises', EntrepriseController::class);

@@ -9,13 +9,6 @@ use Illuminate\Notifications\Notifiable;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\HasApiTokens;
 
-/**
- * Pure authentication + account identity. Deliberately holds nothing
- * that belongs to a legal role:
- *   - Company data (nom_societe, RC, IF, TP, adresses) → DomiciliataireProfile
- *   - Legal representative identity (CIN, DOB, nationality, address)
- *     → Representant, via the polymorphic HasRepresentant trait below.
- */
 class User extends Authenticatable
 {
     use HasApiTokens, HasFactory, Notifiable, HasRepresentant;
@@ -33,8 +26,12 @@ class User extends Authenticatable
         'approved_at',
         'rejection_reason',
         'notification_preferences',
-        'email_alerts_enabled',
         'photo_path',
+        // True when the current password was system-generated (new
+        // client account, or a domiciliataire-triggered reset) and the
+        // owner has not yet chosen their own. See ClientController and
+        // AuthController::changePassword().
+        'must_change_password',
     ];
 
     protected $hidden = ['password', 'remember_token'];
@@ -42,25 +39,17 @@ class User extends Authenticatable
     protected $casts = [
         'activation_date' => 'date',
         'approved_at' => 'datetime',
-        'email_alerts_enabled' => 'boolean',
+        'must_change_password' => 'boolean',
     ];
 
     protected $appends = ['photo_url', 'initials'];
 
     // ── Relations ──────────────────────────────────────────
 
-    /**
-     * Company-level profile of the domiciliation centre. One-to-one,
-     * may be null until the domiciliataire completes it for the first
-     * time. Holds ONLY company data — never representative identity.
-     */
     public function profile()
     {
         return $this->hasOne(DomiciliataireProfile::class, 'user_id');
     }
-
-    // representant() is provided by HasRepresentant:
-    //   morphOne(Representant::class, 'representable')
 
     public function entreprises()
     {
@@ -97,6 +86,24 @@ class User extends Authenticatable
         return $this->belongsTo(User::class, 'approved_by');
     }
 
+    // ── Accessors ──────────────────────────────────────────
+
+    public function getPhotoUrlAttribute(): ?string
+    {
+        if (!$this->photo_path || !Storage::disk('public')->exists($this->photo_path)) {
+            return null;
+        }
+        return url('/api/profile/photo/' . $this->id);
+    }
+
+    public function getInitialsAttribute(): string
+    {
+        $first = mb_strtoupper(mb_substr(trim((string) $this->nom), 0, 1));
+        $second = mb_strtoupper(mb_substr(trim((string) $this->prenom), 0, 1));
+        $initials = $first . $second;
+        return $initials !== '' ? $initials : mb_strtoupper(mb_substr((string) $this->email, 0, 1));
+    }
+
     // ── Helpers ────────────────────────────────────────────
 
     public function isActive(): bool
@@ -104,11 +111,9 @@ class User extends Authenticatable
         if ($this->status !== 'active') {
             return false;
         }
-
         if ($this->activation_date && $this->activation_date->isFuture()) {
             return false;
         }
-
         return true;
     }
 
@@ -116,63 +121,24 @@ class User extends Authenticatable
     {
         return $this->role === 'admin';
     }
-
     public function isDomiciliataire(): bool
     {
         return $this->role === 'domiciliataire';
     }
-
     public function isClient(): bool
     {
         return $this->role === 'client';
     }
 
-    /**
-     * Profile completion check — requires both the company profile
-     * (nom_societe, at least one adresse) AND a fully identified legal
-     * representative (nom + cin on the polymorphic Representant record).
-     *
-     * FIX: previously read $profile->representant_legal, a column that
-     * has been dropped from domiciliataire_profiles. Representative
-     * identity now lives exclusively on the polymorphic Representant
-     * relation, exactly the way it works for a client Entreprise.
-     */
     public function hasCompleteProfile(): bool
     {
         $profile = $this->profile;
-        $rep = $this->representant;
 
         return $profile
             && !empty($profile->nom_societe)
             && !empty($profile->adresses)
             && count($profile->adresses) > 0
-            && $rep
-            && !empty($rep->nom)
-            && !empty($rep->cin);
-    }
-
-    // ── Photo / initials ─────────────────────────────────────
-
-    public function getPhotoUrlAttribute(): ?string
-    {
-        if (!$this->photo_path) {
-            return null;
-        }
-
-        $host = (app()->bound('request') && request())
-            ? rtrim(request()->getSchemeAndHttpHost(), '/')
-            : rtrim((string) config('app.url'), '/');
-
-        return "{$host}/api/users/{$this->id}/photo";
-    }
-
-    public function getInitialsAttribute(): string
-    {
-        $first = mb_strtoupper(mb_substr(trim((string) $this->nom), 0, 1));
-        $second = mb_strtoupper(mb_substr(trim((string) $this->prenom), 0, 1));
-
-        $initials = $first . $second;
-
-        return $initials !== '' ? $initials : mb_strtoupper(mb_substr($this->email, 0, 1));
+            && $this->representant?->nom
+            && $this->representant?->cin;
     }
 }

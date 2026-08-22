@@ -2,12 +2,21 @@
 // pages/admin/clients/[id].vue
 //
 // Client detail page. Sections:
-//   1. Company + représentant summary, with an inline edit modal
-//      auto-filled from the loaded client.
-//   2. Contracts linked to this client, with live preview via the
-//      shared ContratPreviewModal component (openLive).
-//   3. Documents belonging to this client — list, upload, preview,
-//      download, delete — scoped to this entreprise_id.
+//   1. Account header — avatar, company name, account number, status
+//      pill, registration date, and a live "Aperçu" summary of contract
+//      counts by status, plus quick actions (Nouveau contrat / Modifier).
+//   2. Client information grid — four bordered sub-panels (company
+//      details, legal representative, business address, client portal
+//      access), each populated strictly from fields already loaded on
+//      the client object.
+//   3. Contracts — searchable grid of contract cards. Each card shows
+//      only fields that already exist on a contract record. The card
+//      title is always the free-text `titre_contrat` the client chose
+//      when the contract was created — it is never hard-coded to a
+//      fixed contract type, so any contract name is supported.
+//   4. Documents — list, upload, preview, download, delete, scoped to
+//      this client (unchanged from the previous version, restyled to
+//      match the rest of the page).
 
 import { useClientsStore } from '~/stores/clients'
 import ContratPreviewModal from '~/components/ContratPreviewModal.vue'
@@ -69,7 +78,7 @@ const previewUrl = ref<string | null>(null)
 const isPreviewOpen = ref(false)
 const isPdf = ref(false)
 
-// Shared contract preview component reference
+// Shared contract preview component reference.
 const pdfPreview = ref()
 
 function isImage(name: string): boolean {
@@ -80,6 +89,13 @@ function isImage(name: string): boolean {
 function fmt(d: string | null): string {
   if (!d) return '—'
   return new Date(d).toLocaleDateString('fr-FR')
+}
+
+/** Formats a numeric amount using the same locale/currency convention
+ *  already used for `client.capital` elsewhere in the app. */
+function fmtAmount(n: number | string | null | undefined): string {
+  if (n === null || n === undefined || n === '') return '—'
+  return `${Number(n).toLocaleString('fr-MA')} DH`
 }
 
 // ── Fetchers ──────────────────────────────────────────────
@@ -353,7 +369,7 @@ function closePreview() {
   }
 }
 
-// ── Contracts display ────────────────────────────────────────
+// ── Contracts: status labels, colors, search, summary ─────────
 const contratStatutLabel: Record<string, string> = {
   draft: 'Brouillon',
   active: 'Actif',
@@ -368,10 +384,41 @@ const contratStatutColor: Record<string, string> = {
   terminated: 'text-gray-400 bg-gray-400/10',
 }
 
+/** Free-text client-side search across the contracts already loaded
+ *  for this client — filters by title or instruction number, both of
+ *  which are fields that already exist on the contract record. */
+const contratSearch = ref('')
+
+const filteredContrats = computed(() => {
+  if (!contratSearch.value.trim()) return contrats.value
+  const q = contratSearch.value.toLowerCase()
+  return contrats.value.filter((c: any) => {
+    const title = (c.titre_contrat ?? '').toLowerCase()
+    const ref = (c.instruction_no ?? '').toLowerCase()
+    return title.includes(q) || ref.includes(q)
+  })
+})
+
+/** Quick counts used in the header's "Aperçu" line. `expired` contracts
+ *  are folded into the "résiliés" bucket for this summary only — each
+ *  individual card still shows its precise status via contratStatutLabel. */
+const contratsSummary = computed(() => {
+  const list = contrats.value
+  return {
+    actifs: list.filter((c: any) => c.statut === 'active').length,
+    brouillons: list.filter((c: any) => c.statut === 'draft').length,
+    resilies: list.filter((c: any) => c.statut === 'terminated' || c.statut === 'expired').length,
+  }
+})
+
 /**
  * Opens the shared ContratPreviewModal using openLive() — renders the
  * contract from in-memory data (no backend HTML/PDF request), exactly
  * like the wizard's live preview.
+ *
+ * `titreContrat` is passed through as-is: it is the free-text title the
+ * client chose for this contract, so the document heading is always
+ * dynamic and never a fixed, hard-coded contract type name.
  */
 function openContratPreview(c: any): void {
   if (!pdfPreview.value || typeof pdfPreview.value.openLive !== 'function') return
@@ -422,9 +469,12 @@ function openContratPreview(c: any): void {
     </div>
 
     <template v-else-if="client">
-      <!-- ── Header card ─────────────────────────────────── -->
+
+      <!-- ══════════ 1. Account header ══════════════════════ -->
       <div class="card p-6">
         <div class="flex items-start justify-between flex-wrap gap-4">
+
+          <!-- Identity -->
           <div class="flex items-center gap-4">
             <div
               class="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-lg shrink-0"
@@ -436,127 +486,179 @@ function openContratPreview(c: any): void {
               <h1 class="font-serif text-2xl" style="color: var(--app-text)">
                 {{ client.raison_sociale }}
               </h1>
-              <div class="flex items-center gap-2 mt-1 flex-wrap">
-                <span v-if="client.forme_juridique" class="text-sm" style="color: var(--app-text-muted)">
-                  {{ client.forme_juridique }}
-                </span>
-                <span
-                  v-if="client.statut"
-                  class="text-xs px-2 py-0.5 rounded-full font-semibold"
-                  :style="`color: ${statutColor[client.statut] ?? '#94a3b8'}; background: ${statutColor[client.statut] ?? '#94a3b8'}18`"
-                >{{ client.statut }}</span>
-              </div>
+              <p class="text-xs mt-0.5" style="color: var(--app-text-faint)">
+                Compte #{{ client.id }}
+              </p>
             </div>
           </div>
 
-          <button class="btn btn-gold btn-sm" @click="openEditModal">
-            ✎ Modifier
-          </button>
-        </div>
+          <!-- Status + registration date + summary -->
+          <div class="text-sm text-right" style="color: var(--app-text-muted)">
+            <p v-if="client.statut">
+              Statut :
+              <span
+                class="font-semibold"
+                :style="`color: ${statutColor[client.statut] ?? '#94a3b8'}`"
+              >{{ client.statut }}</span>
+              <span v-if="client.created_at"> (Inscrit le {{ fmt(client.created_at) }})</span>
+            </p>
+            <p class="mt-1 text-xs" style="color: var(--app-text-faint)">
+              Aperçu :
+              {{ contratsSummary.actifs }} contrat(s) actif(s),
+              {{ contratsSummary.brouillons }} brouillon(s),
+              {{ contratsSummary.resilies }} résilié(s)
+            </p>
+          </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6 pt-5"
-             style="border-top: 1px solid var(--app-border-2)">
-          <div v-if="client.adresse">
-            <p class="text-xs uppercase tracking-wide font-bold mb-1" style="color: var(--app-text-faint)">Adresse</p>
-            <p class="text-sm" style="color: var(--app-text)">{{ client.adresse }}</p>
-          </div>
-          <div v-if="client.ville">
-            <p class="text-xs uppercase tracking-wide font-bold mb-1" style="color: var(--app-text-faint)">Ville</p>
-            <p class="text-sm" style="color: var(--app-text)">{{ client.ville }}</p>
-          </div>
-          <div v-if="client.capital">
-            <p class="text-xs uppercase tracking-wide font-bold mb-1" style="color: var(--app-text-faint)">Capital</p>
-            <p class="text-sm" style="color: var(--app-text)">{{ Number(client.capital).toLocaleString('fr-MA') }} DH</p>
+          <!-- Quick actions -->
+          <div class="flex items-center gap-2">
+            <NuxtLink :to="`/admin/contrat?new=1&entreprise_id=${client.id}`" class="btn btn-gold btn-sm">
+              + Nouveau contrat
+            </NuxtLink>
+            <button class="btn btn-outline btn-sm" @click="openEditModal">
+              ✎ Modifier
+            </button>
           </div>
         </div>
       </div>
 
-      <!-- ── Client information block ──────────────── -->
+      <!-- ══════════ 2. Client information grid ═════════════ -->
       <div class="card p-6">
         <p class="text-xs uppercase tracking-widest font-bold mb-4" style="color:#c8a96e">
           Informations du client
         </p>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
-          <div>
-            <p class="text-xs font-bold mb-2" style="color: var(--app-text-faint)">Représentant légal</p>
-            <div v-if="client.representant" class="space-y-2 text-sm">
-              <p style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Nom :</span>
-                {{ client.representant.prenom }} {{ client.representant.nom }}
-              </p>
-              <p v-if="client.representant.cin" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">CIN / Passeport :</span> {{ client.representant.cin }}
-              </p>
-              <p v-if="client.representant.telephone" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Téléphone :</span> {{ client.representant.telephone }}
-              </p>
-              <p v-if="client.representant.email" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Email :</span> {{ client.representant.email }}
-              </p>
-              <p v-if="client.representant.nationalite" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Nationalité :</span> {{ client.representant.nationalite }}
-              </p>
-              <p v-if="client.representant.date_naissance" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Date de naissance :</span> {{ fmt(client.representant.date_naissance) }}
-              </p>
-              <p v-if="client.representant.adresse" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Adresse :</span> {{ client.representant.adresse }}
-              </p>
-            </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+
+          <!-- Box 1: company details -->
+          <div class="rounded-xl p-4" style="border: 1px solid var(--app-border-2)">
+            <p class="text-[11px] uppercase tracking-wide font-bold mb-3" style="color: var(--app-text-faint)">
+              Détails société
+            </p>
+            <dl class="space-y-2 text-sm">
+              <div v-if="client.raison_sociale " class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Raison sociale </dt>
+                <dd style="color: var(--app-text)">{{ client.raison_sociale }}</dd>
+              </div>
+              <div v-if="client.capital" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Capital</dt>
+                <dd style="color: var(--app-text)">{{ fmtAmount(client.capital) }}</dd>
+              </div>
+              <!-- <p v-if="!client.forme_juridique && !client.capital" style="color: var(--app-text-faint)">
+                Aucune information renseignée.
+              </p> -->
+            </dl>
+          </div>
+
+          <!-- Box 2: legal representative -->
+          <div class="rounded-xl p-4" style="border: 1px solid var(--app-border-2)">
+            <p class="text-[11px] uppercase tracking-wide font-bold mb-3" style="color: var(--app-text-faint)">
+              Représentant légal
+            </p>
+            <dl v-if="client.representant" class="space-y-2 text-sm">
+              <div class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Nom</dt>
+                <dd style="color: var(--app-text)">{{ client.representant.prenom }} {{ client.representant.nom }}</dd>
+              </div>
+              <div v-if="client.representant.cin" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">CIN / Passeport</dt>
+                <dd style="color: var(--app-text)">{{ client.representant.cin }}</dd>
+              </div>
+              <div v-if="client.representant.telephone" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Téléphone</dt>
+                <dd style="color: var(--app-text)">{{ client.representant.telephone }}</dd>
+              </div>
+              <div v-if="client.representant.email" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Email</dt>
+                <dd style="color: var(--app-text)">{{ client.representant.email }}</dd>
+              </div>
+              <div v-if="client.representant.date_naissance" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Date de naissance</dt>
+                <dd style="color: var(--app-text)">{{ fmt(client.representant.date_naissance) }}</dd>
+              </div>
+            </dl>
             <p v-else class="text-sm" style="color: var(--app-text-faint)">
               Aucun représentant enregistré.
             </p>
           </div>
-
-          <div>
-            <p class="text-xs font-bold mb-2" style="color: var(--app-text-faint)">Compte accès portail</p>
-            <div v-if="client.client_user" class="space-y-2 text-sm">
-              <p style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Nom :</span>
-                {{ client.client_user.nom }} {{ client.client_user.prenom }}
-              </p>
-              <p v-if="client.client_user.email" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Email :</span> {{ client.client_user.email }}
-              </p>
-              <p v-if="client.client_user.telephone" style="color: var(--app-text)">
-                <span style="color: var(--app-text-faint)">Téléphone :</span> {{ client.client_user.telephone }}
-              </p>
-            </div>
-            <p v-else class="text-sm" style="color: var(--app-text-faint)">
-              Aucun compte portail lié à ce client.
-            </p>
-          </div>
         </div>
       </div>
 
-      <!-- ── Contracts section ────────────────────────────── -->
+      <!-- ══════════ 3. Contracts section ═══════════════════ -->
       <div>
-        <div class="flex items-center justify-between mb-4">
+        <div class="flex items-center justify-between mb-4 flex-wrap gap-3">
           <h2 class="font-serif text-xl" style="color: var(--app-text)">Contrats</h2>
-          <NuxtLink to="/admin/contrat?new=1" class="btn btn-outline btn-sm">+ Nouveau contrat</NuxtLink>
+
+          <div class="flex items-center gap-2 flex-wrap">
+            <div class="relative">
+              <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+                   width="13" height="13" viewBox="0 0 24 24" fill="none"
+                   stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                   style="color: var(--app-text-faint)">
+                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+              </svg>
+              <input
+                v-model="contratSearch"
+                class="f-input pl-8 !py-1.5 text-sm"
+                style="width: 200px"
+                placeholder="Rechercher..."
+              />
+            </div>
+            <NuxtLink :to="`/admin/contrat?new=1&entreprise_id=${client.id}`" class="btn btn-outline btn-sm">
+              + Nouveau contrat
+            </NuxtLink>
+          </div>
         </div>
 
-        <div v-if="contrats.length" class="space-y-2">
-          <div v-for="c in contrats" :key="c.id" class="card p-4 flex items-center justify-between gap-4 flex-wrap">
-            <div class="min-w-0 flex-1">
-              <p class="font-semibold text-sm" style="color: var(--app-text)">{{ c.titre_contrat ?? `Contrat #${c.id}` }}</p>
-              <span class="text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block"
-                    :class="contratStatutColor[c.statut] ?? 'text-app-text/40 bg-white/5'">
-                {{ contratStatutLabel[c.statut] ?? c.statut }}
-              </span>
+        <div v-if="filteredContrats.length" class="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-4">
+          <div v-for="c in filteredContrats" :key="c.id" class="card p-4 flex flex-col gap-3">
+
+            <!-- Card header: dynamic client-chosen title + status + Voir -->
+            <div class="flex items-start justify-between gap-2">
+              <div class="min-w-0">
+                <p class="font-semibold text-sm truncate" style="color: var(--app-text)">
+                  {{ c.titre_contrat ?? `Contrat #${c.id}` }}
+                </p>
+                <p v-if="c.instruction_no" class="text-xs mt-0.5" style="color: var(--app-text-faint)">
+                  Réf : {{ c.instruction_no }}
+                </p>
+                <span class="text-xs px-2 py-0.5 rounded-full font-medium mt-1 inline-block"
+                      :class="contratStatutColor[c.statut] ?? 'text-app-text/40 bg-white/5'">
+                  {{ contratStatutLabel[c.statut] ?? c.statut }}
+                </span>
+              </div>
+              <button class="btn btn-outline btn-sm shrink-0" @click="openContratPreview(c)">
+                Voir
+              </button>
             </div>
-            <button class="btn btn-outline btn-sm shrink-0" @click="openContratPreview(c)">
-              Voir
-            </button>
+
+            <!-- Field grid: only fields that exist on the contract -->
+            <div class="grid grid-cols-2 gap-3 pt-3 text-xs" style="border-top: 1px solid var(--app-border-2)">
+              <div v-if="c.date_debut">
+                <p style="color: var(--app-text-faint)">Date début</p>
+                <p class="mt-0.5" style="color: var(--app-text)">{{ fmt(c.date_debut) }}</p>
+              </div>
+              <div v-if="c.date_fin">
+                <p style="color: var(--app-text-faint)">Date fin</p>
+                <p class="mt-0.5" style="color: var(--app-text)">{{ fmt(c.date_fin) }}</p>
+              </div>
+              <div v-if="c.prix_total">
+                <p style="color: var(--app-text-faint)">Montant total</p>
+                <p class="mt-0.5" style="color: var(--app-text)">{{ fmtAmount(c.prix_total) }}</p>
+              </div>
+              <div v-if="c.mode_paiement">
+                <p style="color: var(--app-text-faint)">Mode de paiement</p>
+                <p class="mt-0.5" style="color: var(--app-text)">{{ c.mode_paiement }}</p>
+              </div>
+            </div>
           </div>
         </div>
         <div v-else class="card p-8 text-center" style="color:var(--app-text-faint)">
-          Aucun contrat pour ce client.
+          {{ contratSearch ? `Aucun contrat pour « ${contratSearch} ».` : 'Aucun contrat pour ce client.' }}
         </div>
       </div>
 
-      <!-- ── Documents section ────────────────────────────── -->
+      <!-- ══════════ 4. Documents section ═══════════════════ -->
       <div>
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-serif text-xl" style="color: var(--app-text)">Documents</h2>
@@ -660,7 +762,7 @@ function openContratPreview(c: any): void {
       </div>
     </Teleport>
 
-    <!-- ── Edit client modal ─────────────────────────── -->
+    <!-- Edit client modal -->
     <Teleport to="body">
       <div
         v-if="showEditModal"

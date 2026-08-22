@@ -31,29 +31,35 @@ interface Address {
 const loading = ref(true)
 const saving  = ref(false)
 
+// ── Company-level fields — saved via PUT /api/profile ──────────────
 const form = reactive({
-  nom:                     '',
-  prenom:                  '',
-  telephone:               '',
-  nom_societe:             '',
-  representant_legal:      '',
-  identite_representant:   '',
+  nom: '',
+  prenom: '',
+  telephone: '',
+  nom_societe: '',
+  rc: '',
+  if_fiscal: '',
+  tp: '',
+})
 
-  // FIX: these two fields exist on the backend (domiciliataire_profiles
-  // .representant_email / .representant_telephone) but were missing from
-  // this form entirely — so they were never populated on load and never
-  // sent on save, even if a matching input existed somewhere in the DOM.
-  representant_email:      '',
-  representant_telephone:  '',
-
-  rc:                      '',
-  if_fiscal:               '',
-  tp:                      '',
+// ── Representative fields — saved via PUT /api/profile/representant ─
+// This is now a SEPARATE record (polymorphic Representant), not columns
+// on domiciliataire_profiles. Kept in its own reactive object so the two
+// save calls never accidentally mix payloads.
+const repForm = reactive({
+  nom: '',
+  prenom: '',
+  cin: '',
+  nationalite: '',
+  date_naissance: '',
+  adresse: '',
+  telephone: '',
+  email: '',
 })
 
 const adresses = ref<Address[]>([])
 
-function addAddress(): void    { adresses.value.push({ label: '', value: '' }) }
+function addAddress(): void { adresses.value.push({ label: '', value: '' }) }
 function removeAddress(i: number): void { adresses.value.splice(i, 1) }
 
 function moveUp(i: number): void {
@@ -76,24 +82,31 @@ async function fetchProfile(): Promise<void> {
       { headers: authHeaders() }
     )
     const d = res.data
+
     Object.assign(form, {
-      nom:                    d.nom                    ?? '',
-      prenom:                 d.prenom                 ?? '',
-      telephone:              d.telephone               ?? '',
-      nom_societe:            d.nom_societe             ?? '',
-      representant_legal:     d.representant_legal      ?? '',
-      identite_representant:  d.identite_representant   ?? '',
-
-      // FIX: previously missing — the API already returns these two keys
-      // (see DomiciliataireProfileController::show()), they just weren't
-      // being read into the form.
-      representant_email:     d.representant_email      ?? '',
-      representant_telephone: d.representant_telephone  ?? '',
-
-      rc:                     d.rc                      ?? '',
-      if_fiscal:              d.if_fiscal                ?? '',
-      tp:                     d.tp                       ?? '',
+      nom: d.nom ?? '',
+      prenom: d.prenom ?? '',
+      telephone: d.telephone ?? '',
+      nom_societe: d.nom_societe ?? '',
+      rc: d.rc ?? '',
+      if_fiscal: d.if_fiscal ?? '',
+      tp: d.tp ?? '',
     })
+
+    // The representative now arrives nested — d.representant is either
+    // the polymorphic Representant record or null if never saved.
+    const rep = d.representant ?? {}
+    Object.assign(repForm, {
+      nom: rep.nom ?? '',
+      prenom: rep.prenom ?? '',
+      cin: rep.cin ?? '',
+      nationalite: rep.nationalite ?? '',
+      date_naissance: rep.date_naissance ?? '',
+      adresse: rep.adresse ?? '',
+      telephone: rep.telephone ?? '',
+      email: rep.email ?? '',
+    })
+
     adresses.value = Array.isArray(d.adresses)
       ? d.adresses.map((a: any) => ({ label: a.label ?? '', value: a.value ?? '' }))
       : []
@@ -108,12 +121,28 @@ async function saveProfile(): Promise<void> {
   const validAdresses = adresses.value.filter(a => a.label.trim() !== '' && a.value.trim() !== '')
   saving.value = true
   try {
-    await $fetch(`${getApiBase()}/api/profile`, {
-      method: 'PUT', headers: authHeaders(),
-      body: { ...form, adresses: validAdresses },
-    })
+    // Two independent writes — company profile and legal representative
+    // live in two different tables since the polymorphic Representant
+    // refactor. Both run in parallel; either can fail without corrupting
+    // the other's data.
+    await Promise.all([
+      $fetch(`${getApiBase()}/api/profile`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: { ...form, adresses: validAdresses },
+      }),
+      $fetch(`${getApiBase()}/api/profile/representant`, {
+        method: 'PUT',
+        headers: authHeaders(),
+        body: repForm,
+      }),
+    ])
+
     adresses.value = validAdresses
     success('Profil enregistré avec succès ✓')
+    // Re-fetch so hasCompleteProfile() reflects the freshly saved state
+    // immediately, without waiting for a manual page refresh.
+    await fetchProfile()
   } catch (e: any) {
     const msg = e?.data?.errors
       ? Object.values(e.data.errors).flat().join(' · ')
@@ -124,13 +153,16 @@ async function saveProfile(): Promise<void> {
   }
 }
 
+// FIX: checklist now reads repForm.nom / repForm.cin (the polymorphic
+// Representant fields) instead of the removed form.representant_legal /
+// form.identite_representant — those no longer exist anywhere in the API.
 const requiredFields = computed(() => [
-  { label: 'Nom de la société',     filled: !!form.nom_societe },
-  { label: 'Représentant légal',    filled: !!form.representant_legal },
-  { label: 'Identité représentant', filled: !!form.identite_representant },
-  { label: 'RC',                    filled: !!form.rc },
-  { label: 'IF',                    filled: !!form.if_fiscal },
-  { label: 'Au moins une adresse',  filled: adresses.value.length > 0 },
+  { label: 'Nom de la société',    filled: !!form.nom_societe },
+  { label: 'Représentant légal',   filled: !!repForm.nom },
+  { label: 'Identité représentant', filled: !!repForm.cin },
+  { label: 'RC',                   filled: !!form.rc },
+  { label: 'IF',                   filled: !!form.if_fiscal },
+  { label: 'Au moins une adresse', filled: adresses.value.length > 0 },
 ])
 
 const completionPct = computed(() => {
@@ -140,7 +172,7 @@ const completionPct = computed(() => {
 
 const completionColor = computed(() => {
   if (completionPct.value === 100) return '#22c55e'
-  if (completionPct.value >= 60)  return '#c8a96e'
+  if (completionPct.value >= 60) return '#c8a96e'
   return '#ef4444'
 })
 
@@ -149,7 +181,7 @@ onMounted(fetchProfile)
 
 <template>
   <div class="space-y-6 animate-fade-up max-w-3xl">
-<ProfilePhotoUpload />
+    <ProfilePhotoUpload />
     <div class="flex items-start justify-between flex-wrap gap-4">
       <div>
         <h1 class="font-serif text-2xl" style="color:var(--app-text)">
@@ -223,30 +255,6 @@ onMounted(fetchProfile)
             <input v-model="form.nom_societe" class="f-input" placeholder="Nom de votre société" />
           </div>
           <div>
-            <label class="f-label">Représentant légal *</label>
-            <input v-model="form.representant_legal" class="f-input" placeholder="Nom complet du gérant" />
-          </div>
-          <div>
-            <label class="f-label">Identité du représentant (CIN / Passeport) *</label>
-            <input v-model="form.identite_representant" class="f-input" placeholder="BJ422176" />
-          </div>
-
-          <!-- FIX: previously missing inputs — representant_email and
-               representant_telephone now bound to the form and sent/loaded
-               correctly with the rest of the profile payload. -->
-          <div>
-            <label class="f-label">
-              Email du représentant
-              <span class="ml-1 text-[10px]" style="color:var(--app-text-faint)">→ affiché dans le contrat</span>
-            </label>
-            <input v-model="form.representant_email" type="email" class="f-input" placeholder="representant@societe.ma" />
-          </div>
-          <div>
-            <label class="f-label">Téléphone du représentant</label>
-            <input v-model="form.representant_telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
-          </div>
-
-          <div>
             <label class="f-label">
               Registre du Commerce (RC)
               <span class="ml-1 text-[10px]" style="color:var(--app-text-faint)">→ rempli auto dans PDF</span>
@@ -260,6 +268,57 @@ onMounted(fetchProfile)
           <div>
             <label class="f-label">Taxe Professionnelle (TP)</label>
             <input v-model="form.tp" class="f-input" placeholder="35123456" />
+          </div>
+        </div>
+      </div>
+
+      <!-- Legal representative — now its own section, its own record -->
+      <div class="card p-6 space-y-4">
+        <div class="flex items-center gap-2 mb-1">
+          <div class="w-1 h-5 rounded-full shrink-0" style="background:#c8a96e"/>
+          <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+            Représentant légal du centre
+          </p>
+        </div>
+        <p class="text-xs" style="color:var(--app-text-faint)">
+          Personne physique qui signe les contrats au nom du centre — imprimée sur le bloc « D'une part »
+        </p>
+
+        <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div>
+            <label class="f-label">Nom *</label>
+            <input v-model="repForm.nom" class="f-input" placeholder="Nom du gérant" />
+          </div>
+          <div>
+            <label class="f-label">Prénom</label>
+            <input v-model="repForm.prenom" class="f-input" placeholder="Prénom du gérant" />
+          </div>
+          <div>
+            <label class="f-label">CIN / Passeport *</label>
+            <input v-model="repForm.cin" class="f-input" placeholder="BJ422176" />
+          </div>
+          <div>
+            <label class="f-label">Nationalité</label>
+            <input v-model="repForm.nationalite" class="f-input" placeholder="Marocaine" />
+          </div>
+          <div>
+            <label class="f-label">Date de naissance</label>
+            <input v-model="repForm.date_naissance" type="date" class="f-input" />
+          </div>
+          <div>
+            <label class="f-label">Téléphone</label>
+            <input v-model="repForm.telephone" class="f-input" placeholder="+212 6XX XXX XXX" />
+          </div>
+          <div>
+            <label class="f-label">
+              Email
+              <span class="ml-1 text-[10px]" style="color:var(--app-text-faint)">→ affiché dans le contrat</span>
+            </label>
+            <input v-model="repForm.email" type="email" class="f-input" placeholder="representant@societe.ma" />
+          </div>
+          <div class="sm:col-span-2">
+            <label class="f-label">Adresse</label>
+            <input v-model="repForm.adresse" class="f-input" placeholder="Adresse de résidence" />
           </div>
         </div>
       </div>

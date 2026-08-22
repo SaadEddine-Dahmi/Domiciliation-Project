@@ -1,21 +1,30 @@
 <?php
 // app/Http/Controllers/Api/ClientController.php
 //
-// Manages the client (Entreprise-based) resource for the domiciliataire.
+// Manages the client (Entreprise + linked User) resource for the
+// domiciliataire.
 //
-// The representative is attached separately via RepresentantController,
-// so store() only needs the entreprise fields. 'statut' is deliberately
-// excluded from store() and update() — it has its own dedicated endpoint
-// (toggleStatus) so it can never be overwritten by an unrelated profile edit.
+// Password policy for client portal accounts:
+//   - The domiciliataire NEVER types a password for a client. store()
+//     always generates one server-side via generatePassword().
+//   - The plaintext password is returned ONCE, in the store()/
+//     resetPassword() JSON response, so the domiciliataire can copy it
+//     and hand it to the client. It is never logged or stored anywhere
+//     except as a bcrypt hash on the users row — it cannot be recovered
+//     afterwards, only regenerated.
+//   - must_change_password is set to true whenever a password is
+//     system-generated. AuthController::login() returns this flag on the
+//     user object so the frontend can prompt the client to set their own
+//     password after login. It's cleared by AuthController::changePassword().
 //
 // Routes (auth:sanctum):
-//   GET    /api/clients                  → index
-//   POST   /api/clients                  → store
-//   GET    /api/clients/{id}             → show
-//   PUT    /api/clients/{id}             → update
-//   PUT    /api/clients/{id}/password    → updatePassword
-//   PATCH  /api/clients/{id}/status      → toggleStatus
-//   GET    /api/clients/{id}/history     → history
+//   GET    /api/clients                     → index
+//   POST   /api/clients                     → store
+//   GET    /api/clients/{id}                → show
+//   PUT    /api/clients/{id}                → update
+//   PATCH  /api/clients/{id}/status         → toggleStatus
+//   PATCH  /api/clients/{id}/reset-password → resetPassword
+//   GET    /api/clients/{id}/history        → history
 
 namespace App\Http\Controllers\Api;
 
@@ -23,16 +32,26 @@ use App\Http\Controllers\Controller;
 use App\Models\Entreprise;
 use App\Models\User;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 
 class ClientController extends Controller
 {
     /**
-     * GET /api/clients
-     * Returns all entreprises (clients) belonging to the authenticated
-     * domiciliataire, with representant, linked user account, and
-     * documents eager-loaded.
+     * Generates a random password for a new/reset client account.
+     * Excludes visually ambiguous characters (0/O, 1/l/I) so it can be
+     * read off a screen and typed correctly by the client.
      */
+    private function generatePassword(int $length = 10): string
+    {
+        $alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789';
+        $password = '';
+        for ($i = 0; $i < $length; $i++) {
+            $password .= $alphabet[random_int(0, strlen($alphabet) - 1)];
+        }
+        return $password;
+    }
+
     public function index()
     {
         $tenantId = auth()->id();
@@ -41,24 +60,23 @@ class ClientController extends Controller
             ->where('domiciliataire_id', $tenantId)
             ->with([
                 'representant',
-                'clientUser:id,nom,prenom,email,telephone,role',
+                'clientUser:id,nom,prenom,email,telephone,role,must_change_password',
                 'documents.documentType:id,name,is_required,has_expiration',
             ])
             ->latest()
             ->get();
 
-        return response()->json([
-            'success' => true,
-            'data' => $rows,
-        ]);
+        return response()->json(['success' => true, 'data' => $rows]);
     }
 
     /**
      * POST /api/clients
-     * Creates a new entreprise (client) for the authenticated domiciliataire.
-     * The representant is created afterwards by a separate call to
-     * RepresentantController::store(). Tenant ID is always forced from the
-     * authenticated user, never trusted from the request body.
+     *
+     * Creates the entreprise AND its linked client portal account in one
+     * transaction. A password is always generated — the domiciliataire
+     * cannot set one manually. The plaintext value is included only in
+     * this response's `generated_password` key; the frontend must show
+     * it once and never persist it client-side beyond that.
      */
     public function store(Request $request)
     {
@@ -70,48 +88,65 @@ class ClientController extends Controller
             'pays' => ['nullable', 'string', 'max:100'],
             'capital' => ['nullable', 'numeric'],
             'date_creation' => ['nullable', 'date'],
+
+            // Client portal account fields — no password accepted here.
+            'client_nom' => ['required', 'string', 'max:20'],
+            'client_prenom' => ['nullable', 'string', 'max:20'],
+            'client_email' => ['required', 'email', 'max:50', 'unique:users,email'],
+            'client_telephone' => ['nullable', 'string', 'max:13'],
         ]);
 
-        $entreprise = Entreprise::create([
-            ...$data,
-            'domiciliataire_id' => auth()->id(),
-        ]);
+        $plainPassword = $this->generatePassword();
+
+        $entreprise = DB::transaction(function () use ($data, $plainPassword) {
+            $clientUser = User::create([
+                'nom' => $data['client_nom'],
+                'prenom' => $data['client_prenom'] ?? null,
+                'email' => strtolower(trim($data['client_email'])),
+                'password' => Hash::make($plainPassword),
+                'telephone' => $data['client_telephone'] ?? null,
+                'role' => 'client',
+                'status' => 'active',
+                'must_change_password' => true,
+            ]);
+
+            return Entreprise::create([
+                'raison_sociale' => $data['raison_sociale'],
+                'forme_juridique' => $data['forme_juridique'] ?? null,
+                'adresse' => $data['adresse'] ?? null,
+                'ville' => $data['ville'] ?? null,
+                'pays' => $data['pays'] ?? null,
+                'date_creation' => $data['date_creation'] ?? null,
+                'capital' => $data['capital'] ?? null,
+                'domiciliataire_id' => auth()->id(),
+                'client_user_id' => $clientUser->id,
+            ]);
+        });
 
         return response()->json([
             'success' => true,
             'data' => $entreprise->fresh([
                 'representant',
-                'clientUser:id,nom,prenom,email,telephone,role',
+                'clientUser:id,nom,prenom,email,telephone,role,must_change_password',
             ]),
+            'generated_password' => $plainPassword,
         ], 201);
     }
 
-    /**
-     * GET /api/clients/{id}
-     * Returns a single entreprise by ID, tenant-scoped.
-     */
     public function show(int $id)
     {
         $row = Entreprise::query()
             ->where('domiciliataire_id', auth()->id())
             ->with([
                 'representant',
-                'clientUser:id,nom,prenom,email,telephone,role',
+                'clientUser:id,nom,prenom,email,telephone,role,must_change_password',
                 'documents.documentType:id,name,is_required,has_expiration',
             ])
             ->findOrFail($id);
 
-        return response()->json([
-            'success' => true,
-            'data' => $row,
-        ]);
+        return response()->json(['success' => true, 'data' => $row]);
     }
 
-    /**
-     * PUT /api/clients/{id}
-     * Updates entreprise fields and optionally the linked client user account.
-     * The representant is managed separately via RepresentantController.
-     */
     public function update(Request $request, int $id)
     {
         $entreprise = Entreprise::query()
@@ -172,18 +207,12 @@ class ClientController extends Controller
             'success' => true,
             'data' => $entreprise->fresh([
                 'representant',
-                'clientUser:id,nom,prenom,email,telephone,role',
+                'clientUser:id,nom,prenom,email,telephone,role,must_change_password',
                 'documents.documentType:id,name,is_required,has_expiration',
             ]),
         ]);
     }
 
-    /**
-     * PATCH /api/clients/{id}/status
-     * Toggles the client between 'actif' and 'inactif'. An 'inactif'
-     * client's linked user account is refused login by AuthController::login().
-     * This is the only place statut is written.
-     */
     public function toggleStatus(Request $request, int $id)
     {
         $entreprise = Entreprise::query()
@@ -196,17 +225,22 @@ class ClientController extends Controller
 
         $entreprise->update(['statut' => $data['statut']]);
 
-        return response()->json([
-            'success' => true,
-            'data' => $entreprise->fresh(),
-        ]);
+        return response()->json(['success' => true, 'data' => $entreprise->fresh()]);
     }
 
     /**
-     * PUT /api/clients/{id}/password
-     * Resets the password for the linked client user account.
+     * PATCH /api/clients/{id}/reset-password
+     *
+     * For a client who forgot their password. Generates a brand-new
+     * random password the same way store() does, overwrites the hash,
+     * and flips must_change_password back to true so the client is
+     * prompted to pick their own after logging in with it.
+     *
+     * The old password can never be recovered — it only ever existed as
+     * a bcrypt hash — so "reset" means "issue a new one", not "restore
+     * the original plaintext".
      */
-    public function updatePassword(Request $request, int $id)
+    public function resetPassword(int $id)
     {
         $entreprise = Entreprise::query()
             ->where('domiciliataire_id', auth()->id())
@@ -219,23 +253,21 @@ class ClientController extends Controller
             ], 422);
         }
 
-        $data = $request->validate([
-            'password' => ['required', 'string', 'min:8', 'confirmed'],
-        ]);
-
         $user = User::findOrFail($entreprise->client_user_id);
-        $user->update(['password' => Hash::make($data['password'])]);
+        $plainPassword = $this->generatePassword();
+
+        $user->update([
+            'password' => Hash::make($plainPassword),
+            'must_change_password' => true,
+        ]);
 
         return response()->json([
             'success' => true,
-            'message' => 'Mot de passe mis à jour.',
+            'message' => 'Mot de passe réinitialisé.',
+            'generated_password' => $plainPassword,
         ]);
     }
 
-    /**
-     * GET /api/clients/{id}/history
-     * Returns the full audit trail for this client, newest first.
-     */
     public function history(int $id)
     {
         $entreprise = Entreprise::query()

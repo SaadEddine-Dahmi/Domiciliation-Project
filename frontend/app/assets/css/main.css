@@ -9,23 +9,26 @@
      html.dark    → dark
 ───────────────────────────────────────────────────────────── */
 
-/* ── Light ── */
+/* ── Light (Pure Black Text) ── */
 :root {
   --app-bg: #f4f5f7;
   --app-surface: #ffffff;
   --app-surface-2: #f0f1f4;
-  --app-border: rgba(0, 0, 0, 0.08);
-  --app-border-2: rgba(0, 0, 0, 0.05);
-  --app-text: #1a1d26;
-  --app-text-muted: rgba(26, 29, 38, 0.55);
-  --app-text-faint: rgba(26, 29, 38, 0.3);
-  --gold: #c8a96e;
-  --gold-2: #b89558;
+  --app-border: rgba(0, 0, 0, 0.12);
+  --app-border-2: rgba(0, 0, 0, 0.08);
+  
+  /* Text & accent tokens set to black/dark colors */
+  --app-text: #000000;
+  --app-text-muted: #222222;
+  --app-text-faint: #444444;
+  --gold: #000000;
+  --gold-2: #1a1a1a;
+  
   --topbar-bg: rgba(244, 245, 247, 0.92);
-  --nav-active-bg: rgba(200, 169, 110, 0.13);
-  --nav-active-color: #a07840;
-  --nav-inactive-color: rgba(26, 29, 38, 0.6);
-  --nav-hover-bg: rgba(0, 0, 0, 0.04);
+  --nav-active-bg: rgba(0, 0, 0, 0.08);
+  --nav-active-color: #000000;
+  --nav-inactive-color: #333333;
+  --nav-hover-bg: rgba(0, 0, 0, 0.05);
   --shadow-card: 0 1px 3px rgba(0, 0, 0, 0.07), 0 0 0 1px rgba(0, 0, 0, 0.05);
 
   /* ── Typography tokens ──────────────────────────────────────
@@ -176,10 +179,10 @@ body {
 
 .btn-gold {
   background: linear-gradient(135deg, var(--gold), var(--gold-2));
-  color: #111;
+  color: #ffffff;
 }
 .btn-gold:hover {
-  filter: brightness(1.05);
+  filter: brightness(1.1);
   transform: translateY(-1px);
 }
 
@@ -225,8 +228,8 @@ body {
   color: var(--app-text-faint);
 }
 .f-input:focus {
-  border-color: rgba(200, 169, 110, 0.45);
-  box-shadow: 0 0 0 3px rgba(200, 169, 110, 0.12);
+  border-color: rgba(0, 0, 0, 0.45);
+  box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
 }
 
 /* ─────────────────────────────────────────────────────────────

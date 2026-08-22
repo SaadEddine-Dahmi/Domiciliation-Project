@@ -137,23 +137,69 @@ onMounted(fetchFactures)
       </div>
     </div>
 
-    <div class="flex flex-col sm:flex-row gap-3">
-      <div class="relative flex-1">
-        <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-             width="15" height="15" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2" stroke-linecap="round"
-             style="color:var(--app-text-faint)">
-          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-        </svg>
-        <input v-model="search" class="f-input pl-9" placeholder="Rechercher par N° facture, entreprise..." />
-      </div>
-      <select v-model="filterStatut" class="f-input sm:w-48">
-        <option value="">Tous les statuts</option>
-        <option value="paid">Payées</option>
-        <option value="pending">En attente</option>
-        <option value="cancelled">Annulées</option>
-      </select>
+    <div class="card p-4 rounded-xl border border-[var(--app-border,#212936)] bg-[var(--app-card-bg,#131822)] space-y-3">
+  <!-- Controls Row -->
+  <div class="flex flex-wrap items-center gap-3">
+    
+    <!-- Search Input -->
+    <div class="relative flex-1 min-w-[220px]">
+      <svg 
+        class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+        width="15" height="15" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        style="color: var(--app-text-faint, #8A94A6)"
+      >
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input
+        v-model="search"
+        type="text"
+        autocomplete="off"
+        class="w-full pl-9 pr-3 py-2 bg-[var(--app-bg,#0B0E14)] border border-[var(--app-border,#212936)] rounded-lg text-sm text-[var(--app-text,#FFF)] placeholder:text-[var(--app-text-faint,#8A94A6)] focus:outline-none focus:border-[#E5C158] transition"
+        placeholder="Rechercher par N° facture, entreprise..."
+      />
     </div>
+
+    <!-- Status Pill Filter Chips -->
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <span class="text-xs font-medium text-[var(--app-text-faint,#8A94A6)] mr-1">Statut:</span>
+      
+      <button 
+        @click="filterStatut = ''"
+        :class="filterStatut === '' ? 'bg-[#E5C158]/15 border-[#E5C158] text-[#E5C158] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#E5C158]/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        Tous
+      </button>
+
+      <button 
+        @click="filterStatut = 'paid'"
+        :class="filterStatut === 'paid' ? 'bg-[#10B981]/15 border-[#10B981] text-[#10B981] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#10B981]/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        ✓ Payées
+      </button>
+
+      <button 
+        @click="filterStatut = 'pending'"
+        :class="filterStatut === 'pending' ? 'bg-[#E5C158]/15 border-[#E5C158] text-[#E5C158] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#E5C158]/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        En attente
+      </button>
+
+      <button 
+        @click="filterStatut = 'cancelled'"
+        :class="filterStatut === 'cancelled' ? 'bg-[#EF4444]/15 border-[#EF4444] text-[#EF4444] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#EF4444]/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        Annulées
+      </button>
+    </div>
+
+  </div>
+</div>
 
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 5" :key="i" class="card p-4 animate-pulse flex items-center gap-4">

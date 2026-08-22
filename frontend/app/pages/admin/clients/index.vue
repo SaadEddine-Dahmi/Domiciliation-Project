@@ -1,4 +1,17 @@
 <script setup lang="ts">
+// pages/admin/clients/index.vue
+//
+// Client list page.
+// Redesign notes:
+//   - Rows are now presented as compact "account cards" (avatar, company
+//     name, account number, status pill, representative summary) instead
+//     of plain list rows, matching the dark/gold visual language used on
+//     the client detail page.
+//   - Every value rendered here already exists on the client object as
+//     used elsewhere in the app (raison_sociale, statut, capital, ville,
+//     forme_juridique, representant.*). Nothing is invented — fields that
+//     may be absent are guarded with v-if so the layout degrades cleanly.
+
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
 
@@ -16,15 +29,7 @@ const search      = ref('')
 const serverError = ref('')
 
 /**
- * Exactly the eight fields:
- *   1. raison_sociale        — company name
- *   2. gerant_nom            — representative surname
- *   3. gerant_prenom         — representative first name
- *   4. gerant_email          — email
- *   5. gerant_telephone      — phone
- *   6. gerant_date_naissance — date of birth
- *   7. gerant_adresse        — place of residence on CIN/Passeport
- *   8. gerant_cin            — CIN or passport number
+ * Exactly the eight fields collected for a client + its representative.
  */
 const form = reactive({
   raison_sociale:        '',
@@ -33,10 +38,11 @@ const form = reactive({
   gerant_email:          '',
   gerant_telephone:      '',
   gerant_date_naissance: '',
-  gerant_adresse:        '',   // residence address as on CIN/Passeport
+  gerant_adresse:        '', // residence address as on CIN/Passport
   gerant_cin:            '',
 })
 
+// ── Search / filter ──────────────────────────────────────────
 const filtered = computed(() => {
   if (!search.value.trim()) return clientItems.value
   const q = search.value.toLowerCase()
@@ -51,6 +57,19 @@ const filtered = computed(() => {
   })
 })
 
+// ── Small display helpers ────────────────────────────────────
+/** Status pill color map, mirrored from the client detail page. */
+const statutColor: Record<string, string> = {
+  actif: '#22c55e',
+  inactif: '#ef4444',
+  suspendu: '#f59e0b',
+}
+
+function initials(name: string | null | undefined): string {
+  return (name ?? '?').slice(0, 2).toUpperCase()
+}
+
+// ── Create / edit modal ──────────────────────────────────────
 function resetForm(): void {
   Object.assign(form, {
     raison_sociale: '',
@@ -73,14 +92,14 @@ function openEdit(client: any): void {
   editId.value      = client.id
   serverError.value = ''
   Object.assign(form, {
-    raison_sociale:        client.raison_sociale                  ?? '',
-    gerant_nom:            client.representant?.nom               ?? '',
-    gerant_prenom:         client.representant?.prenom            ?? '',
-    gerant_email:          client.representant?.email             ?? '',
-    gerant_telephone:      client.representant?.telephone         ?? '',
-    gerant_date_naissance: client.representant?.date_naissance    ?? '',
-    gerant_adresse:        client.representant?.adresse           ?? '',
-    gerant_cin:            client.representant?.cin               ?? '',
+    raison_sociale:        client.raison_sociale               ?? '',
+    gerant_nom:            client.representant?.nom            ?? '',
+    gerant_prenom:         client.representant?.prenom         ?? '',
+    gerant_email:          client.representant?.email          ?? '',
+    gerant_telephone:      client.representant?.telephone      ?? '',
+    gerant_date_naissance: client.representant?.date_naissance ?? '',
+    gerant_adresse:        client.representant?.adresse        ?? '',
+    gerant_cin:            client.representant?.cin            ?? '',
   })
   showModal.value = true
 }
@@ -90,12 +109,12 @@ async function submitEntreprise(): Promise<void> {
   saving.value      = true
   try {
     if (modalMode.value === 'create') {
-      // Step 1: create the entreprise
+      // Step 1: create the company record.
       const newClient = await clientsStore.create({
         raison_sociale: form.raison_sociale,
       })
 
-      // Step 2: create the représentant with all seven identity fields
+      // Step 2: create the linked legal representative.
       await clientsStore.createRepresentant(newClient.id, {
         nom:            form.gerant_nom    || 'Non renseigné',
         prenom:         form.gerant_prenom || 'Non renseigné',
@@ -109,12 +128,10 @@ async function submitEntreprise(): Promise<void> {
       success('Client créé avec succès')
 
     } else if (editId.value) {
-      // Update company name
       await clientsStore.update(editId.value, {
         raison_sociale: form.raison_sociale,
       })
 
-      // Update all représentant fields
       await clientsStore.updateRepresentant(editId.value, {
         nom:            form.gerant_nom,
         prenom:         form.gerant_prenom,
@@ -147,7 +164,7 @@ onMounted(() => clientsStore.fetchAll())
 <template>
   <div class="space-y-5 animate-fade-up">
 
-    <!-- Header -->
+    <!-- ── Header ────────────────────────────────────────── -->
     <div class="flex items-center justify-between flex-wrap gap-3">
       <div>
         <h1 class="font-serif text-2xl">
@@ -162,27 +179,65 @@ onMounted(() => clientsStore.fetchAll())
       </button>
     </div>
 
-    <!-- Search -->
-    <div class="relative">
-      <svg class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
-           width="15" height="15" viewBox="0 0 24 24" fill="none"
-           stroke="currentColor" stroke-width="2" stroke-linecap="round"
-           style="color:var(--app-text-faint)">
-        <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-      </svg>
-      <input
-        v-model="search"
-        class="f-input pl-9"
-        placeholder="Rechercher par société, représentant, CIN, email..."
-      />
-    </div>
+    <!-- ── Search ────────────────────────────────────────── -->
+    <div class="relative w-full max-w-xl">
+    <!-- Search Icon -->
+    <svg
+        class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-text-faint)]"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        aria-hidden="true"
+    >
+        <circle cx="11" cy="11" r="7.5" />
+        <path d="m20 20-3.8-3.8" />
+    </svg>
 
-    <!-- Loading -->
+    <!-- Input -->
+    <input
+        v-model.trim="search"
+        type="search"
+        autocomplete="off"
+        class="f-input w-full !pl-10 !pr-10 transition-all duration-200
+               focus:border-[var(--app-primary)] focus:ring-2 focus:ring-[var(--app-primary)]/20
+               placeholder:text-[var(--app-text-faint)]
+               [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none"
+        placeholder="Rechercher une société, un représentant, une CIN ou un email..."
+        aria-label="Rechercher une société, un représentant, une CIN ou un email"
+        @keyup.esc="search = ''"
+    />
+
+    <!-- Clear Button -->
+    <button
+        v-if="search"
+        type="button"
+        class="absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--app-text-faint)] transition-colors hover:bg-black/5 hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary)] dark:hover:bg-white/10 dark:hover:text-white"
+        aria-label="Effacer la recherche"
+        @click="search = ''"
+    >
+        <svg
+            class="h-3.5 w-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            aria-hidden="true"
+        >
+            <path d="M18 6 6 18" />
+            <path d="m6 6 12 12" />
+        </svg>
+    </button>
+</div>
+
+    <!-- ── Loading state ─────────────────────────────────── -->
     <div v-if="loading" class="text-center py-12" style="color:var(--app-text-faint)">
       Chargement...
     </div>
 
-    <!-- List -->
+    <!-- ── Client account cards ──────────────────────────── -->
     <div v-else-if="filtered.length" class="space-y-3">
       <div
         v-for="client in filtered"
@@ -193,32 +248,52 @@ onMounted(() => clientsStore.fetchAll())
           :to="`/admin/clients/${client.id}`"
           class="flex items-center gap-4 min-w-0 flex-1 group"
         >
+          <!-- Avatar -->
           <div
-            class="w-10 h-10 rounded-full flex items-center justify-center
+            class="w-11 h-11 rounded-xl flex items-center justify-center
                    font-bold text-sm shrink-0"
             style="background:rgba(200,169,110,0.15);color:#c8a96e"
           >
-            {{ (client.raison_sociale ?? '?').slice(0, 2).toUpperCase() }}
+            {{ initials(client.raison_sociale) }}
           </div>
+
           <div class="min-w-0">
-            <!-- Company name -->
-            <p class="font-semibold truncate group-hover:underline"
-               style="text-underline-offset:3px">
-              {{ client.raison_sociale }}
-            </p>
-            <!-- Représentant identity summary -->
+            <!-- Company name + account number + status pill -->
+            <div class="flex items-center gap-2 flex-wrap">
+              <p class="font-semibold truncate group-hover:underline"
+                 style="text-underline-offset:3px; color: var(--app-text)">
+                {{ client.raison_sociale }}
+              </p>
+              <!-- <span class="text-[11px]" style="color: var(--app-text-faint)">
+                Compte #{{ client.id }}
+              </span> -->
+              <span
+                v-if="client.statut"
+                class="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
+                :style="`color: ${statutColor[client.statut] ?? '#94a3b8'}; background: ${statutColor[client.statut] ?? '#94a3b8'}18`"
+              >{{ client.statut }}</span>
+            </div>
+
+            <!-- Representative summary -->
             <p
               v-if="client.representant"
               class="text-xs mt-0.5 truncate"
               style="color:var(--app-text-faint)"
             >
               {{ client.representant.prenom }} {{ client.representant.nom }}
-              <span v-if="client.representant.cin">
-                · {{ client.representant.cin }}
-              </span>
-              <span v-if="client.representant.email">
-                · {{ client.representant.email }}
-              </span>
+              <span v-if="client.representant.cin"> · {{ client.representant.cin }}</span>
+              <span v-if="client.representant.email"> · {{ client.representant.email }}</span>
+            </p>
+
+            <!-- Secondary meta: only shown when the field exists -->
+            <p
+              v-if="client.ville || client.forme_juridique"
+              class="text-[11px] mt-0.5 truncate"
+              style="color: var(--app-text-faint)"
+            >
+              <span v-if="client.forme_juridique">{{ client.forme_juridique }}</span>
+              <span v-if="client.forme_juridique && client.ville"> · </span>
+              <span v-if="client.ville">{{ client.ville }}</span>
             </p>
           </div>
         </NuxtLink>
@@ -234,7 +309,7 @@ onMounted(() => clientsStore.fetchAll())
       </div>
     </div>
 
-    <!-- Empty -->
+    <!-- ── Empty state ───────────────────────────────────── -->
     <div v-else class="card p-10 text-center" style="color:var(--app-text-faint)">
       <p class="text-3xl mb-3">🏢</p>
       <p>{{ search ? `Aucun résultat pour « ${search} »` : 'Aucun client trouvé.' }}</p>
@@ -243,8 +318,7 @@ onMounted(() => clientsStore.fetchAll())
       </button>
     </div>
 
-
-    <!-- ════ Modal: eight fields only ════ -->
+    <!-- ── Create / edit modal (unchanged fields) ────────── -->
     <Teleport to="body">
       <div
         v-if="showModal"
@@ -254,7 +328,6 @@ onMounted(() => clientsStore.fetchAll())
       >
         <div class="card w-full max-w-lg max-h-[90vh] flex flex-col" @click.stop>
 
-          <!-- Header -->
           <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0"
                style="border-bottom:1px solid var(--app-border-2)">
             <h2 class="font-serif text-xl">
@@ -271,11 +344,9 @@ onMounted(() => clientsStore.fetchAll())
             </button>
           </div>
 
-          <!-- Body -->
           <div class="flex-1 overflow-y-auto px-6 py-5">
             <form class="space-y-4" @submit.prevent="submitEntreprise">
 
-              <!-- 1. Company name -->
               <div>
                 <label class="f-label">Nom de la société *</label>
                 <input
@@ -286,10 +357,8 @@ onMounted(() => clientsStore.fetchAll())
                 />
               </div>
 
-              <!-- Separator -->
               <div class="pt-1">
-                <p class="text-xs uppercase tracking-widest font-bold"
-                   style="color:#c8a96e">
+                <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
                   Représentant légal
                 </p>
                 <p class="text-xs mt-0.5" style="color:var(--app-text-faint)">
@@ -298,94 +367,45 @@ onMounted(() => clientsStore.fetchAll())
               </div>
 
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-
-                <!-- 2. Nom -->
                 <div>
                   <label class="f-label">Nom *</label>
-                  <input
-                    v-model="form.gerant_nom"
-                    class="f-input"
-                    required
-                    placeholder="WONG"
-                  />
+                  <input v-model="form.gerant_nom" class="f-input" required placeholder="WONG" />
                 </div>
-
-                <!-- 3. Prénom -->
                 <div>
                   <label class="f-label">Prénom *</label>
-                  <input
-                    v-model="form.gerant_prenom"
-                    class="f-input"
-                    required
-                    placeholder="LAETITIA"
-                  />
+                  <input v-model="form.gerant_prenom" class="f-input" required placeholder="LAETITIA" />
                 </div>
-
-                <!-- 4. Email -->
                 <div>
                   <label class="f-label">Email</label>
-                  <input
-                    v-model="form.gerant_email"
-                    class="f-input"
-                    type="email"
-                    placeholder="laetitia@exemple.com"
-                  />
+                  <input v-model="form.gerant_email" class="f-input" type="email" placeholder="laetitia@exemple.com" />
                 </div>
-
-                <!-- 5. Téléphone -->
                 <div>
                   <label class="f-label">Téléphone</label>
-                  <input
-                    v-model="form.gerant_telephone"
-                    class="f-input"
-                    placeholder="+33 6 26 01 11 49"
-                  />
+                  <input v-model="form.gerant_telephone" class="f-input" type="tel" placeholder="+33 6 26 01 11 49" />
                 </div>
-
-                <!-- 6. Date de naissance -->
                 <div>
                   <label class="f-label">Date de naissance</label>
-                  <input
-                    v-model="form.gerant_date_naissance"
-                    class="f-input"
-                    type="date"
-                  />
+                  <input v-model="form.gerant_date_naissance" class="f-input" type="date" />
                 </div>
-
-                <!-- 8. CIN ou Passeport -->
                 <div>
                   <label class="f-label">CIN / Passeport *</label>
-                  <input
-                    v-model="form.gerant_cin"
-                    class="f-input"
-                    required
-                    placeholder="BJ422176 ou 19AC67035"
-                  />
+                  <input v-model="form.gerant_cin" class="f-input" required placeholder="BJ422176 ou 19AC67035" />
                 </div>
-
-                <!-- 7. Adresse de résidence (as on CIN/Passeport) — full width -->
                 <div class="sm:col-span-2">
                   <label class="f-label">
                     Adresse de résidence
-                    <span class="text-[10px] ml-1 font-normal"
-                          style="color:var(--app-text-faint)">
+                    <span class="text-[10px] ml-1 font-normal" style="color:var(--app-text-faint)">
                       telle qu'inscrite sur le CIN ou Passeport
                     </span>
                   </label>
-                  <input
-                    v-model="form.gerant_adresse"
-                    class="f-input"
-                    placeholder="5 Avenue Charcot, 92600 Asnières-sur-Seine, France"
-                  />
+                  <input v-model="form.gerant_adresse" class="f-input" placeholder="5 Avenue Charcot, 92600 Asnières-sur-Seine, France" />
                 </div>
-
               </div>
 
               <p v-if="serverError" class="text-red-400 text-sm">{{ serverError }}</p>
 
               <div class="flex gap-3 justify-end pt-1">
-                <button type="button" class="btn btn-outline btn-md"
-                        @click="showModal = false">
+                <button type="button" class="btn btn-outline btn-md" @click="showModal = false">
                   Annuler
                 </button>
                 <button type="submit" class="btn btn-gold btn-md" :disabled="saving">

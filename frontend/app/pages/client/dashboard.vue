@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import ChangePasswordPrompt from '~/components/ChangePasswordPrompt.vue'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
@@ -143,6 +144,7 @@ onMounted(load)
 </script>
 
 <template>
+  <ChangePasswordPrompt />
   <div class="space-y-5 animate-fade-up">
     <!-- Titre -->
     <div>

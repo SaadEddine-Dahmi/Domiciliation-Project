@@ -185,9 +185,32 @@ onMounted(async () => {
     </div>
 
     <!-- Search -->
-    <div class="card p-3">
-      <input v-model="search" class="f-input" placeholder="Rechercher un modèle..." />
+    <div class="card p-4 rounded-xl border border-[var(--app-border,#212936)] bg-[var(--app-card-bg,#131822)] space-y-3">
+  <!-- Controls Row -->
+  <div class="flex flex-wrap items-center gap-3">
+    
+    <!-- Search Input -->
+    <div class="relative flex-1 min-w-[220px]">
+      <svg 
+        class="absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none"
+        width="15" height="15" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2" stroke-linecap="round"
+        style="color: var(--app-text-faint, #8A94A6)"
+      >
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input
+        v-model="search"
+        type="text"
+        autocomplete="off"
+        class="w-full pl-9 pr-3 py-2 bg-[var(--app-bg,#0B0E14)] border border-[var(--app-border,#212936)] rounded-lg text-sm text-[var(--app-text,#FFF)] placeholder:text-[var(--app-text-faint,#8A94A6)] focus:outline-none focus:border-[#E5C158] transition"
+        placeholder="Rechercher un modèle..."
+      />
     </div>
+
+  </div>
+</div>
 
     <!-- Loading -->
     <div v-if="loading" class="text-center py-12 text-app-text/40">Chargement...</div>
