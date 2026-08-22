@@ -6,14 +6,13 @@
 // the change was applied, plus the list of fields that changed and who
 // made the change.
 //
-// domiciliataire_id is denormalised directly onto the entreprises_history
-// and representants_history tables (rather than requiring a join through
-// entreprises) so tenant-scoped history queries — e.g. "show me the audit
-// trail for clients belonging to me" — can filter with a single indexed
-// WHERE clause, consistent with the same pattern already used on
-// factures.domiciliataire_id. This also avoids an IDOR risk: without this
-// column, forgetting the join in a future controller would leak another
-// tenant's audit data.
+// domiciliataire_id is denormalised directly onto entreprises_history
+// and representants_history (rather than requiring a join) so
+// tenant-scoped history queries filter with a single indexed WHERE
+// clause. For representants_history specifically, this value is derived
+// at write time from either side of the polymorphic relation:
+//   - representable = Entreprise → entreprise->domiciliataire_id
+//   - representable = User (domiciliataire) → the user's own id
 //
 // contrats_history does not need this denormalisation since Contrat
 // already has domiciliataire_id directly on the parent row.
@@ -88,6 +87,10 @@ return new class extends Migration {
         });
 
         // ── Representants audit trail ───────────────────────────────────────
+        // Shared by both the domiciliataire's own representant AND every
+        // client entreprise's representant — representant_id alone is
+        // enough to trace either, since Representant itself carries the
+        // polymorphic representable_type/representable_id.
         Schema::create('representants_history', function (Blueprint $table) {
             $table->id();
 
@@ -95,8 +98,8 @@ return new class extends Migration {
                 ->constrained('representants')
                 ->cascadeOnDelete();
 
-            // Same denormalisation as above, derived from
-            // representant->entreprise->domiciliataire_id at write time.
+            // Denormalised tenant owner — derived at write time (see
+            // migration docblock above for both derivation paths).
             $table->foreignId('domiciliataire_id')
                 ->nullable()
                 ->constrained('users')

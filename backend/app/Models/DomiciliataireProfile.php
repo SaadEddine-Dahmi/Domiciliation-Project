@@ -5,6 +5,15 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 
+/**
+ * Company-level identity of the domiciliation centre ONLY.
+ *
+ * Deliberately holds NO representative attributes (nom, cin, DOB,
+ * nationality, contact) — those belong exclusively to the polymorphic
+ * Representant linked to the owning User (see User::representant() via
+ * HasRepresentant). Mixing the two here would recreate the exact
+ * duplication problem this refactor removes.
+ */
 class DomiciliataireProfile extends Model
 {
     use HasFactory;
@@ -12,22 +21,18 @@ class DomiciliataireProfile extends Model
     protected $fillable = [
         'user_id',
         'nom_societe',
-        'representant_legal',
-        'identite_representant',
 
-        // Contact details of the centre's legal representative — used on
-        // the "D'une part" block of the contract PDF (see
-        // ContratController::buildTokenMap()).
-        'representant_email',
-        'representant_telephone',
+        // Free text chosen by the domiciliataire — printed as the heading
+        // on every generated contract. Falls back to a default title
+        // when empty (see ContratController::store()).
+        'contract_title',
 
-        'rc',
-        'if_fiscal',
-        'tp',
+        'rc',        // Registre de Commerce
+        'if_fiscal', // Identifiant Fiscal
+        'tp',        // Taxe Professionnelle
 
-        // Array of {label, value}. Convention enforced at read time in
-        // ContratController::buildTokenMap(): index 0 = siège social,
-        // every subsequent entry = succursale.
+        // Array of {label, value}. Index 0 = siège social, every entry
+        // after it = succursale (see ContratController::buildTokenMap()).
         'adresses',
     ];
 
@@ -35,19 +40,11 @@ class DomiciliataireProfile extends Model
         'adresses' => 'array',
     ];
 
-    // ── Relations ──────────────────────────────────────────
-
     public function user()
     {
         return $this->belongsTo(User::class);
     }
 
-    // ── Accessors ──────────────────────────────────────────
-
-    /**
-     * Returns adresses as a flat array of {label, value} objects.
-     * Falls back to empty array when null.
-     */
     public function getAdressesListAttribute(): array
     {
         return is_array($this->adresses) ? $this->adresses : [];

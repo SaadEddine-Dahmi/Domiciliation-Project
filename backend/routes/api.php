@@ -14,24 +14,26 @@
 //   AUTHENTICATED (auth:sanctum):
 //     All other routes. Require a valid Bearer token in the Authorization header.
 
-use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\AccountHistoryController;
+use App\Http\Controllers\Api\ActivationController;
+use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\ArticleController;
+use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\ClientController;
+use App\Http\Controllers\Api\ContratController;
+use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\DocumentController;
 use App\Http\Controllers\Api\DocumentTypeController;
-use App\Http\Controllers\Api\DashboardController;
-use App\Http\Controllers\Api\NotificationController;
-use App\Http\Controllers\Api\ContratController;
-use App\Http\Controllers\Api\EntrepriseController;
-use App\Http\Controllers\Api\RepresentantController;
-use App\Http\Controllers\Api\AdminController;
 use App\Http\Controllers\Api\DomiciliataireProfileController;
-use App\Http\Controllers\Api\ActivationController;
-use App\Http\Controllers\Api\PaiementController;
-use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\DomiciliataireRepresentantController;
+use App\Http\Controllers\Api\EntrepriseController;
 use App\Http\Controllers\Api\FactureController;
+use App\Http\Controllers\Api\MessageController;
+use App\Http\Controllers\Api\NotificationController;
+use App\Http\Controllers\Api\PaiementController;
+use App\Http\Controllers\Api\RepresentantController;
 use App\Http\Controllers\Api\TemplateController;
+use Illuminate\Support\Facades\Route;
 
 // ── Public auth endpoints ────────────────────────────────────────────────
 
@@ -82,6 +84,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::get('/admin/users/pending', [ActivationController::class, 'pending']);
     Route::post('/admin/users/{id}/approve', [ActivationController::class, 'approve']);
     Route::post('/admin/users/{id}/reject', [ActivationController::class, 'reject']);
+
+    Route::get('/profile/representant', [DomiciliataireRepresentantController::class, 'show']);
+Route::put('/profile/representant', [DomiciliataireRepresentantController::class, 'update']);
 
     // ── Entreprises and nested representant (1-to-1) ────────────────────
     Route::apiResource('entreprises', EntrepriseController::class);
@@ -154,4 +159,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/messages', [MessageController::class, 'send']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markRead']);
     Route::get('/messages/{id}/receipt', [MessageController::class, 'receipt']);
+
+    Route::get('/account/history', [AccountHistoryController::class, 'index']);
+    Route::get('/account/history/export', [AccountHistoryController::class, 'export']);
 });

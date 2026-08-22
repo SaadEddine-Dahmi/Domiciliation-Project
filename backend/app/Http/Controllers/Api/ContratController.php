@@ -29,15 +29,16 @@
 //
 // ── entreprise.representant eager-load ──────────────────────────────────────
 //   The Blade template reads gerant_* fields, which live in the
-//   representants table (hasOne Representant on Entreprise), not on
+//   representants table (morphOne Representant on Entreprise), not on
 //   entreprises directly.
 //
-// ── domiciliataire.profile eager-load ─────────────────────────────────────────
+// ── domiciliataire.representant / domiciliataire.profile eager-loads ───────
 //   Company identity printed as the "Domiciliataire" party on the PDF
-//   (nom_societe, RC, IF, TP, representant_legal, adresses) lives on
-//   domiciliataire_profiles — App\Models\User::profile(), NOT on users
-//   directly. Any query that feeds buildTokenMap() must eager-load
-//   'domiciliataire.profile', never just 'domiciliataire'.
+//   (nom_societe, RC, IF, TP, adresses) lives on domiciliataire_profiles —
+//   App\Models\User::profile(). The centre's own legal representative
+//   (nom, cin, ...) lives on the polymorphic Representant relation —
+//   App\Models\User::representant(). Any query that feeds buildTokenMap()
+//   must eager-load BOTH, never just 'domiciliataire'.
 //
 // ── legalised contracts are frozen ───────────────────────────────────────────
 //   Once a contract has a scanned_pdf_path (Contrat::isLegalised()), its
@@ -61,7 +62,9 @@
 // ── streamPdf() ────────────────────────────────────────────────────────────────
 //   Registered OUTSIDE auth:sanctum in routes/api.php. A browser
 //   <iframe src="…"> cannot attach Authorization: Bearer, so access is
-//   validated via a ?token= query param instead.
+//   validated via a ?token= query param instead, resolved through
+//   authenticateViaToken() — same pattern as
+//   DocumentController::download()/preview() and FactureController::pdf().
 
 namespace App\Http\Controllers\Api;
 
@@ -70,6 +73,7 @@ use App\Models\Contrat;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
+use Laravel\Sanctum\PersonalAccessToken;
 
 class ContratController extends Controller
 {
@@ -142,39 +146,39 @@ class ContratController extends Controller
         $user = auth()->user();
 
         $data = $request->validate([
-            'entreprise_id'  => ['required', 'integer', 'exists:entreprises,id'],
-            'titre_contrat'  => ['nullable', 'string', 'max:255'],
-            'date_debut'     => ['required', 'date'],
-            'date_fin'       => ['nullable', 'date', 'after_or_equal:date_debut'],
-            'duree_mois'     => ['nullable', 'integer', 'min:1'],
-            'prix_mensuel'   => ['nullable', 'numeric', 'min:0'],
-            'prix_total'     => ['nullable', 'numeric', 'min:0'],
+            'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
+            'titre_contrat' => ['nullable', 'string', 'max:255'],
+            'date_debut' => ['required', 'date'],
+            'date_fin' => ['nullable', 'date', 'after_or_equal:date_debut'],
+            'duree_mois' => ['nullable', 'integer', 'min:1'],
+            'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
+            'prix_total' => ['nullable', 'numeric', 'min:0'],
             'instruction_no' => ['nullable', 'string', 'max:20'],
-            'ville_signature'=> ['nullable', 'string', 'max:100'],
+            'ville_signature' => ['nullable', 'string', 'max:100'],
             'date_signature' => ['nullable', 'date'],
-            'caution'        => ['nullable', 'numeric', 'min:0'],
-            'mode_paiement'  => ['nullable', 'string', 'max:100'],
-            'statut'         => ['nullable', 'in:draft,active,expired,terminated'],
-            'articles'       => ['nullable', 'array'],
-            'articles.*.id'  => ['required_with:articles', 'string'],
+            'caution' => ['nullable', 'numeric', 'min:0'],
+            'mode_paiement' => ['nullable', 'string', 'max:100'],
+            'statut' => ['nullable', 'in:draft,active,expired,terminated'],
+            'articles' => ['nullable', 'array'],
+            'articles.*.id' => ['required_with:articles', 'string'],
             'articles.*.ordre' => ['nullable', 'integer'],
         ]);
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $user->id,
-            'entreprise_id'     => $data['entreprise_id'],
-            'titre_contrat'     => $data['titre_contrat'] ?: 'Contrat de Domiciliation',
-            'date_debut'        => $data['date_debut'],
-            'date_fin'          => $data['date_fin']          ?? null,
-            'duree_mois'        => $data['duree_mois']        ?? null,
-            'prix_mensuel'      => $data['prix_mensuel']      ?? null,
-            'prix_total'        => $data['prix_total']        ?? null,
-            'instruction_no'    => $data['instruction_no']    ?? null,
-            'ville_signature'   => $data['ville_signature']   ?? null,
-            'date_signature'    => $data['date_signature']    ?? null,
-            'caution'           => $data['caution']           ?? null,
-            'mode_paiement'     => $data['mode_paiement']     ?? null,
-            'statut'            => $data['statut']            ?? 'draft',
+            'entreprise_id' => $data['entreprise_id'],
+            'titre_contrat' => $data['titre_contrat'] ?: 'Contrat de Domiciliation',
+            'date_debut' => $data['date_debut'],
+            'date_fin' => $data['date_fin'] ?? null,
+            'duree_mois' => $data['duree_mois'] ?? null,
+            'prix_mensuel' => $data['prix_mensuel'] ?? null,
+            'prix_total' => $data['prix_total'] ?? null,
+            'instruction_no' => $data['instruction_no'] ?? null,
+            'ville_signature' => $data['ville_signature'] ?? null,
+            'date_signature' => $data['date_signature'] ?? null,
+            'caution' => $data['caution'] ?? null,
+            'mode_paiement' => $data['mode_paiement'] ?? null,
+            'statut' => $data['statut'] ?? 'draft',
         ]);
 
         $this->syncArticles($contrat, $request->input('articles', []));
@@ -205,7 +209,7 @@ class ContratController extends Controller
      */
     public function update(Request $request, string $id)
     {
-        $user    = auth()->user();
+        $user = auth()->user();
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         if ($blocked = $this->assertEditable($contrat)) {
@@ -213,40 +217,40 @@ class ContratController extends Controller
         }
 
         $data = $request->validate([
-            'entreprise_id'  => ['sometimes', 'integer', 'exists:entreprises,id'],
-            'titre_contrat'  => ['nullable', 'string', 'max:255'],
-            'date_debut'     => ['sometimes', 'date'],
-            'date_fin'       => ['nullable', 'date'],
-            'duree_mois'     => ['nullable', 'integer', 'min:1'],
-            'prix_mensuel'   => ['nullable', 'numeric', 'min:0'],
-            'prix_total'     => ['nullable', 'numeric', 'min:0'],
+            'entreprise_id' => ['sometimes', 'integer', 'exists:entreprises,id'],
+            'titre_contrat' => ['nullable', 'string', 'max:255'],
+            'date_debut' => ['sometimes', 'date'],
+            'date_fin' => ['nullable', 'date'],
+            'duree_mois' => ['nullable', 'integer', 'min:1'],
+            'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
+            'prix_total' => ['nullable', 'numeric', 'min:0'],
             'instruction_no' => ['nullable', 'string', 'max:20'],
-            'ville_signature'=> ['nullable', 'string', 'max:100'],
+            'ville_signature' => ['nullable', 'string', 'max:100'],
             'date_signature' => ['nullable', 'date'],
-            'caution'        => ['nullable', 'numeric', 'min:0'],
-            'mode_paiement'  => ['nullable', 'string', 'max:100'],
-            'statut'         => ['nullable', 'in:draft,active,expired,terminated'],
-            'articles'       => ['nullable', 'array'],
-            'articles.*.id'  => ['required_with:articles', 'string'],
+            'caution' => ['nullable', 'numeric', 'min:0'],
+            'mode_paiement' => ['nullable', 'string', 'max:100'],
+            'statut' => ['nullable', 'in:draft,active,expired,terminated'],
+            'articles' => ['nullable', 'array'],
+            'articles.*.id' => ['required_with:articles', 'string'],
             'articles.*.ordre' => ['nullable', 'integer'],
         ]);
 
         $contrat->update(array_filter([
-            'entreprise_id'  => $data['entreprise_id']  ?? null,
-            'titre_contrat'  => isset($data['titre_contrat'])
-                                    ? ($data['titre_contrat'] ?: 'Contrat de Domiciliation')
-                                    : null,
-            'date_debut'     => $data['date_debut']     ?? null,
-            'date_fin'       => $data['date_fin']       ?? null,
-            'duree_mois'     => $data['duree_mois']     ?? null,
-            'prix_mensuel'   => $data['prix_mensuel']   ?? null,
-            'prix_total'     => $data['prix_total']     ?? null,
+            'entreprise_id' => $data['entreprise_id'] ?? null,
+            'titre_contrat' => isset($data['titre_contrat'])
+                ? ($data['titre_contrat'] ?: 'Contrat de Domiciliation')
+                : null,
+            'date_debut' => $data['date_debut'] ?? null,
+            'date_fin' => $data['date_fin'] ?? null,
+            'duree_mois' => $data['duree_mois'] ?? null,
+            'prix_mensuel' => $data['prix_mensuel'] ?? null,
+            'prix_total' => $data['prix_total'] ?? null,
             'instruction_no' => $data['instruction_no'] ?? null,
-            'ville_signature'=> $data['ville_signature']?? null,
+            'ville_signature' => $data['ville_signature'] ?? null,
             'date_signature' => $data['date_signature'] ?? null,
-            'caution'        => $data['caution']        ?? null,
-            'mode_paiement'  => $data['mode_paiement']  ?? null,
-            'statut'         => $data['statut']         ?? null,
+            'caution' => $data['caution'] ?? null,
+            'mode_paiement' => $data['mode_paiement'] ?? null,
+            'statut' => $data['statut'] ?? null,
         ], fn($v) => $v !== null));
 
         if ($request->has('articles')) {
@@ -295,7 +299,7 @@ class ContratController extends Controller
         ]);
 
         if ($request->hasFile('signed_pdf')) {
-            $folder   = 'contrats/signed/' . $contrat->entreprise_id;
+            $folder = 'contrats/signed/' . $contrat->entreprise_id;
             $filename = 'contrat_' . $contrat->id . '_signed.pdf';
 
             $path = $request->file('signed_pdf')->storeAs($folder, $filename, 'public');
@@ -316,7 +320,7 @@ class ContratController extends Controller
      */
     public function terminate(string $id)
     {
-        $user    = auth()->user();
+        $user = auth()->user();
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         if ($contrat->statut !== 'active') {
@@ -382,11 +386,40 @@ class ContratController extends Controller
 
         return response()->json([
             'success' => true,
-            'data'    => $contrat->history()->with('changedBy:id,nom,prenom')->get(),
+            'data' => $contrat->history()->with('changedBy:id,nom,prenom')->get(),
         ]);
     }
 
     // ── Stream PDF (preview AND download — the only PDF-producing route) ──────
+
+    /**
+     * Resolves the acting user from a Sanctum token passed as ?token=,
+     * since streamPdf() is registered outside auth:sanctum (an
+     * <iframe src="…"> cannot attach an Authorization header). Returns
+     * null on any failure (missing/invalid/expired token) so the caller
+     * can return a clean 401 rather than leaking which part failed.
+     *
+     * Same pattern as DocumentController::authenticateViaToken() and
+     * FactureController::authenticateViaToken().
+     */
+    private function authenticateViaToken(Request $request): ?\App\Models\User
+    {
+        $tokenValue = $request->query('token');
+        if (!$tokenValue) {
+            return null;
+        }
+
+        $token = PersonalAccessToken::findToken($tokenValue);
+        if (!$token) {
+            return null;
+        }
+
+        if ($token->expires_at && $token->expires_at->isPast()) {
+            return null;
+        }
+
+        return $token->tokenable;
+    }
 
     /**
      * GET /api/contrats/{id}/pdf/stream
@@ -405,27 +438,37 @@ class ContratController extends Controller
      * WHY THIS ROUTE IS OUTSIDE auth:sanctum:
      *   A browser <iframe src="…"> issues a plain GET with no custom
      *   headers, so Authorization: Bearer cannot be attached. Access is
-     *   instead validated via ?token=.
+     *   instead validated via ?token=, resolved through
+     *   authenticateViaToken() above.
+     *
+     * IDOR guard: the resolved token owner must be this contract's own
+     * domiciliataire — findOrFail() is scoped to $user->id, exactly like
+     * every other contract endpoint in this controller.
      */
     public function streamPdf(Request $request, string $id)
     {
-        $contrat = Contrat::with([
-            'entreprise.representant',
-            // FIX: must eager-load the company profile relation, not just
-            // 'domiciliataire' — nom_societe/rc/if_fiscal/tp/representant_legal/
-            // adresses all live on domiciliataire_profiles via User::profile().
-            'domiciliataire.profile',
-            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-        ])->findOrFail($id);
+        $user = $this->authenticateViaToken($request);
+        if (!$user) {
+            return response()->json(['message' => 'Non authentifié.'], 401);
+        }
+
+        $contrat = Contrat::where('domiciliataire_id', $user->id)
+            ->with([
+                'entreprise.representant',
+                'domiciliataire.representant',
+                'domiciliataire.profile',
+                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+            ])
+            ->findOrFail($id);
 
         $mode = $request->query('mode', 'preview'); // preview | download
 
         $headers = [
-            'Content-Type'        => 'application/pdf',
+            'Content-Type' => 'application/pdf',
             'Content-Disposition' => ($mode === 'download' ? 'attachment' : 'inline')
-                                      . '; filename="contrat_' . $contrat->id . '.pdf"',
-            'Cache-Control'       => 'no-store, no-cache, must-revalidate',
-            'X-Frame-Options'     => 'SAMEORIGIN',
+                . '; filename="contrat_' . $contrat->id . '.pdf"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
+            'X-Frame-Options' => 'SAMEORIGIN',
         ];
 
         // 1. Legalized contract → stream the real signed document, untouched.
@@ -434,16 +477,16 @@ class ContratController extends Controller
         }
 
         // 2. Not legalized yet → render on the fly. Nothing is persisted.
-        $tokenMap         = $this->buildTokenMap($contrat);
+        $tokenMap = $this->buildTokenMap($contrat);
         $resolvedArticles = $contrat->articles->map(function ($article) use ($tokenMap) {
-            $clone       = clone $article;
+            $clone = clone $article;
             $clone->body = $this->resolveTokens($article->body ?? '', $tokenMap);
             return $clone;
         });
 
         $pdf = Pdf::loadView('pdf.contrat', [
-            'contrat'  => $contrat,
-            'tokens'   => $tokenMap,
+            'contrat' => $contrat,
+            'tokens' => $tokenMap,
             'articles' => $resolvedArticles,
         ])->setPaper('a4', 'portrait');
 
@@ -474,28 +517,17 @@ class ContratController extends Controller
 
     /**
      * Build the complete {{variable}} → resolved value map from a loaded Contrat.
-     * This is the SINGLE SOURCE OF TRUTH for every value the PDF Blade prints —
-     * if the Blade references a new $tokens['xxx'] key, add it here first.
      *
-     * Requires: entreprise.representant + domiciliataire.profile eager-loaded
-     * on $contrat (see streamPdf() above).
-     *
-     * FALLBACK BEHAVIOUR:
-     *   domiciliataire_nom / domiciliataire_representant fall back to the
-     *   domiciliataire's personal account name (users.nom + prenom — always
-     *   set at registration) when the company profile hasn't been completed
-     *   yet, so contracts don't render an entirely blank identity line.
-     *   RC / IF / TP / siège-succursales have NO safe fallback and stay
-     *   blank until the domiciliataire enters real values in /admin/profile.
-     *
-     * @return array<string, string>
+     * Requires: entreprise.representant + domiciliataire.representant +
+     * domiciliataire.profile eager-loaded on $contrat.
      */
     private function buildTokenMap(Contrat $contrat): array
     {
-        $entreprise     = $contrat->entreprise;
-        $representant   = $entreprise?->representant;
+        $entreprise = $contrat->entreprise;
+        $clientRep = $entreprise?->representant;
         $domiciliataire = $contrat->domiciliataire;
-        $profile        = $domiciliataire?->profile;
+        $domiciliataireRep = $domiciliataire?->representant;
+        $profile = $domiciliataire?->profile;
 
         $fmt = fn($v) => $v !== null
             ? number_format((float) $v, 2, ',', ' ') . ' DH'
@@ -505,99 +537,56 @@ class ContratController extends Controller
             ? \Carbon\Carbon::parse($v)->format('d/m/Y')
             : '';
 
-        // Domiciliataire's personal account name — always present (set at
-        // registration), used as a fallback when the company profile row
-        // doesn't exist yet or nom_societe/representant_legal are empty.
-        $domiciliataireAccountName = trim(
-            ($domiciliataire?->nom    ?? '') . ' ' .
-            ($domiciliataire?->prenom ?? '')
-        );
-
-        // Build the "Siège N° ... – Succursale1 : ... ; Succursale 2 : ..."
-        // inline block from domiciliataire_profiles.adresses. Convention
-        // (see DomiciliataireProfileController): index 0 = siège social,
-        // every following entry = a succursale. No fallback — legally
-        // meaningless without real profile data.
-        $adresses = $profile?->adresses_list ?? [];
-        $siegeSuccursales = collect($adresses)
-            ->map(function ($a) {
-                $label = trim($a['label'] ?? '');
-                $value = trim($a['value'] ?? '');
-                if ($label === '' && $value === '') return null;
-                return $label !== '' ? "{$label} : {$value}" : $value;
-            })
-            ->filter()
+        // Formats the adresses[] array as "Siège social : X - Succursale 1 : Y - ..."
+        $adressesFormatted = collect($profile?->adresses_list ?? [])
+            ->map(fn($a) => ($a['label'] ?? '') . ' : ' . ($a['value'] ?? ''))
             ->implode(' – ');
 
         return [
-            // ── Domiciliataire (service provider) company identity ─────────
-            'domiciliataire_nom'          => $profile?->nom_societe
-                                                ?: $domiciliataireAccountName,
-            'domiciliataire_rc'           => $profile?->rc                    ?? '',
-            'domiciliataire_if'           => $profile?->if_fiscal             ?? '',
-            'domiciliataire_tp'           => $profile?->tp                    ?? '',
-
-            // Full siège + succursales sentence assembled from adresses.
-            'domiciliataire_siege_succursales' => $siegeSuccursales,
-
-            // ── Domiciliataire's legal representative ───────────────────────
-            'domiciliataire_representant'           => $profile?->representant_legal
-                                                            ?: $domiciliataireAccountName,
-            'domiciliataire_identite_representant'  => $profile?->identite_representant ?? '',
-            // Prefer the representative's own dedicated contact fields
-            // (representant_email/representant_telephone on the profile);
-            // fall back to the account owner's login email/telephone if the
-            // representative-specific fields haven't been filled in.
-            'domiciliataire_representant_telephone' => $profile?->representant_telephone
-                                                            ?: ($domiciliataire?->telephone ?? ''),
-            'domiciliataire_representant_email'     => $profile?->representant_email
-                                                            ?: ($domiciliataire?->email ?? ''),
+            // ── Domiciliataire (service provider) ────────────────────────────
+            'domiciliataire_nom' => $profile?->nom_societe ?? '',
+            'domiciliataire_rc' => $profile?->rc ?? '',
+            'domiciliataire_if' => $profile?->if_fiscal ?? '',
+            'domiciliataire_tp' => $profile?->tp ?? '',
+            'domiciliataire_siege_succursales' => $adressesFormatted,
+            'domiciliataire_representant' => $domiciliataireRep?->nom_complet ?? '',
+            'domiciliataire_cin' => $domiciliataireRep?->cin ?? '',
 
             // ── Client / domicilié ────────────────────────────────────────────
-            'raison_sociale'              => $entreprise?->raison_sociale           ?? '',
-            'societe'                     => $entreprise?->raison_sociale           ?? '',
-            'forme_juridique'             => $entreprise?->forme_juridique          ?? '',
-            'adresse_domiciliation'       => $entreprise?->adresse                  ?? '',
-            'ville_client'                => $entreprise?->ville                    ?? '',
+            'raison_sociale' => $entreprise?->raison_sociale ?? '',
+            'societe' => $entreprise?->raison_sociale ?? '',
+            'forme_juridique' => $entreprise?->forme_juridique ?? '',
+            'adresse_domiciliation' => $entreprise?->adresse ?? '',
+            'ville_client' => $entreprise?->ville ?? '',
 
-            // ── Legal representative (gérant) of the client company ─────────
-            'gerant_nom'                  => trim(
-                                                ($representant?->nom    ?? '') . ' ' .
-                                                ($representant?->prenom ?? '')
-                                            ),
-            'gerant_prenom'               => $representant?->prenom                 ?? '',
-            'gerant_cin'                  => $representant?->cin                    ?? '',
-            'gerant_identite'             => $representant?->cin                    ?? '',
-            'gerant_telephone'            => $representant?->telephone              ?? '',
-            'telephone'                   => $representant?->telephone              ?? '',
-            'gerant_email'                => $representant?->email                  ?? '',
-            'email'                       => $representant?->email                  ?? '',
-            'gerant_adresse'              => $representant?->adresse                ?? '',
-            'gerant_nationalite'          => $representant?->nationalite            ?? '',
-            'date_naissance'              => $date($representant?->date_naissance),
-            'gerant_naissance'            => $date($representant?->date_naissance),
+            // ── Legal representative (gérant du client) ────────────────────────
+            'gerant_nom' => trim(($clientRep?->nom ?? '') . ' ' . ($clientRep?->prenom ?? '')),
+            'gerant_prenom' => $clientRep?->prenom ?? '',
+            'gerant_identite' => $clientRep?->cin ?? '',
+            'gerant_cin' => $clientRep?->cin ?? '',
+            'gerant_telephone' => $clientRep?->telephone ?? '',
+            'telephone' => $clientRep?->telephone ?? '',
+            'gerant_email' => $clientRep?->email ?? '',
+            'email' => $clientRep?->email ?? '',
+            'gerant_adresse' => $clientRep?->adresse ?? '',
+            'gerant_nationalite' => $clientRep?->nationalite ?? '',
+            'date_naissance' => $date($clientRep?->date_naissance),
 
             // ── Contract dates and duration ────────────────────────────────────
-            'date_debut'                  => $date($contrat->date_debut),
-            'date_fin'                    => $date($contrat->date_fin),
-            'date_signature'              => $date($contrat->date_signature),
-            'duree_mois'                  => (string) ($contrat->duree_mois         ?? ''),
-            'instruction_no'              => $contrat->instruction_no               ?? '',
-            'ville_signature'             => $contrat->ville_signature              ?? '',
+            'date_debut' => $date($contrat->date_debut),
+            'date_fin' => $date($contrat->date_fin),
+            'date_signature' => $date($contrat->date_signature),
+            'duree_mois' => (string) ($contrat->duree_mois ?? ''),
+            'instruction_no' => $contrat->instruction_no ?? '',
+            'ville_signature' => $contrat->ville_signature ?? '',
 
             // ── Financial ─────────────────────────────────────────────────────
-            'prix_mensuel'                => $fmt($contrat->prix_mensuel),
-            'prix_total'                  => $fmt($contrat->prix_total),
-            'caution'                     => $fmt($contrat->caution),
-            'mode_paiement'               => $contrat->mode_paiement                ?? '',
-
-            'redevance_mensuelle'         => $fmt($contrat->prix_mensuel),
-            'redevance_annuelle'          => $fmt($contrat->prix_total),
-
-            // Contract title, printed exactly as chosen by the domiciliataire —
-            // fully dynamic, never hardcoded (see titre_contrat notes at the
-            // top of this file).
-            'titre_contrat'               => $contrat->titre_contrat               ?? '',
+            'prix_mensuel' => $fmt($contrat->prix_mensuel),
+            'prix_total' => $fmt($contrat->prix_total),
+            'caution' => $fmt($contrat->caution),
+            'mode_paiement' => $contrat->mode_paiement ?? '',
+            'redevance_mensuelle' => $fmt($contrat->prix_mensuel),
+            'redevance_annuelle' => $fmt($contrat->prix_total),
         ];
     }
 
@@ -634,11 +623,11 @@ class ContratController extends Controller
 
         foreach ($rawArticles as $index => $item) {
             if (is_array($item)) {
-                $articleId = (int) ($item['id']    ?? 0);
-                $ordre     = (int) ($item['ordre'] ?? ($index + 1));
+                $articleId = (int) ($item['id'] ?? 0);
+                $ordre = (int) ($item['ordre'] ?? ($index + 1));
             } else {
                 $articleId = (int) $item;
-                $ordre     = $index + 1;
+                $ordre = $index + 1;
             }
 
             if ($articleId > 0) {

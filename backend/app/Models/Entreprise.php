@@ -2,13 +2,20 @@
 
 namespace App\Models;
 
+use App\Models\Concerns\BelongsToTenant;
+use App\Models\Concerns\HasRepresentant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
-use App\Models\Concerns\BelongsToTenant;
 
+/**
+ * A client company being domiciled. Its legal identity (raison_sociale,
+ * forme_juridique, adresse...) lives here; its legal representative's
+ * personal identity (CIN, nom, DOB...) lives in the polymorphic
+ * Representant relation via HasRepresentant — never duplicated here.
+ */
 class Entreprise extends Model
 {
-    use HasFactory, BelongsToTenant;
+    use HasFactory, BelongsToTenant, HasRepresentant;
 
     protected $fillable = [
         'domiciliataire_id',
@@ -46,14 +53,8 @@ class Entreprise extends Model
             ->orderByDesc('created_at');
     }
 
-    /**
-     * Each entreprise has exactly ONE representant.
-     * Enforced by UNIQUE constraint on representants.entreprise_id.
-     */
-    public function representant()
-    {
-        return $this->hasOne(Representant::class);
-    }
+    // representant() is provided by HasRepresentant:
+    //   morphOne(Representant::class, 'representable')
 
     public function contrats()
     {
@@ -77,10 +78,6 @@ class Entreprise extends Model
 
     // ── Audit trail hook ───────────────────────────────────
 
-    /**
-     * Writes an EntrepriseHistory snapshot before every update and delete.
-     * See Contrat::booted() for the full explanation of this pattern.
-     */
     protected static function booted(): void
     {
         static::updating(function (Entreprise $entreprise) {
@@ -111,10 +108,6 @@ class Entreprise extends Model
 
     // ── Helpers ────────────────────────────────────────────
 
-    /**
-     * Whether the linked client user is currently allowed to log in.
-     * Checked in AuthController::login() before issuing a token.
-     */
     public function isActiveForClient(): bool
     {
         return $this->statut === 'actif';

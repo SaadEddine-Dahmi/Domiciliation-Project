@@ -9,7 +9,7 @@
     <style>
         @page {
             size: A4;
-            margin: 12mm 15mm 12mm 15mm;
+            margin: 12mm 15mm 24mm 15mm;
         }
         * { box-sizing: border-box; }
 
@@ -23,7 +23,6 @@
             background: #fff;
         }
 
-        /* --- DOMPDF FULL-PAGE OUTER BORDER FRAME --- */
         .page-border-frame {
             position: fixed;
             top: -2mm;
@@ -92,6 +91,7 @@
             margin-top: 8px;
             margin-bottom: 8px;
             text-align: justify;
+            page-break-inside: avoid;
         }
 
         .article-title {
@@ -99,6 +99,7 @@
             font-size: 9.5pt;
             text-transform: uppercase;
             text-decoration: underline;
+            margin-top: 2px;
             margin-bottom: 2px;
             display: block;
         }
@@ -146,7 +147,6 @@
             margin-bottom: 2px;
         }
 
-        /* --- FIXED FOOTER INSIDE THE PAGE BOTTOM --- */
         .footer {
             position: fixed;
             bottom: 4mm;
@@ -164,7 +164,6 @@
 </head>
 <body>
 
-    {{-- FIXED BORDER FRAME DRAWN OVER THE ENTIRE PAGE --}}
     <div class="page-border-frame"></div>
 
     <div class="content-container">
@@ -180,8 +179,9 @@
         <div class="party-title">D'une part</div>
         <div class="party-block">
             Entre les soussignés :<br>
-            Centre De domiciliation <strong>{{ $tokens['domiciliataire_nom'] ?: '—' }}</strong> ,RC <strong>{{ $tokens['domiciliataire_rc'] ?: '—' }}</strong> .I.F : <strong>{{ $tokens['domiciliataire_if'] ?: '—' }}</strong> sise à <strong>{{ $tokens['domiciliataire_siege_succursales'] ?: '—' }}</strong>. Représentée par <strong>{{ $tokens['domiciliataire_representant'] ?: '—' }}</strong> titulaire de la CIN N° <strong>{{ $tokens['domiciliataire_identite_representant'] ?: '—' }}</strong>.<br>
-            Déclare par la présente 
+            Centre De domiciliation <strong>{{ $tokens['domiciliataire_nom'] ?: '—' }}</strong> ,RC <strong>{{ $tokens['domiciliataire_rc'] ?: '—' }}</strong> .I.F : <strong>{{ $tokens['domiciliataire_if'] ?: '—' }}</strong> sise à <strong>{{ $tokens['domiciliataire_siege_succursales'] ?: '—' }}</strong>.
+            Représentée par <strong>{{ $tokens['domiciliataire_representant'] ?: '—' }}</strong> titulaire de la CIN N° <strong>{{ $tokens['domiciliataire_cin'] ?: '—' }}</strong>.<br>
+            Déclare par la présente
             @if (!empty($tokens['instruction_no']))
                 suivant l'instruction No. : <strong>{{ $tokens['instruction_no'] }}</strong>,
             @endif
@@ -210,6 +210,19 @@
             </div>
         </div>
 
+        {{--
+            All remaining clauses — INCLUDING "Redevance" and "Contact" —
+            now come exclusively from the domiciliataire's article library
+            selection ($articles), never hardcoded here. This is what
+            fixed the duplicate ARTICLE 12/13 vs 14/15 bug: those two
+            blocks used to be force-appended below regardless of whether
+            the domiciliataire had already picked equivalent articles.
+            See database/seeders/DefaultArticlesSeeder.php for the
+            REDEVANCE / CONTACT starter clauses every new tenant gets,
+            using {{redevance_mensuelle}}, {{redevance_annuelle}},
+            {{gerant_nom}}, {{gerant_telephone}}, {{gerant_email}},
+            {{gerant_adresse}} tokens exactly as before.
+        --}}
         @if (!empty($articles) && $articles->count() > 0)
             @foreach ($articles as $index => $article)
                 <div class="article-block">
@@ -218,23 +231,6 @@
                 </div>
             @endforeach
         @endif
-
-        <div class="article-block">
-            <div class="article-title">ARTICLE {{ (!empty($articles) ? $articles->count() : 0) + 2 }} : REDEVANCE</div>
-            <div class="article-body">
-                Le présent contrat est consenti moyennant une redevance mensuelle de <strong>{{ $tokens['redevance_mensuelle'] ?: '—' }}</strong>, soit <strong>{{ $tokens['redevance_annuelle'] ?: '—' }}</strong> Annuelle payable d'avance.
-            </div>
-        </div>
-
-        <div class="article-block">
-            <div class="article-title">ARTICLE {{ (!empty($articles) ? $articles->count() : 0) + 3 }} : CONTACT</div>
-            <div class="article-body">
-                Je certifie, <strong>{{ $tokens['gerant_nom'] ?: '—' }}</strong> l'exactitude des informations ci-dessous :<br>
-                N° Tel : <strong>{{ $tokens['gerant_telephone'] ?: '—' }}</strong><br>
-                Email : <strong>{{ $tokens['gerant_email'] ?: '—' }}</strong><br>
-                Adresse personnelle : <strong>{{ $tokens['gerant_adresse'] ?: '—' }}</strong>
-            </div>
-        </div>
 
         <div class="signature-section">
             <div class="date-location">
@@ -259,7 +255,6 @@
 
     </div>
 
-    {{-- FOOTER POSITIONED SAFELY ABOVE THE BOTTOM BORDER LINE --}}
     <div class="footer">
         {{ $tokens['domiciliataire_siege_succursales'] ?: '' }}<br>
         RC: {{ $tokens['domiciliataire_rc'] ?: '—' }} IF: {{ $tokens['domiciliataire_if'] ?: '—' }} TP: {{ $tokens['domiciliataire_tp'] ?: '—' }}

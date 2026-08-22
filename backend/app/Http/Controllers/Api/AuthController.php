@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Entreprise;
 use App\Models\User;
 use App\Services\ActivationService;
+use Database\Seeders\DefaultArticlesSeeder;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\ValidationException;
@@ -38,6 +39,16 @@ class AuthController extends Controller
             'role' => $role,
             'status' => $role === 'domiciliataire' ? 'pending' : 'active',
         ]);
+
+        // Seeds the REDEVANCE/CONTACT starter clauses for a brand-new
+        // domiciliataire account, so their article library isn't empty
+        // and the contract wizard behaves consistently from day one.
+        // Must run BEFORE the response is returned, and is scoped to
+        // 'domiciliataire' only — client/admin accounts never own an
+        // article library.
+        if ($role === 'domiciliataire') {
+            (new DefaultArticlesSeeder())->run($user->id);
+        }
 
         if ($user->status === 'pending') {
             return response()->json([

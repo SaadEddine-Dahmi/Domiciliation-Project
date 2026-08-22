@@ -1,4 +1,9 @@
 <?php
+//
+// Pure authentication + account identity. Deliberately holds nothing
+// that belongs to a legal role — no CIN, no company name, no legal
+// representative fields. Those live in DomiciliataireProfile and the
+// polymorphic Representant model respectively.
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
@@ -24,6 +29,12 @@ return new class extends Migration {
             // Widened to 30 chars to accommodate international formats
             // with spacing/country codes beyond the original 13-char limit.
             $table->string('telephone', 30)->nullable();
+
+            // Relative path on the "public" disk to the user's profile
+            // photo, e.g. "profile-photos/12/6710e9f1a2.jpg".
+            // Nullable — when empty, the frontend falls back to initials
+            // built from nom + prenom (see User::getInitialsAttribute()).
+            $table->string('photo_path')->nullable();
 
             $table->enum('role', ['domiciliataire', 'client', 'admin'])
                 ->default('domiciliataire');
