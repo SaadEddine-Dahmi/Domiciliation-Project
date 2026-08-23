@@ -51,7 +51,7 @@ describe('Auth Middleware Logic', () => {
 
     it('session restored from valid localStorage grants access', () => {
         // FIX: set localStorage FIRST, then create fresh pinia + store
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             user: {
                 id: 1, name: 'Test', email: 't@t.ma',
                 role: 'domiciliataire', status: 'active',
@@ -71,7 +71,7 @@ describe('Auth Middleware Logic', () => {
     })
 
     it('expired session does not grant access', () => {
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             user: { id: 1, email: 't@t.ma', role: 'domiciliataire' },
             token: 'old-token',
             savedAt: Date.now() - 8 * 24 * 60 * 60 * 1000,

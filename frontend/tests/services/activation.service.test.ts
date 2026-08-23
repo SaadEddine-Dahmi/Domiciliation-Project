@@ -5,7 +5,7 @@ import { activationService } from '~/services/activation.service'
 describe('Activation Service', () => {
 
     beforeEach(() => {
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             token: 'admin-token', savedAt: Date.now(),
         }))
         vi.clearAllMocks()

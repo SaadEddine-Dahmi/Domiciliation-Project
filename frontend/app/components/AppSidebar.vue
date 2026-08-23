@@ -40,7 +40,6 @@
         :style="showLabels ? 'opacity:1;max-width:200px' : 'opacity:0;max-width:0;pointer-events:none'"
       >
         <div class="font-serif text-sm leading-tight truncate" style="color: var(--app-text)">{{ appName }}</div>
-        <!-- <div class="text-[10px] italic truncate" style="color: #c8a96e">Domiciliation</div> -->
       </div>
 
       <!-- Collapse toggle — custom tooltip instead of native title,
@@ -77,9 +76,9 @@
     </div>
 
     <!-- ── USER CARD ── -->
-    <!-- Now a real link to account settings — previously an inert div
-         with no way to act on it. In collapsed mode a tooltip shows the
-         full name and role, so identity is never lost when icon-only. -->
+    <!-- Links to `settingsPath`, which is now resolved per-role below —
+         this is the exact spot that used to send a Super Admin into the
+         Domiciliataire company-profile page. -->
     <NuxtLink
       v-if="auth.user"
       :to="settingsPath"
@@ -89,16 +88,11 @@
     >
       <UserAvatar :size="32" font-size="11px" />
 
-      <div
-        v-if="showLabels"
-        class="min-w-0 flex-1 overflow-hidden"
-      >
+      <div v-if="showLabels" class="min-w-0 flex-1 overflow-hidden">
         <div class="text-xs font-bold truncate" style="color: var(--app-text)">{{ auth.user.name }}</div>
         <div class="text-[10px] font-medium truncate" :style="`color:${auth.user.color}`">{{ roleLabel }}</div>
       </div>
 
-      <!-- Subtle affordance that this card is clickable, only shown
-           once there's room for it. -->
       <svg
         v-if="showLabels"
         width="14" height="14" viewBox="0 0 24 24" fill="none"
@@ -109,8 +103,6 @@
         <path d="M9 18l6-6-6-6"/>
       </svg>
 
-      <!-- Tooltip for icon-only mode — same visual treatment as nav
-           item tooltips, so it reads as part of the same system. -->
       <span
         v-if="!showLabels"
         class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
@@ -138,7 +130,6 @@
     </div>
 
     <!-- ── NAV — hidden scrollbar, fully scrollable ── -->
-    
     <nav
       class="flex-1 py-1 sidebar-scroll"
       :class="showLabels ? 'overflow-y-auto px-2' : 'overflow-y-auto px-1.5'"
@@ -160,9 +151,9 @@
           style="border-top: 1px solid var(--app-border-2)"
         />
 
-        <!-- NuxtLink — active item now gets a left-edge accent bar in
-             addition to the existing background highlight, so "you are
-             here" is legible at a glance even in icon-only mode. -->
+        <!-- NuxtLink — active item gets a left-edge accent bar in
+             addition to the background highlight, so "you are here" is
+             legible at a glance even in icon-only mode. -->
         <NuxtLink
           v-else-if="item.to && !item.action"
           :to="item.to"
@@ -187,7 +178,6 @@
             class="shrink-0 min-w-4.5 h-4.5 rounded-md text-[10px] font-black flex items-center justify-center px-1"
             style="background: #c8a96e; color: #13161f"
           >{{ item.badge }}</span>
-          <!-- Tooltip for icon-only mode -->
           <span
             v-if="!showLabels"
             class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
@@ -269,12 +259,27 @@ const appShortCode = computed(() =>
 
 // Where the user card links to — same convention already used by
 // AppTopbar.vue's avatar link, kept consistent across both.
-const settingsPath = computed(() => auth.isInternal ? '/admin/profile' : '/client/settings')
+//
+// Three distinct destinations, one per role:
+//   - domiciliataire      → /admin/profile   (their company/contract profile —
+//                            RC, IF, TP, legal representative, addresses)
+//   - admin (Super Admin) → /admin/settings  (personal account only — a
+//                            Super Admin has no company profile to fill in)
+//   - client              → /client/settings
+//
+// FIX: previously this was a single `auth.isInternal ? '/admin/profile' :
+// '/client/settings'` check, which treated "admin" and "domiciliataire"
+// as the same thing and routed the Super Admin into the domiciliataire
+// company-profile screen. `auth.isAdmin` is checked first so it always
+// wins over the more general `isInternal` branch.
+const settingsPath = computed(() => {
+  if (auth.isAdmin) return '/admin/settings'
+  if (auth.isInternal) return '/admin/profile'
+  return '/client/settings'
+})
 
 // On mobile: always show full labels regardless of isOpen
 // On desktop: follow isOpen state
-// FIX: when on mobile and sidebar was "collapsed" on desktop,
-// we should still show full labels in the mobile drawer.
 const isMobile = ref(false)
 onMounted(() => {
   isMobile.value = window.innerWidth < 1024
@@ -285,10 +290,8 @@ onMounted(() => {
 
 const showLabels = computed(() => isMobile.value ? true : isOpen.value)
 
-// Sidebar width: desktop follows isOpen, mobile is always 230px
 const asideStyle = computed(() => {
   if (isMobile.value) {
-    // Mobile: slide in/out as overlay, always full width
     return {
       width: '230px',
       background: 'var(--app-surface)',
@@ -296,7 +299,6 @@ const asideStyle = computed(() => {
       transform: isMobileOpen.value ? 'translateX(0)' : 'translateX(-100%)',
     }
   }
-  // Desktop: width transitions between expanded and collapsed
   return {
     width: isOpen.value ? '230px' : '64px',
     background: 'var(--app-surface)',
@@ -327,14 +329,12 @@ async function handleLogout(): Promise<void> {
 </script>
 
 <style scoped>
-/* Hide scrollbar — still scrollable */
 .sidebar-scroll {
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
 .sidebar-scroll::-webkit-scrollbar { display: none; }
 
-/* Tooltip: fade in on hover */
 .nav-tooltip {
   opacity: 0;
   transform: translateX(-4px);
@@ -345,24 +345,17 @@ async function handleLogout(): Promise<void> {
   transform: translateX(0);
 }
 
-/* Keyboard focus — visible outline for anyone navigating by keyboard.
-   Previously relied on the browser default, which is hard to see
-   against a dark surface and inconsistent across browsers. */
 .focus-ring:focus-visible {
   outline: 2px solid #c8a96e;
   outline-offset: 2px;
   border-radius: 10px;
 }
 
-/* Backdrop transition */
 .t-backdrop-enter-active { transition: opacity 0.2s ease; }
 .t-backdrop-leave-active { transition: opacity 0.18s ease; }
 .t-backdrop-enter-from,
 .t-backdrop-leave-to     { opacity: 0; }
 
-/* Respect the OS-level "reduce motion" preference — skip the
-   width/transform/backdrop transitions entirely for anyone who's
-   asked for it. */
 @media (prefers-reduced-motion: reduce) {
   .app-sidebar,
   .t-backdrop-enter-active,

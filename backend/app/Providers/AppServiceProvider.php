@@ -1,6 +1,5 @@
 <?php
 // app/Providers/AppServiceProvider.php
-
 namespace App\Providers;
 
 use Illuminate\Support\ServiceProvider;
@@ -9,12 +8,18 @@ use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Http\Request;
 use App\Models\Entreprise;
 use App\Models\Representant;
+use App\Models\Contrat;
+use App\Models\Document;
 use App\Observers\EntrepriseObserver;
 use App\Observers\RepresentantObserver;
+use App\Observers\ContratObserver;
+use App\Observers\DocumentObserver;
 
 class AppServiceProvider extends ServiceProvider
 {
-    public function register(): void {}
+    public function register(): void
+    {
+    }
 
     public function boot(): void
     {
@@ -22,8 +27,16 @@ class AppServiceProvider extends ServiceProvider
         Entreprise::observe(EntrepriseObserver::class);
         Representant::observe(RepresentantObserver::class);
 
-        // ── Rate Limiters ──────────────────────────────────────
+        // NEW — these two were missing entirely, which is why
+        // notifyDocumentUploaded()/notifyContractLegalized() never fired:
+        // Document::observe()/Contrat::observe() were never called, so
+        // Laravel had zero listeners bound to their `created`/`updated`
+        // events (confirmed via app('events')->getListeners(...) coming
+        // back empty in tinker).
+        Contrat::observe(ContratObserver::class);
+        Document::observe(DocumentObserver::class);
 
+        // ── Rate Limiters ──────────────────────────────────────
         // Auth endpoints: 10 attempts per minute per IP
         // Brute-force and credential stuffing protection
         RateLimiter::for('auth', function (Request $request) {

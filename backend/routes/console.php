@@ -3,34 +3,33 @@
 //
 // Scheduled jobs for the application.
 //
-//   1. contracts:expire-check — runs daily at 01:00
-//      Transitions active contracts whose date_fin has passed to
-//      'expired' and notifies the domiciliataire. Implemented as a
-//      dedicated Artisan command (app/Console/Commands/
-//      ExpireContractsCommand.php) rather than an inline closure so the
-//      logic has a single, testable source of truth. date_fin is a DATE
-//      column, not a DATETIME, so a contract's expiration status can only
-//      change once every 24 hours — running this more than once a day
-//      gives no additional benefit.
+//   1. contracts:expire-check — daily at 01:00
+//      See app/Console/Commands/ExpireContractsCommand.php.
 //
-//   2. Renewal reminder alerts — runs daily at 08:00
-//      For each domiciliataire, reads their configured reminder delays
-//      (1, 3, and/or 6 months — stored per-user in
-//      notification_preferences) and sends a reminder notification for
-//      every active contract whose date_fin falls exactly on one of those
-//      future dates. A same-day duplicate guard prevents sending the same
-//      reminder twice.
+//   2. alertes:send — daily at 08:00
+//      Sends contract-expiry reminders:
+//        - 3 reminders during the contract's last month: 30, 15 and 3
+//          days before date_fin.
+//        - 1 additional reminder 1-2 days after date_fin (post-expiry),
+//          checked on both J+1 and J+2 so a missed scheduler run doesn't
+//          silently skip the notification.
+//      Each reminder is sent once per contract (guarded by the `alertes`
+//      table) and fires in-app + email to BOTH the domiciliataire and
+//      the client via NotificationService.
+//
+// FIX: the previous version of this file called
+// sendReminderEmailIfEnabled() but that function was commented out —
+// every run of this cron threw "Call to undefined function". Its logic
+// now lives in NotificationService::sendReminderEmailIfEnabled(), called
+// through notifyContractReminder().
 
+use App\Models\Alerte;
+use App\Models\Contrat;
+use App\Services\NotificationService;
+use Carbon\Carbon;
 use Illuminate\Foundation\Inspiring;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Schedule;
-use App\Models\Alerte;
-use App\Models\AppNotification;
-use App\Models\Contrat;
-use App\Models\User;
-use Carbon\Carbon;
-use App\Mail\ContractReminderMail;
-use Illuminate\Support\Facades\Mail;
 
 Artisan::command('inspire', function () {
     $this->comment(Inspiring::quote());
@@ -42,50 +41,23 @@ Schedule::command('contracts:expire-check')
     ->name('contracts:expire-check')
     ->withoutOverlapping();
 
-// function sendReminderEmailIfEnabled(\App\Models\Contrat $contrat, string $reminderType): void
-// {
-//     $domiciliataire = $contrat->domiciliataire;
-//     if (!$domiciliataire || !$domiciliataire->email_alerts_enabled) {
-//         return;
-//     }
-
-//     $clientEmail = $contrat->entreprise?->representant?->email
-//         ?? $contrat->entreprise?->clientUser?->email
-//         ?? null;
-
-//     if (!$clientEmail) {
-//         return;
-//     }
-
-//     Mail::to($clientEmail)->queue(new \App\Mail\ContractReminderMail($contrat, $reminderType));
-// }
-
-
-// ── Cron 2: renewal reminder alerts (multi-delay, per-domiciliataire) ────
+// ── Cron 2: renewal reminder alerts (3 pre-expiry + 1 post-expiry) ───────
 Schedule::call(function () {
+    $notifications = app(NotificationService::class);
     $today = Carbon::today();
 
-    $reminderOffsets = [
-        30 => '⏳ Le contrat de %s expire dans 1 mois (le %s). Pensez à préparer le renouvellement.',
-        15 => '⏳ Le contrat de %s expire dans 15 jours (le %s).',
-        3  => '⏳ Le contrat de %s expire dans 3 jours (le %s). Dernière ligne droite pour le renouvellement.',
-    ];
-
-    foreach ($reminderOffsets as $daysBefore => $template) {
+    // "3 rappels durant le dernier mois du contrat": 30, 15 and 3 days
+    // before date_fin — all inside the last 30-day window.
+    foreach ([30, 15, 3] as $daysBefore) {
         $targetDate = $today->copy()->addDays($daysBefore);
+        $reminderType = "pre_expiry_{$daysBefore}";
 
         $contrats = Contrat::where('statut', 'active')
             ->whereDate('date_fin', $targetDate)
-            ->with([
-                'entreprise:id,raison_sociale',
-                'entreprise.representant', // needed for the client's email
-                'domiciliataire',
-            ])
+            ->with(['entreprise.representant', 'entreprise.clientUser', 'domiciliataire'])
             ->get();
 
         foreach ($contrats as $contrat) {
-            $reminderType = "pre_expiry_{$daysBefore}";
-
             $alreadySent = Alerte::where('contrat_id', $contrat->id)
                 ->where('type', $reminderType)
                 ->exists();
@@ -94,21 +66,7 @@ Schedule::call(function () {
                 continue;
             }
 
-            // In-app notification (unchanged behavior)
-            AppNotification::create([
-                'user_id' => $contrat->domiciliataire_id,
-                'contrat_id' => $contrat->id,
-                'message' => sprintf(
-                    $template,
-                    $contrat->entreprise?->raison_sociale ?? 'un client',
-                    $contrat->date_fin->format('d/m/Y')
-                ),
-                'is_read' => false,
-            ]);
-
-            // Email to the client, if the domiciliataire has email alerts on
-            // and the client has a reachable email address.
-            sendReminderEmailIfEnabled($contrat, $reminderType);
+            $notifications->notifyContractReminder($contrat, $reminderType);
 
             Alerte::create([
                 'contrat_id' => $contrat->id,
@@ -119,57 +77,33 @@ Schedule::call(function () {
         }
     }
 
-    // ── Post-expiry reminder (J+1) ──────────────────────────────────────
-    $postExpiryDate = $today->copy()->subDay();
-
-    $expiredContrats = Contrat::where('statut', 'expired')
-        ->whereDate('date_fin', $postExpiryDate)
-        ->with([
-            'entreprise:id,raison_sociale',
-            'entreprise.representant',
-            'domiciliataire',
-        ])
-        ->get();
-
-    foreach ($expiredContrats as $contrat) {
+    // "1 rappel supplémentaire 1 à 2 jours après la fin du contrat".
+    foreach ([1, 2] as $daysAfter) {
+        $postExpiryDate = $today->copy()->subDays($daysAfter);
         $reminderType = 'post_expiry';
 
-        $alreadySent = Alerte::where('contrat_id', $contrat->id)
-            ->where('type', $reminderType)
-            ->exists();
+        $expiredContrats = Contrat::where('statut', 'expired')
+            ->whereDate('date_fin', $postExpiryDate)
+            ->with(['entreprise.representant', 'entreprise.clientUser', 'domiciliataire'])
+            ->get();
 
-        if ($alreadySent) {
-            continue;
+        foreach ($expiredContrats as $contrat) {
+            $alreadySent = Alerte::where('contrat_id', $contrat->id)
+                ->where('type', $reminderType)
+                ->exists();
+
+            if ($alreadySent) {
+                continue;
+            }
+
+            $notifications->notifyContractReminder($contrat, $reminderType);
+
+            Alerte::create([
+                'contrat_id' => $contrat->id,
+                'date_alerte' => $today,
+                'type' => $reminderType,
+                'envoye' => true,
+            ]);
         }
-
-        AppNotification::create([
-            'user_id' => $contrat->domiciliataire_id,
-            'contrat_id' => $contrat->id,
-            'message' => sprintf(
-                '❌ Le contrat de %s a expiré le %s. Contactez le client pour un renouvellement.',
-                $contrat->entreprise?->raison_sociale ?? 'un client',
-                $contrat->date_fin->format('d/m/Y')
-            ),
-            'is_read' => false,
-        ]);
-
-        sendReminderEmailIfEnabled($contrat, $reminderType);
-
-        Alerte::create([
-            'contrat_id' => $contrat->id,
-            'date_alerte' => $today,
-            'type' => $reminderType,
-            'envoye' => true,
-        ]);
     }
 })->dailyAt('08:00')->name('alertes:send')->withoutOverlapping();
-
-/**
- * Sends the reminder email to the client's address, provided:
- *   - the domiciliataire has email_alerts_enabled === true
- *   - the client (via representant, falling back to the linked client
- *     user account) has a usable email address
- *
- * Queued (::queue instead of ::send) so a slow/failing mail provider
- * never blocks or crashes the scheduled job for other contracts.
- */

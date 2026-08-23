@@ -2,18 +2,20 @@
 // pages/admin/clients/index.vue
 //
 // Client list page.
-// Redesign notes:
-//   - Rows are now presented as compact "account cards" (avatar, company
-//     name, account number, status pill, representative summary) instead
-//     of plain list rows, matching the dark/gold visual language used on
-//     the client detail page.
-//   - Every value rendered here already exists on the client object as
-//     used elsewhere in the app (raison_sociale, statut, capital, ville,
-//     forme_juridique, representant.*). Nothing is invented — fields that
-//     may be absent are guarded with v-if so the layout degrades cleanly.
+//
+// Password field (create mode only):
+//   - Optional. Left blank → backend generates a random password and
+//     returns it once; PasswordRevealModal shows it so the domiciliataire
+//     can copy it for the client.
+//   - Filled in (typed manually, or pre-filled via the "Générer" button)
+//     → sent as-is; no reveal modal afterwards since the domiciliataire
+//     already has it in the form they just typed.
+//   - Not shown at all in edit mode — changing an existing client's
+//     password is a separate action (reset), not part of profile edits.
 
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
+import PasswordRevealModal from '~/components/PasswordRevealModal.vue'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
@@ -29,7 +31,8 @@ const search      = ref('')
 const serverError = ref('')
 
 /**
- * Exactly the eight fields collected for a client + its representative.
+ * client_email/client_password only apply in create mode — they're not
+ * sent by update() at all (see submitEntreprise()).
  */
 const form = reactive({
   raison_sociale:        '',
@@ -40,7 +43,29 @@ const form = reactive({
   gerant_date_naissance: '',
   gerant_adresse:        '', // residence address as on CIN/Passport
   gerant_cin:            '',
+  client_email:          '', // client portal login
+  client_password:       '', // optional — blank = auto-generated
 })
+
+// ── Generated-password reveal modal state ──────────────────────
+const showPasswordModal   = ref(false)
+const revealedPassword    = ref('')
+const revealedClientName  = ref('')
+
+/**
+ * Fills the password field with a random suggestion the domiciliataire
+ * can accept, edit, or clear. Purely a client-side convenience — the
+ * value is only "real" once the form is submitted; leaving the field
+ * blank still lets the backend generate its own on submit.
+ */
+function generateSuggestedPassword(): void {
+  const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz23456789'
+  let out = ''
+  for (let i = 0; i < 10; i++) {
+    out += alphabet[Math.floor(Math.random() * alphabet.length)]
+  }
+  form.client_password = out
+}
 
 // ── Search / filter ──────────────────────────────────────────
 const filtered = computed(() => {
@@ -58,7 +83,6 @@ const filtered = computed(() => {
 })
 
 // ── Small display helpers ────────────────────────────────────
-/** Status pill color map, mirrored from the client detail page. */
 const statutColor: Record<string, string> = {
   actif: '#22c55e',
   inactif: '#ef4444',
@@ -76,6 +100,7 @@ function resetForm(): void {
     gerant_nom: '', gerant_prenom: '', gerant_email: '',
     gerant_telephone: '', gerant_date_naissance: '',
     gerant_adresse: '', gerant_cin: '',
+    client_email: '', client_password: '',
   })
 }
 
@@ -99,7 +124,9 @@ function openEdit(client: any): void {
     gerant_telephone:      client.representant?.telephone      ?? '',
     gerant_date_naissance: client.representant?.date_naissance ?? '',
     gerant_adresse:        client.representant?.adresse        ?? '',
-    gerant_cin:            client.representant?.cin            ?? '',
+    gerant_cin:            client.representant?.cin             ?? '',
+    client_email:          '',
+    client_password:       '',
   })
   showModal.value = true
 }
@@ -109,13 +136,26 @@ async function submitEntreprise(): Promise<void> {
   saving.value      = true
   try {
     if (modalMode.value === 'create') {
-      // Step 1: create the company record.
-      const newClient = await clientsStore.create({
-        raison_sociale: form.raison_sociale,
+      if (!form.client_email.trim()) {
+        serverError.value = "L'email d'accès au portail client est obligatoire."
+        saving.value = false
+        return
+      }
+
+      // Step 1: create the company record + linked client portal account.
+      // client_password is passed through as-is: blank means "let the
+      // backend generate one", filled means "use exactly this".
+      const { entreprise, generatedPassword } = await clientsStore.create({
+        raison_sociale:    form.raison_sociale,
+        client_nom:        form.gerant_nom    || 'Non renseigné',
+        client_prenom:     form.gerant_prenom || undefined,
+        client_email:      form.client_email,
+        client_telephone:  form.gerant_telephone || undefined,
+        client_password:   form.client_password  || undefined,
       })
 
       // Step 2: create the linked legal representative.
-      await clientsStore.createRepresentant(newClient.id, {
+      await clientsStore.createRepresentant(entreprise.id, {
         nom:            form.gerant_nom    || 'Non renseigné',
         prenom:         form.gerant_prenom || 'Non renseigné',
         cin:            form.gerant_cin    || 'Non renseigné',
@@ -126,6 +166,16 @@ async function submitEntreprise(): Promise<void> {
       })
 
       success('Client créé avec succès')
+      showModal.value = false
+
+      // Only show the reveal modal when the backend generated the
+      // password itself — if the domiciliataire typed their own, they
+      // already have it and don't need it echoed back.
+      if (generatedPassword) {
+        revealedPassword.value   = generatedPassword
+        revealedClientName.value = entreprise.raison_sociale
+        showPasswordModal.value  = true
+      }
 
     } else if (editId.value) {
       await clientsStore.update(editId.value, {
@@ -143,9 +193,9 @@ async function submitEntreprise(): Promise<void> {
       })
 
       success('Client mis à jour')
+      showModal.value = false
     }
 
-    showModal.value = false
     await clientsStore.fetchAll()
 
   } catch (e: any) {
@@ -181,7 +231,6 @@ onMounted(() => clientsStore.fetchAll())
 
     <!-- ── Search ────────────────────────────────────────── -->
     <div class="relative w-full max-w-xl">
-    <!-- Search Icon -->
     <svg
         class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-text-faint)]"
         viewBox="0 0 24 24"
@@ -195,7 +244,6 @@ onMounted(() => clientsStore.fetchAll())
         <path d="m20 20-3.8-3.8" />
     </svg>
 
-    <!-- Input -->
     <input
         v-model.trim="search"
         type="search"
@@ -209,7 +257,6 @@ onMounted(() => clientsStore.fetchAll())
         @keyup.esc="search = ''"
     />
 
-    <!-- Clear Button -->
     <button
         v-if="search"
         type="button"
@@ -248,7 +295,6 @@ onMounted(() => clientsStore.fetchAll())
           :to="`/admin/clients/${client.id}`"
           class="flex items-center gap-4 min-w-0 flex-1 group"
         >
-          <!-- Avatar -->
           <div
             class="w-11 h-11 rounded-xl flex items-center justify-center
                    font-bold text-sm shrink-0"
@@ -258,15 +304,11 @@ onMounted(() => clientsStore.fetchAll())
           </div>
 
           <div class="min-w-0">
-            <!-- Company name + account number + status pill -->
             <div class="flex items-center gap-2 flex-wrap">
               <p class="font-semibold truncate group-hover:underline"
                  style="text-underline-offset:3px; color: var(--app-text)">
                 {{ client.raison_sociale }}
               </p>
-              <!-- <span class="text-[11px]" style="color: var(--app-text-faint)">
-                Compte #{{ client.id }}
-              </span> -->
               <span
                 v-if="client.statut"
                 class="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
@@ -274,7 +316,6 @@ onMounted(() => clientsStore.fetchAll())
               >{{ client.statut }}</span>
             </div>
 
-            <!-- Representative summary -->
             <p
               v-if="client.representant"
               class="text-xs mt-0.5 truncate"
@@ -285,7 +326,6 @@ onMounted(() => clientsStore.fetchAll())
               <span v-if="client.representant.email"> · {{ client.representant.email }}</span>
             </p>
 
-            <!-- Secondary meta: only shown when the field exists -->
             <p
               v-if="client.ville || client.forme_juridique"
               class="text-[11px] mt-0.5 truncate"
@@ -318,7 +358,7 @@ onMounted(() => clientsStore.fetchAll())
       </button>
     </div>
 
-    <!-- ── Create / edit modal (unchanged fields) ────────── -->
+    <!-- ── Create / edit modal ───────────────────────────── -->
     <Teleport to="body">
       <div
         v-if="showModal"
@@ -376,7 +416,7 @@ onMounted(() => clientsStore.fetchAll())
                   <input v-model="form.gerant_prenom" class="f-input" required placeholder="LAETITIA" />
                 </div>
                 <div>
-                  <label class="f-label">Email</label>
+                  <label class="f-label">Email (contact représentant)</label>
                   <input v-model="form.gerant_email" class="f-input" type="email" placeholder="laetitia@exemple.com" />
                 </div>
                 <div>
@@ -402,6 +442,52 @@ onMounted(() => clientsStore.fetchAll())
                 </div>
               </div>
 
+              <!-- ── Portail client — création uniquement ─────────── -->
+              <template v-if="modalMode === 'create'">
+                <div class="pt-1">
+                  <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">
+                    Accès portail client
+                  </p>
+                  <p class="text-xs mt-0.5" style="color:var(--app-text-faint)">
+                    Identifiants de connexion à l'espace client
+                  </p>
+                </div>
+
+                <div class="grid grid-cols-1 gap-3">
+                  <div>
+                    <label class="f-label">Email de connexion *</label>
+                    <input
+                      v-model="form.client_email"
+                      class="f-input"
+                      type="email"
+                      required
+                      placeholder="contact@westodyssee.com"
+                    />
+                  </div>
+
+                  <div>
+                    <div class="flex items-center justify-between mb-1">
+                      <label class="f-label mb-0">Mot de passe</label>
+                      <button type="button" class="text-xs underline" style="color:#c8a96e" @click="generateSuggestedPassword">
+                        Générer automatiquement
+                      </button>
+                    </div>
+                    <input
+                      v-model="form.client_password"
+                      class="f-input font-mono"
+                      type="text"
+                      placeholder="Laisser vide pour générer automatiquement"
+                      minlength="8"
+                    />
+                    <p class="text-[10px] mt-1" style="color:var(--app-text-faint)">
+                      Minimum 8 caractères. Si laissé vide, un mot de passe sera généré
+                      et affiché après la création du client. Le client sera invité à le
+                      changer à sa première connexion.
+                    </p>
+                  </div>
+                </div>
+              </template>
+
               <p v-if="serverError" class="text-red-400 text-sm">{{ serverError }}</p>
 
               <div class="flex gap-3 justify-end pt-1">
@@ -424,6 +510,14 @@ onMounted(() => clientsStore.fetchAll())
         </div>
       </div>
     </Teleport>
+
+    <!-- ── Generated-password reveal modal ───────────────── -->
+    <PasswordRevealModal
+      :show="showPasswordModal"
+      :password="revealedPassword"
+      :client-name="revealedClientName"
+      @close="showPasswordModal = false"
+    />
 
   </div>
 </template>

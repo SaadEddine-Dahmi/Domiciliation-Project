@@ -122,7 +122,7 @@ describe('Auth Store', () => {
 
         await auth.login({ email: 'x@x.ma', password: 'p' })
 
-        const raw = localStorage.getItem('astfisc_auth')
+        const raw = localStorage.getItem('app_auth')
         expect(raw).not.toBeNull()
         const stored = JSON.parse(raw!)
         expect(stored.token).toBe('my-token')
@@ -185,14 +185,14 @@ describe('Auth Store', () => {
         expect(auth.isAuthenticated).toBe(false)
         expect(auth.user).toBeNull()
         expect(auth.token).toBe('')
-        expect(localStorage.getItem('astfisc_auth')).toBeNull()
+        expect(localStorage.getItem('app_auth')).toBeNull()
     })
 
     // ── restoreSession ───────────────────────────────────────
 
     it('restoreSession restores user and token from localStorage', () => {
         // Write directly to mock localStorage BEFORE creating store
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             user: mockApiUser(),
             token: 'restored-token',
             savedAt: Date.now(),
@@ -210,7 +210,7 @@ describe('Auth Store', () => {
 
     it('restoreSession clears expired session', () => {
         const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             user: mockApiUser(),
             token: 'old-token',
             savedAt: eightDaysAgo,
@@ -222,18 +222,18 @@ describe('Auth Store', () => {
 
         expect(auth.token).toBe('')
         expect(auth.user).toBeNull()
-        expect(localStorage.getItem('astfisc_auth')).toBeNull()
+        expect(localStorage.getItem('app_auth')).toBeNull()
     })
 
     it('restoreSession clears corrupted localStorage data', () => {
-        localStorage.setItem('astfisc_auth', 'not-valid-json{{{')
+        localStorage.setItem('app_auth', 'not-valid-json{{{')
 
         setActivePinia(createPinia())
         const auth = useAuthStore()
         auth.restoreSession()
 
         expect(auth.token).toBe('')
-        expect(localStorage.getItem('astfisc_auth')).toBeNull()
+        expect(localStorage.getItem('app_auth')).toBeNull()
     })
 
     it('restoreSession does nothing when already authenticated', async () => {
@@ -246,7 +246,7 @@ describe('Auth Store', () => {
         await auth.login({ email: 'x@x.ma', password: 'p' })
 
         // Overwrite localStorage with different token
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             user: mockApiUser(), token: 'stale-token', savedAt: Date.now(),
         }))
 

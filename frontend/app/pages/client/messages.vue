@@ -14,7 +14,7 @@ function getApiBase() {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
@@ -82,14 +82,15 @@ onMounted(load)
     <div
       v-else-if="messages.length"
       class="rounded-2xl overflow-hidden"
-      style="background:#13161f;border:1px solid rgba(255,255,255,0.06)"
+      style="background: var(--app-surface); border: 1px solid var(--app-border-2)"
     >
       <div
         v-for="(msg, i) in messages" :key="msg.id"
-        class="px-5 py-4 cursor-pointer hover:bg-white/3 transition flex items-start gap-3"
-        :class="[
-          i < messages.length - 1 ? 'border-b border-white/5' : '',
-          !msg.is_read ? 'bg-gold/5' : ''
+        class="px-5 py-4 cursor-pointer transition flex items-start gap-3"
+        :class="[i < messages.length - 1 ? 'border-b' : '']"
+        :style="[
+          i < messages.length - 1 ? 'border-color: var(--app-border-2)' : '',
+          !msg.is_read ? 'background: rgba(200,169,110,0.05)' : '',
         ]"
         @click="openMsg(msg)"
       >
@@ -135,7 +136,8 @@ onMounted(load)
         </div>
 
         <div
-          class="rounded-xl border border-white/10 p-4 text-sm leading-relaxed whitespace-pre-wrap bg-white/3"
+          class="rounded-xl p-4 text-sm leading-relaxed whitespace-pre-wrap"
+          style="border: 1px solid var(--app-border); background: var(--app-surface-2)"
         >
           {{ openMessage.message }}
         </div>

@@ -18,7 +18,10 @@ return [
     // SECURITY: explicit whitelist — no wildcard
     // Set APP_FRONTEND_URL in your .env file
     'allowed_origins' => [
-        env('APP_FRONTEND_URL', 'http://localhost:3000'),
+        env('FRONTEND_URL', 'http://localhost:3000'),
+        'http://192.168.100.225:3000',
+        'http://localhost:3000',
+        'http://127.0.0.1:3000',
     ],
 
     'allowed_origins_patterns' => [],

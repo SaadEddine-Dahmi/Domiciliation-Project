@@ -1,6 +1,30 @@
 <!-- pages/admin/notifs.vue -->
 <script setup lang="ts">
+// pages/admin/notifs.vue
+//
+// Shared notifications page for the two "internal" roles that use the
+// /admin/* section: Domiciliataire and Super Admin (both nav trees link
+// here — see app.vue → adminNav / domiciNav). The notification feed
+// itself (GET /api/notifications) is already scoped server-side to
+// whatever the authenticated user is entitled to see, so the list
+// doesn't need role branching.
+//
+// CHANGE: the old "Alertes d'expiration" card let a Domiciliataire pick
+// custom reminder delays (1 / 3 / 6 months) via PUT
+// /api/notifications/preferences. That's been replaced by a fixed,
+// automatic schedule (see NotificationService::notifyContractReminder()
+// + routes/console.php): 3 reminders during the contract's last month
+// (30 / 15 / 3 days before date_fin) plus 1 extra reminder 1-2 days
+// after date_fin. Nothing is user-configurable anymore, so the
+// preferences UI, its localStorage cache and its API calls are gone —
+// replaced below with a small read-only card explaining the schedule.
+
+import { useAuthStore } from '~/stores/auth'
+
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
+
+const auth = useAuthStore()
+const isAdmin = computed(() => auth.isAdmin)
 
 const { success, error: toastError } = useToast()
 
@@ -19,83 +43,26 @@ function authHeaders(): Record<string, string> {
   } catch { return {} }
 }
 
-const notifications  = ref<any[]>([])
+const notifications = ref<any[]>([])
 const loading        = ref(true)
-const savingPrefs    = ref(false)
-const selectedDelays = ref<number[]>([1])
 const expandedId     = ref<number | null>(null)
 
 function toggleExpand(id: number): void {
   expandedId.value = expandedId.value === id ? null : id
 }
 
-// localStorage key uses generic prefix
-function readStorage(): number[] {
-  try {
-    const raw = localStorage.getItem('app_notif_delays')
-    if (raw) {
-      const p = JSON.parse(raw)
-      if (Array.isArray(p) && p.length) return p
-    }
-  } catch {}
-  return [1]
-}
-
-function writeStorage(d: number[]): void {
-  localStorage.setItem('app_notif_delays', JSON.stringify(d))
-}
-
 async function loadAll(): Promise<void> {
-  selectedDelays.value = readStorage()
   loading.value = true
   try {
-    const [notifsRes, prefsRes] = await Promise.all([
-      $fetch<{ success: boolean; data: any[] }>(
-        `${getApiBase()}/api/notifications`,
-        { headers: authHeaders() }
-      ),
-      $fetch<{ success: boolean; data: { delays: number[] } }>(
-        `${getApiBase()}/api/notifications/preferences`,
-        { headers: authHeaders() }
-      ).catch(() => ({ success: true, data: { delays: readStorage() } })),
-    ])
-    notifications.value = notifsRes.data ?? []
-    const db = prefsRes.data?.delays ?? []
-    if (Array.isArray(db) && db.length) {
-      selectedDelays.value = db
-      writeStorage(db)
-    }
+    const res = await $fetch<{ success: boolean; data: any[] }>(
+      `${getApiBase()}/api/notifications`,
+      { headers: authHeaders() }
+    )
+    notifications.value = res.data ?? []
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur chargement')
   } finally {
     loading.value = false
-  }
-}
-
-function toggleDelay(m: number): void {
-  const cur = [...selectedDelays.value]
-  if (cur.includes(m)) {
-    if (cur.length === 1) return
-    selectedDelays.value = cur.filter(d => d !== m)
-  } else {
-    selectedDelays.value = [...cur, m].sort((a, b) => a - b)
-  }
-  writeStorage(selectedDelays.value)
-}
-
-async function savePreferences(): Promise<void> {
-  savingPrefs.value = true
-  try {
-    await $fetch(`${getApiBase()}/api/notifications/preferences`, {
-      method: 'PUT', headers: authHeaders(),
-      body: { delays: selectedDelays.value },
-    })
-    writeStorage(selectedDelays.value)
-    success(`✓ Alertes : ${selectedDelays.value.sort((a,b)=>a-b).map(d=>`${d} mois`).join(', ')} avant expiration`)
-  } catch (e: any) {
-    toastError?.(e?.data?.message ?? 'Erreur sauvegarde')
-  } finally {
-    savingPrefs.value = false
   }
 }
 
@@ -130,7 +97,21 @@ function notifColor(n: any): string {
   if (msg.includes('expir'))    return '#f59e0b'
   if (msg.includes('contrat'))  return '#c8a96e'
   if (msg.includes('document')) return '#60a5fa'
+  // Account/signup notifications (Super Admin: new domiciliataire
+  // requests) — same yellow used for "pending" everywhere else in the
+  // admin UI (dashboard.vue, domiciliataires.vue).
+  if (msg.includes('compte') || msg.includes('inscription') || msg.includes('domiciliataire')) return '#facc15'
   return '#94a3b8'
+}
+
+/** True when a notification is about an account/signup event rather
+ *  than a contract/document/payment one — used to offer a "manage
+ *  domiciliataires" shortcut in the expanded view instead of the
+ *  contract-specific fields, which won't be present on this kind of
+ *  notification anyway. */
+function isAccountNotif(n: any): boolean {
+  const msg = (n.message ?? '').toLowerCase()
+  return msg.includes('compte') || msg.includes('inscription') || msg.includes('domiciliataire')
 }
 
 onMounted(loadAll)
@@ -149,29 +130,37 @@ onMounted(loadAll)
       </button>
     </div>
 
-    <div class="card p-5 space-y-4">
+    <!-- Fixed expiry-reminder schedule — read-only, Domiciliataire only.
+         Replaces the old configurable 1/3/6-month preference card: the
+         schedule is now automatic and identical for every contract. -->
+    <div v-if="!isAdmin" class="card p-5 space-y-3">
       <div>
         <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">Alertes d'expiration</p>
-        <p class="text-xs mt-1" style="color:var(--app-text-muted)">Rappel avant la date d'expiration. Plusieurs délais possibles.</p>
+        <p class="text-xs mt-1" style="color:var(--app-text-muted)">
+          Le rappel est désormais automatique et s'applique à tous vos contrats — rien à configurer.
+        </p>
       </div>
-      <div class="flex gap-3 flex-wrap">
-        <button v-for="m in [1, 3, 6]" :key="m"
-                class="px-5 py-2.5 rounded-xl text-sm font-bold border transition-all duration-150"
-                :style="selectedDelays.includes(m)
-                  ? 'border-color:#c8a96e;background:rgba(200,169,110,0.15);color:#c8a96e'
-                  : 'border-color:var(--app-border);color:var(--app-text-faint)'"
-                @click="toggleDelay(m)">
-          {{ m }} mois <span v-if="selectedDelays.includes(m)">✓</span>
-        </button>
-      </div>
-      <p class="text-xs" style="color:var(--app-text-muted)">
-        Actif : <span class="font-semibold" style="color:#c8a96e">
-          {{ selectedDelays.sort((a,b)=>a-b).map(d=>`${d} mois`).join(', ') }}
-        </span>
+      <ul class="space-y-2 text-sm">
+        <li class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:#c8a96e" />
+          <span style="color:var(--app-text)">Rappel 1 mois avant l'expiration</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:#c8a96e" />
+          <span style="color:var(--app-text)">Rappel 15 jours avant l'expiration</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:#c8a96e" />
+          <span style="color:var(--app-text)">Rappel 3 jours avant l'expiration</span>
+        </li>
+        <li class="flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full shrink-0" style="background:#f59e0b" />
+          <span style="color:var(--app-text)">Rappel supplémentaire 1 à 2 jours après la fin du contrat</span>
+        </li>
+      </ul>
+      <p class="text-xs" style="color:var(--app-text-faint)">
+        Vous et votre client recevez chacun ces rappels par notification et par e-mail.
       </p>
-      <button class="btn btn-gold btn-md" :disabled="savingPrefs" @click="savePreferences">
-        {{ savingPrefs ? 'Enregistrement...' : 'Enregistrer les préférences' }}
-      </button>
     </div>
 
     <div v-if="loading" class="space-y-2">
@@ -226,17 +215,28 @@ onMounted(loadAll)
               </div>
               <p style="color:var(--app-text)">{{ n.message }}</p>
               <div class="pt-2 space-y-1 text-xs" style="color:var(--app-text-muted)">
+                <!-- Contract/document/payment context — present on
+                     Domiciliataire-facing notifications. -->
                 <p v-if="n.data?.contrat_id"><span class="font-medium" style="color:var(--app-text)">Contrat ID :</span> #{{ n.data.contrat_id }}</p>
                 <p v-if="n.data?.entreprise"><span class="font-medium" style="color:var(--app-text)">Entreprise :</span> {{ n.data.entreprise }}</p>
                 <p v-if="n.data?.montant"><span class="font-medium" style="color:var(--app-text)">Montant :</span> {{ n.data.montant }} DH</p>
                 <p v-if="n.data?.date_expiration"><span class="font-medium" style="color:var(--app-text)">Expiration :</span> {{ n.data.date_expiration }}</p>
+                <!-- Account/signup context — present on Super-Admin-facing
+                     notifications (new domiciliataire requests). -->
+                <p v-if="n.data?.domiciliataire"><span class="font-medium" style="color:var(--app-text)">Domiciliataire :</span> {{ n.data.domiciliataire }}</p>
+                <p v-if="n.data?.email"><span class="font-medium" style="color:var(--app-text)">Email :</span> {{ n.data.email }}</p>
                 <p><span class="font-medium" style="color:var(--app-text)">Reçu le :</span> {{ formatDate(n.created_at) }}</p>
                 <p><span class="font-medium" style="color:var(--app-text)">Statut :</span>
                   <span :style="n.is_read ? 'color:#22c55e' : 'color:#f59e0b'">{{ n.is_read ? 'Lu' : 'Non lu' }}</span>
                 </p>
               </div>
-              <div class="flex gap-2 pt-2">
+              <div class="flex gap-2 pt-2 flex-wrap">
                 <button v-if="!n.is_read" class="btn btn-outline btn-sm" @click="markRead(n.id)">Marquer comme lu</button>
+                <!-- Shortcut to act on the request — only for Super
+                     Admin, and only on account/signup notifications. -->
+                <NuxtLink v-if="isAdmin && isAccountNotif(n)" to="/admin/domiciliataires" class="btn btn-gold btn-sm">
+                  Gérer les domiciliataires
+                </NuxtLink>
                 <button class="btn btn-outline btn-sm" @click="expandedId = null">Fermer</button>
               </div>
             </div>

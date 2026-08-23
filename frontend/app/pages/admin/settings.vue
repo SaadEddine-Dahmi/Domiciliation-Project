@@ -2,16 +2,21 @@
 <script setup lang="ts">
 // pages/admin/settings.vue
 //
-// Domiciliataire account settings, organized into tabbed sections so
-// related fields are grouped together instead of one long scroll of
-// stacked cards.
+// Shared account-settings page for the two "internal" roles that use the
+// /admin/* section: Domiciliataire and Super Admin. Both reach this same
+// route, but a Super Admin does not run a domiciliation company, so the
+// tab list is role-aware and only the tabs that apply to the current
+// user are shown.
 //
-//   Profil            → photo, nom/prenom/telephone
+//   Profil            → photo, nom/prenom/telephone          (both roles)
 //   Société & contrat → company identity, RC/IF/TP, representative
-//                        contact, contract_title, adresses
-//   Sécurité          → password change
+//                        contact, contract_title, adresses    (domiciliataire only)
+//   Sécurité          → password change                      (both roles)
 //   Historique        → recent activity feed (with per-field before/after
-//                        diffs) + full JSON/HTML export
+//                        diffs) + full JSON/HTML export       (domiciliataire only —
+//                        it tracks changes to a domiciliataire's own
+//                        clients/representatives/contracts, which a
+//                        Super Admin does not have)
 //
 // Backend endpoints used:
 //   GET/PUT     /api/profile
@@ -48,24 +53,39 @@ function fmtDateTime(d: string | null | undefined): string {
 }
 
 // ══════════════════════════════════════════════════════════════
-// Tab navigation
+// Tab navigation — role-aware
 // ══════════════════════════════════════════════════════════════
 
 type TabId = 'profil' | 'societe' | 'securite' | 'historique'
 
-const tabs: { id: TabId; label: string }[] = [
-  { id: 'profil', label: 'Profil' },
-  { id: 'societe', label: 'Société & contrat' },
-  { id: 'securite', label: 'Sécurité' },
-  { id: 'historique', label: 'Historique & export' },
-]
+/** Tabs that only make sense for a Domiciliataire (they describe a
+ *  company: RC/IF/TP, legal representative, contract title, and the
+ *  activity log of that company's own clients/contracts). A Super Admin
+ *  has none of that, so those two tabs are simply not rendered for them
+ *  — not just hidden, never mounted, so their fetch calls never fire. */
+const tabs = computed<{ id: TabId; label: string }[]>(() => {
+  const base: { id: TabId; label: string }[] = [
+    { id: 'profil', label: 'Profil' },
+  ]
+  if (!auth.isAdmin) {
+    base.push({ id: 'societe', label: 'Société & contrat' })
+  }
+  base.push({ id: 'securite', label: 'Sécurité' })
+  if (!auth.isAdmin) {
+    base.push({ id: 'historique', label: 'Historique & export' })
+  }
+  return base
+})
 
 const activeTab = ref<TabId>('profil')
 
 /** Flags an incomplete profile even while the user is on another tab,
  *  so the warning banner (and a dot on the "Société" tab) stays visible
- *  regardless of which section is currently open. */
-const showIncompleteDot = computed(() => !profile.profile_complete && !loadingProfile.value)
+ *  regardless of which section is currently open. Only applies to
+ *  Domiciliataire — a Super Admin has no company profile to complete. */
+const showIncompleteDot = computed(() =>
+  !auth.isAdmin && !profile.profile_complete && !loadingProfile.value
+)
 
 // ══════════════════════════════════════════════════════════════
 // 1. Profile: GET/PUT /api/profile, photo upload/delete
@@ -113,8 +133,9 @@ async function fetchProfile(): Promise<void> {
       { headers: authHeaders() }
     )
     Object.assign(profile, res.data)
-    if (!profile.adresses.length) {
-      // Always keep at least the siège social row visible/editable.
+    // The "siège social" placeholder row only matters for a Domiciliataire's
+    // address list — a Super Admin never sees or edits the addresses field.
+    if (!auth.isAdmin && !profile.adresses.length) {
       profile.adresses = [{ label: 'Siège social', value: '' }]
     }
   } catch (e: any) {
@@ -127,12 +148,17 @@ async function fetchProfile(): Promise<void> {
 async function saveProfile(): Promise<void> {
   savingProfile.value = true
   try {
-    const res = await $fetch<{ success: boolean; profile_complete: boolean }>(
-      `${getApiBase()}/api/profile`,
-      {
-        method: 'PUT',
-        headers: authHeaders(),
-        body: {
+    // Super Admin only ever edits their personal identity — sending the
+    // entreprise fields for a role that has no company would either be
+    // silently ignored server-side or, worse, write stray empty values
+    // over data that isn't theirs. Keep the payload role-scoped.
+    const body = auth.isAdmin
+      ? {
+          nom: profile.nom,
+          prenom: profile.prenom,
+          telephone: profile.telephone,
+        }
+      : {
           nom: profile.nom,
           prenom: profile.prenom,
           telephone: profile.telephone,
@@ -146,8 +172,11 @@ async function saveProfile(): Promise<void> {
           if_fiscal: profile.if_fiscal,
           tp: profile.tp,
           adresses: profile.adresses.filter(a => a.value.trim() !== ''),
-        },
-      }
+        }
+
+    const res = await $fetch<{ success: boolean; profile_complete: boolean }>(
+      `${getApiBase()}/api/profile`,
+      { method: 'PUT', headers: authHeaders(), body }
     )
     profile.profile_complete = res.profile_complete
     success('Profil mis à jour')
@@ -378,7 +407,10 @@ async function requestDataExport(format: 'json' | 'html'): Promise<void> {
 
 onMounted(() => {
   fetchProfile()
-  fetchActivity()
+  // The activity log tracks a Domiciliataire's own clients/representants/
+  // contrats — a Super Admin has none of those, and the "Historique" tab
+  // isn't even rendered for them (see `tabs` above), so skip the call.
+  if (!auth.isAdmin) fetchActivity()
 })
 </script>
 
@@ -390,7 +422,8 @@ onMounted(() => {
       <p class="text-app-text/50 text-sm mt-1">Gérez vos préférences et informations</p>
     </div>
 
-    <!-- ══════════ Incomplete profile notice (always visible) ═══ -->
+    <!-- ══════════ Incomplete profile notice — Domiciliataire only,
+         `showIncompleteDot` already excludes Super Admin ══════════ -->
     <div v-if="showIncompleteDot" class="card p-4 flex items-center gap-3"
          style="border: 1px solid rgba(234,179,8,0.3); background: rgba(234,179,8,0.06)">
       <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#eab308" stroke-width="2" class="shrink-0">
@@ -402,7 +435,8 @@ onMounted(() => {
       </p>
     </div>
 
-    <!-- ══════════ Tab bar ═══════════════════════════════════ -->
+    <!-- ══════════ Tab bar — `tabs` is role-aware; a Super Admin only
+         ever sees Profil + Sécurité ═══════════════════════════════ -->
     <div class="flex gap-2 flex-wrap border-b pb-0" style="border-color: var(--app-border-2)">
       <button
         v-for="tab in tabs"
@@ -429,7 +463,7 @@ onMounted(() => {
 
     <template v-else>
 
-      <!-- ══════════ TAB: Profil ══════════════════════════════ -->
+      <!-- ══════════ TAB: Profil — shown to every role ═══════════ -->
       <div v-show="activeTab === 'profil'" class="card p-6">
         <div class="flex items-center gap-4">
           <div class="relative shrink-0">
@@ -467,7 +501,7 @@ onMounted(() => {
               </span>
               <span class="text-[10px] px-2 py-0.5 rounded-full font-semibold uppercase tracking-wide"
                     style="color: #c8a96e; background: rgba(200,169,110,0.12)">
-                {{ auth.user?.role ?? 'Domiciliataire' }}
+                {{ auth.user?.role ?? 'Utilisateur' }}
               </span>
             </div>
             <div class="flex items-center gap-2 mt-2">
@@ -505,7 +539,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- ══════════ TAB: Société & contrat ═══════════════════ -->
+      <!-- ══════════ TAB: Société & contrat — never rendered for
+           Super Admin, since `tabs` excludes it above ═══════════ -->
       <div v-show="activeTab === 'societe'" class="card p-6 space-y-4">
         <div>
           <p class="text-xs uppercase text-gold tracking-widest font-bold">Société & contrat</p>
@@ -597,7 +632,7 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- ══════════ TAB: Sécurité ═════════════════════════════ -->
+      <!-- ══════════ TAB: Sécurité — shown to every role ══════════ -->
       <div v-show="activeTab === 'securite'" class="card p-6">
         <p class="text-xs uppercase text-gold tracking-widest font-bold mb-1">Sécurité</p>
         <p class="text-xs mb-4" style="color: var(--app-text-faint)">
@@ -615,7 +650,8 @@ onMounted(() => {
         </div>
       </div>
 
-      <!-- ══════════ TAB: Historique & export ══════════════════ -->
+      <!-- ══════════ TAB: Historique & export — never rendered for
+           Super Admin, since `tabs` excludes it above ══════════════ -->
       <div v-show="activeTab === 'historique'" class="card p-6 space-y-4">
         <div>
           <p class="text-xs uppercase text-gold tracking-widest font-bold">Historique & export de données</p>
@@ -637,7 +673,6 @@ onMounted(() => {
           <div v-else-if="activity.length" class="space-y-2">
             <div v-for="item in activity" :key="item.id" class="rounded-lg overflow-hidden" style="background: rgba(255,255,255,0.03)">
 
-              <!-- Entry header row — click to expand the field-by-field diff -->
               <button
                 type="button"
                 class="w-full flex items-center justify-between gap-3 text-sm px-3 py-2 text-left"
@@ -665,7 +700,6 @@ onMounted(() => {
                 </span>
               </button>
 
-              <!-- "Champs modifiés" — before/after breakdown per field -->
               <div v-if="expandedIds.has(item.id) && item.diff.length" class="px-3 pb-3 pt-1">
                 <p class="text-[10px] uppercase tracking-wide font-bold mb-1.5" style="color: var(--app-text-faint)">
                   Champs modifiés

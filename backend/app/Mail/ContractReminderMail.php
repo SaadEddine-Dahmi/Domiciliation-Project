@@ -50,13 +50,14 @@ class ContractReminderMail extends Mailable
     private function subjectFor(string $type): string
     {
         $societe = $this->contrat->domiciliataire?->nom_societe ?? 'Votre domiciliataire';
+        $title = $this->contrat->titre_contrat ?: "Contrat #{$this->contrat->id}";
 
         return match ($type) {
-            'pre_expiry_30' => "{$societe} — Votre contrat expire dans 1 mois",
-            'pre_expiry_15' => "{$societe} — Votre contrat expire dans 15 jours",
-            'pre_expiry_3'  => "{$societe} — Votre contrat expire dans 3 jours",
-            'post_expiry'   => "{$societe} — Votre contrat a expiré",
-            default         => "{$societe} — Rappel concernant votre contrat",
+            'pre_expiry_30' => "{$societe} — « {$title} » expire dans 1 mois",
+            'pre_expiry_15' => "{$societe} — « {$title} » expire dans 15 jours",
+            'pre_expiry_3' => "{$societe} — « {$title} » expire dans 3 jours",
+            'post_expiry' => "{$societe} — « {$title} » a expiré",
+            default => "{$societe} — Rappel concernant « {$title} »",
         };
     }
 }

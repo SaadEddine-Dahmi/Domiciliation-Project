@@ -8,6 +8,15 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const auth = useAuthStore()
 const { success, error: toastError } = useToast()
 
+// This page is the DOMICILIATAIRE company profile — société, RC/IF/TP,
+// legal representative, addresses. A Super Admin doesn't run a
+// domiciliation company, so none of that applies to them. Super Admin
+// has no nav link here (see app.vue → adminNav), but guard the direct
+// URL too: send them to their own account settings instead.
+if (auth.isAdmin) {
+  await navigateTo('/admin/settings')
+}
+
 function getApiBase() {
   const config = useRuntimeConfig()
   return (config.public.apiBase as string) ?? ''
@@ -43,9 +52,6 @@ const form = reactive({
 })
 
 // ── Representative fields — saved via PUT /api/profile/representant ─
-// This is now a SEPARATE record (polymorphic Representant), not columns
-// on domiciliataire_profiles. Kept in its own reactive object so the two
-// save calls never accidentally mix payloads.
 const repForm = reactive({
   nom: '',
   prenom: '',
@@ -93,8 +99,6 @@ async function fetchProfile(): Promise<void> {
       tp: d.tp ?? '',
     })
 
-    // The representative now arrives nested — d.representant is either
-    // the polymorphic Representant record or null if never saved.
     const rep = d.representant ?? {}
     Object.assign(repForm, {
       nom: rep.nom ?? '',
@@ -121,10 +125,6 @@ async function saveProfile(): Promise<void> {
   const validAdresses = adresses.value.filter(a => a.label.trim() !== '' && a.value.trim() !== '')
   saving.value = true
   try {
-    // Two independent writes — company profile and legal representative
-    // live in two different tables since the polymorphic Representant
-    // refactor. Both run in parallel; either can fail without corrupting
-    // the other's data.
     await Promise.all([
       $fetch(`${getApiBase()}/api/profile`, {
         method: 'PUT',
@@ -140,8 +140,6 @@ async function saveProfile(): Promise<void> {
 
     adresses.value = validAdresses
     success('Profil enregistré avec succès ✓')
-    // Re-fetch so hasCompleteProfile() reflects the freshly saved state
-    // immediately, without waiting for a manual page refresh.
     await fetchProfile()
   } catch (e: any) {
     const msg = e?.data?.errors
@@ -153,9 +151,6 @@ async function saveProfile(): Promise<void> {
   }
 }
 
-// FIX: checklist now reads repForm.nom / repForm.cin (the polymorphic
-// Representant fields) instead of the removed form.representant_legal /
-// form.identite_representant — those no longer exist anywhere in the API.
 const requiredFields = computed(() => [
   { label: 'Nom de la société',    filled: !!form.nom_societe },
   { label: 'Représentant légal',   filled: !!repForm.nom },
@@ -272,7 +267,7 @@ onMounted(fetchProfile)
         </div>
       </div>
 
-      <!-- Legal representative — now its own section, its own record -->
+      <!-- Legal representative -->
       <div class="card p-6 space-y-4">
         <div class="flex items-center gap-2 mb-1">
           <div class="w-1 h-5 rounded-full shrink-0" style="background:#c8a96e"/>

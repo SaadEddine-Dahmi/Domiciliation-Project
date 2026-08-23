@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
-import ChangePasswordPrompt from '~/components/ChangePasswordPrompt.vue'
+import ChangePasswordPrompt from '~/components/PasswordRevealModal.vue'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
@@ -13,7 +13,7 @@ function getApiBase(): string {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}

@@ -28,7 +28,7 @@ describe('Clients Store', () => {
 
     beforeEach(() => {
         setActivePinia(createPinia())
-        localStorage.setItem('astfisc_auth', JSON.stringify({
+        localStorage.setItem('app_auth', JSON.stringify({
             token: 'test-token', savedAt: Date.now(),
         }))
         vi.clearAllMocks()

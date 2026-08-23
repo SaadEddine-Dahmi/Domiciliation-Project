@@ -1,4 +1,4 @@
-<!-- Client portal: view and download own documents -->
+<!-- pages/client/documents.vue (or wherever this page lives) -->
 <script setup lang="ts">
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
@@ -12,7 +12,7 @@ function getApiBase() {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
@@ -24,7 +24,7 @@ function authHeaders(): Record<string, string> {
 function getRawToken(): string {
   if (!import.meta.client) return ''
   try {
-    const raw = localStorage.getItem('astfisc_auth')
+    const raw = localStorage.getItem('app_auth')
     if (!raw) return ''
     const parsed = JSON.parse(raw)
     return parsed?.token ?? ''
@@ -61,6 +61,10 @@ const documents = ref<any[]>([])
 const loading = ref(true)
 const search = ref('')
 const downloadingId = ref<number | null>(null)
+// NEW — tracks which row's preview is being opened, so the button can
+// show a brief loading state instead of appearing to do nothing while
+// the token URL / popup opens.
+const previewingId = ref<number | null>(null)
 
 async function fetchDocuments() {
   loading.value = true
@@ -98,6 +102,30 @@ function expiryInfo(d: string | null): { label: string; cls: string } {
   if (days === 0) return { label: "Expire aujourd'hui", cls: 'text-yellow-400' }
   if (days < 30) return { label: `Expire dans ${days} jour(s)`, cls: 'text-yellow-400' }
   return { label: fmt(d), cls: 'text-green-400' }
+}
+
+/**
+ * NEW — opens the document in a new tab via the public preview route
+ * (GET /api/documents/{id}/preview). This route is deliberately outside
+ * auth:sanctum (a browser tab can't attach an Authorization header), so
+ * the token travels as a query param instead — same pattern already used
+ * for downloadDoc() and the contract's scanned-PDF preview in
+ * contrats.vue (viewScannedPdf()).
+ *
+ * Opening the window synchronously (before the async gap) avoids popup
+ * blockers, which trigger on tabs opened after an `await`.
+ */
+function previewDoc(doc: any): void {
+  previewingId.value = doc.id
+  try {
+    const baseUrl = doc?.preview_url || `${getApiBase()}/api/documents/${doc.id}/preview`
+    const url = withToken(baseUrl)
+    window.open(url, '_blank', 'noopener')
+  } catch {
+    toastError?.('Impossible d\'ouvrir l\'aperçu')
+  } finally {
+    previewingId.value = null
+  }
 }
 
 async function downloadDoc(doc: any) {
@@ -230,20 +258,36 @@ onMounted(fetchDocuments)
           </div>
         </div>
 
-        <!-- Download button (fixed: no direct href) -->
-        <button
-          class="btn btn-gold btn-sm shrink-0"
-          :disabled="downloadingId === doc.id"
-          @click="downloadDoc(doc)"
-        >
-          <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
-               stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7 10 12 15 17 10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          {{ downloadingId === doc.id ? 'Téléchargement...' : 'Télécharger' }}
-        </button>
+        <!-- Actions -->
+        <div class="flex items-center gap-2 shrink-0">
+          <!-- NEW: preview button -->
+          <button
+            class="btn btn-outline btn-sm"
+            :disabled="previewingId === doc.id"
+            @click="previewDoc(doc)"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+              <circle cx="12" cy="12" r="3"/>
+            </svg>
+            Aperçu
+          </button>
+
+          <button
+            class="btn btn-gold btn-sm"
+            :disabled="downloadingId === doc.id"
+            @click="downloadDoc(doc)"
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+              <polyline points="7 10 12 15 17 10"/>
+              <line x1="12" y1="15" x2="12" y2="3"/>
+            </svg>
+            {{ downloadingId === doc.id ? 'Téléchargement...' : 'Télécharger' }}
+          </button>
+        </div>
       </div>
     </div>
 

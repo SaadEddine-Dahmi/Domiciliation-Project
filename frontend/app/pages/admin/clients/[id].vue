@@ -248,6 +248,34 @@ async function submitEdit(): Promise<void> {
     savingEdit.value = false
   }
 }
+// ── Client status toggle ───────────────────────────────────
+const togglingStatus = ref(false)
+
+/**
+ * Flips the client's portal access between 'actif' and 'inactif'.
+ * Calls the existing PATCH /api/clients/{id}/status endpoint through
+ * the clients store — the endpoint already existed on the backend,
+ * nothing in the UI called it until now.
+ */
+async function toggleClientStatus(): Promise<void> {
+  if (!client.value || togglingStatus.value) return
+  const next = client.value.statut === 'actif' ? 'inactif' : 'actif'
+
+  togglingStatus.value = true
+  try {
+    const updated = await clientsStore.toggleStatus(client.value.id, next)
+    client.value.statut = updated.statut
+    success(
+      next === 'actif'
+        ? 'Client réactivé — il peut de nouveau se connecter.'
+        : 'Client suspendu — il ne pourra plus se connecter.'
+    )
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur lors du changement de statut')
+  } finally {
+    togglingStatus.value = false
+  }
+}
 
 // ── Documents ───────────────────────────────────────────────
 const showUpload = ref(false)
@@ -510,7 +538,7 @@ function openContratPreview(c: any): void {
             </p>
           </div>
 
-          <!-- Quick actions -->
+                   <!-- Quick actions -->
           <div class="flex items-center gap-2">
             <NuxtLink :to="`/admin/contrat?new=1&entreprise_id=${client.id}`" class="btn btn-gold btn-sm">
               + Nouveau contrat
@@ -518,9 +546,23 @@ function openContratPreview(c: any): void {
             <button class="btn btn-outline btn-sm" @click="openEditModal">
               ✎ Modifier
             </button>
+            <button
+              class="btn btn-outline btn-sm"
+              :disabled="togglingStatus"
+              @click="toggleClientStatus"
+            >
+              {{
+                togglingStatus
+                  ? '...'
+                  : client.statut === 'actif'
+                    ? '⏸ Suspendre'
+                    : '▶ Activer'
+              }}
+            </button>
           </div>
         </div>
       </div>
+         
 
       <!-- ══════════ 2. Client information grid ═════════════ -->
       <div class="card p-6">

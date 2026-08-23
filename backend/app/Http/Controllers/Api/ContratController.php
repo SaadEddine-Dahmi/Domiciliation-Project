@@ -59,17 +59,24 @@
 //   strings (String(a.id)). Accepted formats: [{id:"3",ordre:1}] or flat
 //   [3,14]. IDs resolving to <= 0 are silently skipped.
 //
-// ── streamPdf() ────────────────────────────────────────────────────────────────
+// ── streamPdf() / client access ─────────────────────────────────────────────
 //   Registered OUTSIDE auth:sanctum in routes/api.php. A browser
 //   <iframe src="…"> cannot attach Authorization: Bearer, so access is
 //   validated via a ?token= query param instead, resolved through
 //   authenticateViaToken() — same pattern as
 //   DocumentController::download()/preview() and FactureController::pdf().
+//
+//   Accessible to BOTH the owning domiciliataire and the client the
+//   contract belongs to — see resolveContratForStream(). A client user's
+//   id is never a domiciliataire_id, so a plain "where domiciliataire_id =
+//   $user->id" scope silently 404s for every client; index() and
+//   streamPdf() both branch on $user->role to scope correctly instead.
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Contrat;
+use App\Models\Entreprise;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Facades\Storage;
@@ -82,16 +89,59 @@ class ContratController extends Controller
     /**
      * GET /api/contrats
      *
-     * Returns all contracts belonging to the authenticated domiciliataire,
-     * with their related entreprise, ordered articles, and a minimal
-     * renewals projection (used by the frontend to detect open renewal
-     * drafts without an extra round trip).
+     * Domiciliataire → all contracts they own (optionally filtered by
+     * ?entreprise_id=, tenant-checked), with entreprise, ordered articles,
+     * and a minimal renewals projection (used by the frontend to detect
+     * open renewal drafts without an extra round trip).
+     *
+     * Client → only the contract(s) belonging to their own entreprise. A
+     * client user has no domiciliataire_id of their own, so the old
+     * domiciliataire-only scope silently returned an empty list for every
+     * client — this branch fixes that.
      */
     public function index(Request $request)
     {
         $user = auth()->user();
 
-        $contrats = Contrat::where('domiciliataire_id', $user->id)
+        if ($user->role === 'client') {
+            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+
+            if (!$entreprise) {
+                return response()->json(['success' => true, 'data' => []]);
+            }
+
+            $contrats = Contrat::where('entreprise_id', $entreprise->id)
+                ->with([
+                    'entreprise.representant',
+                    'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+                    'renewals:id,renewed_from_id,statut',
+                ])
+                ->latest()
+                ->get();
+
+            return response()->json(['success' => true, 'data' => $contrats]);
+        }
+
+        $query = Contrat::where('domiciliataire_id', $user->id);
+
+        if ($request->filled('entreprise_id')) {
+            $entrepriseId = (int) $request->query('entreprise_id');
+
+            $belongsToTenant = Entreprise::where('id', $entrepriseId)
+                ->where('domiciliataire_id', $user->id)
+                ->exists();
+
+            if (!$belongsToTenant) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Client introuvable.',
+                ], 404);
+            }
+
+            $query->where('entreprise_id', $entrepriseId);
+        }
+
+        $contrats = $query
             ->with([
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
@@ -164,6 +214,12 @@ class ContratController extends Controller
             'articles.*.ordre' => ['nullable', 'integer'],
         ]);
 
+        // Tenant guard — the entreprise being domiciled must belong to the
+        // authenticated domiciliataire, not just exist somewhere.
+        Entreprise::where('id', $data['entreprise_id'])
+            ->where('domiciliataire_id', $user->id)
+            ->firstOrFail();
+
         $contrat = Contrat::create([
             'domiciliataire_id' => $user->id,
             'entreprise_id' => $data['entreprise_id'],
@@ -234,6 +290,12 @@ class ContratController extends Controller
             'articles.*.id' => ['required_with:articles', 'string'],
             'articles.*.ordre' => ['nullable', 'integer'],
         ]);
+
+        if (isset($data['entreprise_id'])) {
+            Entreprise::where('id', $data['entreprise_id'])
+                ->where('domiciliataire_id', $user->id)
+                ->firstOrFail();
+        }
 
         $contrat->update(array_filter([
             'entreprise_id' => $data['entreprise_id'] ?? null,
@@ -422,6 +484,36 @@ class ContratController extends Controller
     }
 
     /**
+     * Resolves a contract for the pdf/stream route against the
+     * token-resolved user, with role-appropriate IDOR scoping:
+     *   - domiciliataire → must own the contract (domiciliataire_id match)
+     *   - client         → the contract must belong to THEIR entreprise
+     * Returns null on any mismatch so the caller can return a clean 404
+     * without distinguishing "wrong owner" from "doesn't exist".
+     */
+    private function resolveContratForStream(string $id, \App\Models\User $user): ?Contrat
+    {
+        $query = Contrat::with([
+            'entreprise.representant',
+            'domiciliataire.representant',
+            'domiciliataire.profile',
+            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+        ]);
+
+        if ($user->role === 'client') {
+            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+            if (!$entreprise) {
+                return null;
+            }
+            $query->where('entreprise_id', $entreprise->id);
+        } else {
+            $query->where('domiciliataire_id', $user->id);
+        }
+
+        return $query->find($id);
+    }
+
+    /**
      * GET /api/contrats/{id}/pdf/stream
      *
      * Streams the contract document for either <iframe> preview or a real
@@ -441,9 +533,9 @@ class ContratController extends Controller
      *   instead validated via ?token=, resolved through
      *   authenticateViaToken() above.
      *
-     * IDOR guard: the resolved token owner must be this contract's own
-     * domiciliataire — findOrFail() is scoped to $user->id, exactly like
-     * every other contract endpoint in this controller.
+     * IDOR guard: resolveContratForStream() scopes to either the token
+     * owner's own contracts (domiciliataire) or their own entreprise's
+     * contracts (client) — never any other tenant's data.
      */
     public function streamPdf(Request $request, string $id)
     {
@@ -452,14 +544,10 @@ class ContratController extends Controller
             return response()->json(['message' => 'Non authentifié.'], 401);
         }
 
-        $contrat = Contrat::where('domiciliataire_id', $user->id)
-            ->with([
-                'entreprise.representant',
-                'domiciliataire.representant',
-                'domiciliataire.profile',
-                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-            ])
-            ->findOrFail($id);
+        $contrat = $this->resolveContratForStream($id, $user);
+        if (!$contrat) {
+            return response()->json(['message' => 'Contrat introuvable.'], 404);
+        }
 
         $mode = $request->query('mode', 'preview'); // preview | download
 
