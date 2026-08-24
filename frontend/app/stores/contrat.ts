@@ -226,24 +226,38 @@ export const useContractStore = defineStore('contrat', {
          * were missing, meaning the {{domiciliataire_email}} and {{domiciliataire_telephone}}
          * tokens always resolved to empty strings in article bodies.
          */
+
+
         fillFromProfile(profile: {
             nom_societe?: string
             rc?: string
             if_fiscal?: string
             tp?: string
-            representant_legal?: string
-            identite_representant?: string
+            representant?: {
+                nom?: string
+                prenom?: string
+                nom_complet?: string
+                cin?: string
+                telephone?: string
+                email?: string
+            } | null
             email?: string
             telephone?: string
         }): void {
+            const rep = profile.representant
+
             this.form.companyName = profile.nom_societe ?? ''
             this.form.companyRC = profile.rc ?? ''
             this.form.companyIF = profile.if_fiscal ?? ''
             this.form.companyTP = profile.tp ?? ''
-            this.form.companyRepresentant = profile.representant_legal ?? ''
-            this.form.companyCIN = profile.identite_representant ?? ''
-            this.form.companyEmail = profile.email ?? ''   // FIX
-            this.form.companyTelephone = profile.telephone ?? ''   // FIX
+            this.form.companyRepresentant = (
+                rep?.nom_complet
+                ?? (rep ? `${rep.prenom ?? ''} ${rep.nom ?? ''}`.trim() : '')
+            ) || ''
+            this.form.companyCIN = rep?.cin ?? ''
+
+            this.form.companyEmail = profile.email ?? rep?.email ?? ''
+            this.form.companyTelephone = profile.telephone ?? rep?.telephone ?? ''
         },
 
         /**

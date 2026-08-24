@@ -126,7 +126,7 @@ async function loadProfile(): Promise<void> {
     addresses.value = normaliseAddresses(raw);
 
     profileLoaded.value = !!(
-      res.data?.nom_societe && res.data?.representant_legal
+       res.data?.nom_societe && res.data?.representant?.nom && res.data?.representant?.cin
     );
   } catch {
     profileLoaded.value = false;
