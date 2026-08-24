@@ -68,6 +68,8 @@ class ContratLifecycleTest extends TestCase
             'entreprise_id' => $entreprise->id,
             'titre_contrat' => 'Convention de Domiciliation Commerciale',
             'date_debut'    => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ]);
 
         $res->assertCreated();
@@ -86,6 +88,8 @@ class ContratLifecycleTest extends TestCase
             'entreprise_id' => $entreprise->id,
             'titre_contrat' => '',
             'date_debut'    => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ]);
 
         $res->assertCreated();
@@ -100,6 +104,8 @@ class ContratLifecycleTest extends TestCase
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
             'date_debut'    => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
             'articles' => [
                 ['id' => (string) $article2->id, 'ordre' => 1],
                 ['id' => (string) $article1->id, 'ordre' => 2],
@@ -129,6 +135,8 @@ class ContratLifecycleTest extends TestCase
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
             'date_debut'    => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
             'articles'      => [(string) $article1->id],
         ]);
 
@@ -137,6 +145,50 @@ class ContratLifecycleTest extends TestCase
             'contrat_id' => $res->json('data.id'),
             'article_id' => $article1->id,
         ]);
+    }
+
+    public function test_create_contract_requires_signature_fields(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now()->toDateString(),
+        ])->assertStatus(422)
+            ->assertJsonValidationErrors(['ville_signature', 'date_signature']);
+    }
+
+    public function test_update_contract_requires_signature_fields(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'statut' => 'draft',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->putJson("/api/contrats/{$contrat->id}", [
+                'articles' => [],
+            ])->assertStatus(422)
+            ->assertJsonValidationErrors(['ville_signature', 'date_signature']);
+    }
+
+    public function test_brouillon_status_is_normalized_to_draft(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
+            'statut' => 'brouillon',
+        ]);
+
+        $res->assertCreated()->assertJsonPath('data.statut', 'draft');
     }
 
     /** Updating a draft re-syncs articles (detach + attach). */
@@ -149,11 +201,15 @@ class ContratLifecycleTest extends TestCase
             'entreprise_id'     => $entreprise->id,
             'titre_contrat'     => 'Contrat de Domiciliation',
             'date_debut'        => now(),
+            'ville_signature'   => 'Agadir',
+            'date_signature'    => now()->toDateString(),
         ]);
         $contrat->articles()->sync([$article1->id => ['ordre' => 1]]);
 
         $this->actingAs($tenant, 'sanctum')
             ->putJson("/api/contrats/{$contrat->id}", [
+                'ville_signature' => 'Agadir',
+                'date_signature' => now()->toDateString(),
                 'articles' => [['id' => (string) $article2->id, 'ordre' => 1]],
             ])
             ->assertOk();
@@ -179,6 +235,8 @@ class ContratLifecycleTest extends TestCase
             'titre_contrat'             => 'Contrat de Domiciliation',
             'date_debut'                => now(),
             'date_fin'                  => now()->addMonths(12),
+            'ville_signature'           => 'Agadir',
+            'date_signature'            => now()->toDateString(),
             'notification_delay_months' => 1,
             'statut'                    => 'draft',
         ]);
@@ -240,6 +298,43 @@ class ContratLifecycleTest extends TestCase
         $this->actingAs($tenant, 'sanctum')
             ->postJson("/api/contrats/{$contrat->id}/terminate")
             ->assertStatus(422);
+    }
+
+    public function test_contract_can_be_archived_and_restored(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
+            'statut' => 'draft',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/contrats/{$contrat->id}/archive")
+            ->assertOk()
+            ->assertJsonPath('data.id', $contrat->id);
+
+        $this->assertNotNull($contrat->fresh()->archived_at);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->getJson('/api/contrats')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+
+        $this->actingAs($tenant, 'sanctum')
+            ->getJson('/api/contrats?include_archived=1')
+            ->assertOk()
+            ->assertJsonCount(1, 'data');
+
+        $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/contrats/{$contrat->id}/restore")
+            ->assertOk();
+
+        $this->assertNull($contrat->fresh()->archived_at);
     }
 
     /** A tenant cannot view/edit another tenant's contract (IDOR). */

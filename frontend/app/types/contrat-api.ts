@@ -62,6 +62,7 @@ export interface ContratEntity {
   caution: string | number | null
   mode_paiement: string | null
   statut: ContratStatus
+  archived_at: string | null
 
   // Deprecated: the backend no longer writes this. Draft/active/expired/
   // terminated contracts are rendered on demand at preview/download time

@@ -25,6 +25,8 @@ class ContratTest extends TestCase
             'date_fin' => now()->addYear()->toDateString(),
             'prix_mensuel' => 500,
             'prix_total' => 6000,
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ])->assertStatus(201)
             ->assertJsonPath('data.statut', 'draft');
     }
@@ -39,6 +41,8 @@ class ContratTest extends TestCase
             'entreprise_id' => $entreprise->id,
             'date_debut' => now()->toDateString(),
             'statut' => 'active',
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ]);
 
         $response->assertStatus(201)
@@ -78,6 +82,8 @@ class ContratTest extends TestCase
         $this->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
             'date_debut' => now()->toDateString(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ])->assertStatus(404);
     }
 
@@ -160,6 +166,8 @@ class ContratTest extends TestCase
 
         $this->putJson("/api/contrats/{$contrat->id}", [
             'statut' => 'active',
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
         ])->assertOk();
 
         // statut must remain 'draft' — the only way to activate is

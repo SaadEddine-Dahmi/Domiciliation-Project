@@ -60,8 +60,10 @@ function authHeaders(): Record<string, string> {
 const items          = ref<any[]>([])
 const loading        = ref(true)
 const q              = ref('')
-const statutFilter = ref<'' | 'draft' | 'active' | 'active_soon' | 'expired' | 'terminated' | 'legalized' | 'not_legalized'>('')
+const sortBy         = ref<'recent' | 'oldest' | 'price_desc' | 'price_asc'>('recent')
+const statutFilter = ref<'' | 'draft' | 'active' | 'active_soon' | 'expired' | 'terminated' | 'archived' | 'legalized' | 'not_legalized'>('')
 const activating     = ref<number | null>(null)
+const actionBusyId   = ref<number | null>(null)
 const showActivate   = ref(false)
 const activateId     = ref<number | null>(null)
 const signedFile     = ref<File | null>(null)
@@ -84,7 +86,7 @@ async function load(): Promise<void> {
   loading.value = true
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
-      `${getApiBase()}/api/contrats`,
+      `${getApiBase()}/api/contrats?include_archived=1`,
       { headers: authHeaders() }
     )
     items.value = res.data ?? []
@@ -125,6 +127,7 @@ function fmtRelative(iso: string | null | undefined): string {
 // here: if statut is still 'active' but date_fin is in the past, treat
 // it as expired everywhere in this page (badge, color, actions).
 function effectiveStatut(c: any): string {
+  if (c.archived_at) return 'archived'
   if (c.statut === 'active' && c.date_fin) {
     const end = new Date(c.date_fin)
     if (!isNaN(end.getTime()) && end.getTime() < Date.now()) {
@@ -150,6 +153,7 @@ const filtered = computed(() => {
         }
         case 'expired':      return eff === 'expired'
         case 'terminated':   return eff === 'terminated'
+        case 'archived':     return !!c.archived_at
         case 'legalized':    return !!c.scanned_pdf_path
         case 'not_legalized':return !c.scanned_pdf_path
         default:              return true
@@ -165,6 +169,19 @@ const filtered = computed(() => {
       effectiveStatut(c).toLowerCase().includes(term)
     )
   }
+
+  list = [...list].sort((a, b) => {
+    if (sortBy.value === 'oldest') {
+      return new Date(a.created_at ?? a.date_debut ?? 0).getTime() - new Date(b.created_at ?? b.date_debut ?? 0).getTime()
+    }
+    if (sortBy.value === 'price_desc') {
+      return Number(b.prix_total ?? 0) - Number(a.prix_total ?? 0)
+    }
+    if (sortBy.value === 'price_asc') {
+      return Number(a.prix_total ?? 0) - Number(b.prix_total ?? 0)
+    }
+    return new Date(b.created_at ?? b.date_debut ?? 0).getTime() - new Date(a.created_at ?? a.date_debut ?? 0).getTime()
+  })
 
   return list
 })
@@ -305,6 +322,48 @@ async function terminate(id: number): Promise<void> {
 
 // ── Renouvellement ──────────────────────────────────────────
 
+function replaceContrat(updated: any): void {
+  const index = items.value.findIndex((item) => item.id === updated.id)
+  if (index === -1) {
+    items.value.unshift(updated)
+    return
+  }
+  items.value.splice(index, 1, { ...items.value[index], ...updated })
+}
+
+async function archiveContract(c: any): Promise<void> {
+  if (!confirm('Archiver ce contrat ?')) return
+  actionBusyId.value = c.id
+  try {
+    const res = await $fetch<{ success: boolean; data: any }>(
+      `${getApiBase()}/api/contrats/${c.id}/archive`,
+      { method: 'POST', headers: authHeaders() }
+    )
+    replaceContrat(res.data)
+    success('Contrat archivÃ©')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur archivage')
+  } finally {
+    actionBusyId.value = null
+  }
+}
+
+async function restoreContract(c: any): Promise<void> {
+  actionBusyId.value = c.id
+  try {
+    const res = await $fetch<{ success: boolean; data: any }>(
+      `${getApiBase()}/api/contrats/${c.id}/restore`,
+      { method: 'POST', headers: authHeaders() }
+    )
+    replaceContrat(res.data)
+    success('Contrat restaurÃ©')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur restauration')
+  } finally {
+    actionBusyId.value = null
+  }
+}
+
 /** True if this contract already has a draft or active renewal chained to it. */
 function hasOpenRenewal(c: any): boolean {
   return Array.isArray(c.renewals) && c.renewals.some((r: any) => ['draft', 'active'].includes(r.statut))
@@ -388,11 +447,13 @@ const statutColor: Record<string, string> = {
   active:     'text-green-400 bg-green-400/10',
   expired:    'text-red-400 bg-red-400/10',
   terminated: 'text-gray-400 bg-gray-400/10',
+  archived:   'text-slate-300 bg-slate-400/10',
 }
 
 const statutLabel: Record<string, string> = {
   draft:      'Brouillon',
   active:     'Actif',
+  archived:   'Archive',
   expired:    'Expiré',
   terminated: 'Résilié',
 }
@@ -479,7 +540,14 @@ onMounted(load)
         :class="statutFilter === 'terminated' ? 'bg-[#E5C158]/15 border-[#E5C158] text-[#E5C158] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#E5C158]/50 hover:text-white'"
         class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
       >
-        Renouvellement
+        Resilies
+      </button>
+      <button
+        @click="statutFilter = 'archived'"
+        :class="statutFilter === 'archived' ? 'bg-slate-400/15 border-slate-400 text-slate-200 font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-slate-400/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        Archives
       </button>
     </div>
 
@@ -600,6 +668,23 @@ onMounted(load)
             <button class="btn btn-outline btn-sm" @click="downloadPdf(c)">⬇ PDF</button>
             <span class="text-xs text-app-text/40">Lecture seule</span>
           </template>
+
+          <button
+            v-if="effectiveStatut(c) === 'archived'"
+            class="btn btn-outline btn-sm"
+            :disabled="actionBusyId === c.id"
+            @click="restoreContract(c)"
+          >
+            Restaurer
+          </button>
+          <button
+            v-else
+            class="btn btn-outline btn-sm"
+            :disabled="actionBusyId === c.id"
+            @click="archiveContract(c)"
+          >
+            Archiver
+          </button>
 
         </div>
       </div>

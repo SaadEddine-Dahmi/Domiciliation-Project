@@ -105,6 +105,8 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::put('/contrats/{id}', [ContratController::class, 'update']);
     Route::post('/contrats/{id}/activate', [ContratController::class, 'activate']);
     Route::post('/contrats/{id}/terminate', [ContratController::class, 'terminate']);
+    Route::post('/contrats/{id}/archive', [ContratController::class, 'archive']);
+    Route::post('/contrats/{id}/restore', [ContratController::class, 'restore']);
     Route::post('/contrats/{id}/renew', [ContratController::class, 'renew']);
 
     // ── Payments ─────────────────────────────────────────────────────────

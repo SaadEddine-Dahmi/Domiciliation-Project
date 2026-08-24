@@ -26,6 +26,7 @@ class Contrat extends Model
         'mode_paiement',
         'statut',
         'scanned_pdf_path',
+        'archived_at',
         'notification_delay_months',
         'next_alert_date',
     ];
@@ -35,6 +36,7 @@ class Contrat extends Model
         'date_debut' => 'date',
         'date_fin' => 'date',
         'next_alert_date' => 'date',
+        'archived_at' => 'datetime',
         'prix_mensuel' => 'decimal:2',
         'prix_total' => 'decimal:2',
         'caution' => 'decimal:2',
@@ -166,6 +168,21 @@ class Contrat extends Model
         $this->update(['statut' => 'terminated']);
     }
 
+    public function setStatutAttribute($value): void
+    {
+        $this->attributes['statut'] = $value === 'brouillon' ? 'draft' : $value;
+    }
+
+    public function archive(): void
+    {
+        $this->forceFill(['archived_at' => now()])->save();
+    }
+
+    public function restoreArchive(): void
+    {
+        $this->forceFill(['archived_at' => null])->save();
+    }
+
     public function isLegalised(): bool
     {
         return !empty($this->scanned_pdf_path);
@@ -173,7 +190,7 @@ class Contrat extends Model
 
     public function isVisibleToClient(): bool
     {
-        return $this->statut === 'active';
+        return $this->statut === 'active' && $this->archived_at === null;
     }
 
     // ── Renewal ──────────────────────────────────────────────
@@ -220,6 +237,7 @@ class Contrat extends Model
             'caution' => $this->caution,
             'mode_paiement' => $this->mode_paiement,
             'ville_signature' => $this->ville_signature,
+            'date_signature' => $this->date_signature,
             'notification_delay_months' => $this->notification_delay_months,
             'statut' => 'draft',
         ]);

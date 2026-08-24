@@ -139,6 +139,22 @@ function pickAddress(addr: { label: string; value: string }): void {
   contract.form.companyAdresse = addr.value;
 }
 
+function pickBestAddress(value?: string | null): void {
+  const trimmed = (value ?? "").trim();
+  const match = trimmed
+    ? addresses.value.find((addr) => addr.value.trim() === trimmed)
+    : null;
+  const selected = match ?? addresses.value[0] ?? null;
+
+  if (!selected) {
+    selectedAddress.value = trimmed;
+    contract.form.companyAdresse = trimmed;
+    return;
+  }
+
+  pickAddress(selected);
+}
+
 // ── Step 2 ──────────────────────────────────────────────────────────────
 
 const clientMode = ref<"select" | "create">("select");
@@ -173,18 +189,7 @@ function selectClient(client: any): void {
   selectedClientId.value = client.id;
   selectedClient.value = client;
 
-  contract.form.societe = client.raison_sociale ?? "";
-  contract.form.gerantNom =
-    client.representant?.nom_complet ??
-    (client.client_user
-      ? `${client.client_user.nom ?? ""} ${client.client_user.prenom ?? ""}`.trim()
-      : "");
-  contract.form.gerantCIN = client.representant?.cin ?? "";
-  contract.form.tel =
-    client.representant?.telephone ?? client.client_user?.telephone ?? "";
-  contract.form.email =
-    client.representant?.email ?? client.client_user?.email ?? "";
-  contract.form.adressePerso = client.representant?.adresse ?? "";
+  contract.fillFromClient(client);
 
   clientSearchQuery.value = "";
 }
@@ -403,20 +408,14 @@ async function loadExistingDraft(
 
     contratId.value = c.id;
     isResumedDraft.value = true;
+    contract.fillFromProfile(profile.value ?? {});
 
     // ── Client / entreprise — already fixed on the draft ──────────────
     selectedClientId.value = c.entreprise_id ?? c.entreprise?.id ?? null;
     selectedClient.value = c.entreprise ?? null;
     clientMode.value = "select";
 
-    contract.form.societe = c.entreprise?.raison_sociale ?? "";
-    contract.form.gerantNom =
-      c.entreprise?.representant?.nom_complet ??
-      `${c.entreprise?.representant?.nom ?? ""} ${c.entreprise?.representant?.prenom ?? ""}`.trim();
-    contract.form.gerantCIN = c.entreprise?.representant?.cin ?? "";
-    contract.form.tel = c.entreprise?.representant?.telephone ?? "";
-    contract.form.email = c.entreprise?.representant?.email ?? "";
-    contract.form.adressePerso = c.entreprise?.representant?.adresse ?? "";
+    contract.fillFromClient(c.entreprise ?? {});
 
     // ── Contract title / metadata ──────────────────────────────────────
     contract.form.titreContrat = c.titre_contrat ?? "";
@@ -452,8 +451,7 @@ async function loadExistingDraft(
     //    since saveDraft() doesn't re-check it once resumed, but
     //    keeping it populated avoids a blank field if the user goes
     //    back to Step 1 manually.
-    selectedAddress.value =
-      contract.form.companyAdresse || selectedAddress.value;
+    pickBestAddress(contract.form.companyAdresse);
 
     if (forceStep3) {
       isRenewalResume.value = true;
@@ -480,6 +478,12 @@ function canProceed(): boolean {
       newClientForm.raison_sociale &&
       newClientForm.email &&
       newClientForm.password
+    );
+  }
+  if (step.value === 3) {
+    return !!(
+      contract.form.ville_signature.trim() &&
+      contract.form.date_signature
     );
   }
   return true;
@@ -543,6 +547,11 @@ async function saveDraft(): Promise<void> {
     return;
   }
 
+  if (!contract.form.ville_signature.trim() || !contract.form.date_signature) {
+    toastError?.("Ville et date de signature sont obligatoires");
+    return;
+  }
+
   saving.value = true;
   try {
     const body = {
@@ -555,8 +564,8 @@ async function saveDraft(): Promise<void> {
       prix_total: contract.grandTotal || null,
       caution: contract.form.caution || null,
       mode_paiement: contract.form.mode_paiement || null,
-      ville_signature: contract.form.ville_signature || null,
-      date_signature: contract.form.date_signature || null,
+      ville_signature: contract.form.ville_signature.trim(),
+      date_signature: contract.form.date_signature,
       instruction_no: contract.form.instruction_no || null,
       statut: "draft",
       articles: orderedArticles.value.map((a) => ({
@@ -666,6 +675,8 @@ function recalcMonths(): void {
 }
 
 onMounted(async () => {
+  contract.resetForm();
+
   await Promise.all([
     loadProfile(),
     clientsStore.fetchAll(),
@@ -1653,17 +1664,19 @@ onMounted(async () => {
                 class="f-input" />
             </div>
             <div>
-              <label class="f-label">Ville de signature</label>
+              <label class="f-label">Ville de signature *</label>
               <input
                 v-model="contract.form.ville_signature"
                 class="f-input"
+                required
                 placeholder="Agadir" />
             </div>
             <div>
-              <label class="f-label">Date de signature</label>
+              <label class="f-label">Date de signature *</label>
               <input
                 v-model="contract.form.date_signature"
                 type="date"
+                required
                 class="f-input" />
             </div>
           </div>

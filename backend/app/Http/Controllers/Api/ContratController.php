@@ -111,10 +111,12 @@ class ContratController extends Controller
             }
 
             $contrats = Contrat::where('entreprise_id', $entreprise->id)
+                ->whereNull('archived_at')
+                ->where('statut', 'active')
                 ->with([
                     'entreprise.representant',
                     'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                    'renewals:id,renewed_from_id,statut',
+                    'renewals:id,renewed_from_id,statut,archived_at',
                 ])
                 ->latest()
                 ->get();
@@ -122,7 +124,8 @@ class ContratController extends Controller
             return response()->json(['success' => true, 'data' => $contrats]);
         }
 
-        $query = Contrat::where('domiciliataire_id', $user->id);
+        $query = Contrat::where('domiciliataire_id', $user->id)
+            ->when(!$request->boolean('include_archived'), fn($q) => $q->whereNull('archived_at'));
 
         if ($request->filled('entreprise_id')) {
             $entrepriseId = (int) $request->query('entreprise_id');
@@ -145,7 +148,7 @@ class ContratController extends Controller
             ->with([
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                'renewals:id,renewed_from_id,statut',
+                'renewals:id,renewed_from_id,statut,archived_at',
             ])
             ->latest()
             ->get();
@@ -171,7 +174,7 @@ class ContratController extends Controller
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
                 'renewedFrom:id,date_debut,date_fin,statut',
-                'renewals:id,renewed_from_id,statut',
+                'renewals:id,renewed_from_id,statut,archived_at',
             ])
             ->findOrFail($id);
 
@@ -204,11 +207,11 @@ class ContratController extends Controller
             'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
             'prix_total' => ['nullable', 'numeric', 'min:0'],
             'instruction_no' => ['nullable', 'string', 'max:20'],
-            'ville_signature' => ['nullable', 'string', 'max:100'],
-            'date_signature' => ['nullable', 'date'],
+            'ville_signature' => ['required', 'string', 'max:100'],
+            'date_signature' => ['required', 'date'],
             'caution' => ['nullable', 'numeric', 'min:0'],
             'mode_paiement' => ['nullable', 'string', 'max:100'],
-            'statut' => ['nullable', 'in:draft,active,expired,terminated'],
+            'statut' => ['nullable', 'in:draft,brouillon,active,expired,terminated'],
             'articles' => ['nullable', 'array'],
             'articles.*.id' => ['required_with:articles', 'string'],
             'articles.*.ordre' => ['nullable', 'integer'],
@@ -223,18 +226,18 @@ class ContratController extends Controller
         $contrat = Contrat::create([
             'domiciliataire_id' => $user->id,
             'entreprise_id' => $data['entreprise_id'],
-            'titre_contrat' => $data['titre_contrat'] ?: 'Contrat de Domiciliation',
+            'titre_contrat' => ($data['titre_contrat'] ?? null) ?: 'Contrat de Domiciliation',
             'date_debut' => $data['date_debut'],
             'date_fin' => $data['date_fin'] ?? null,
             'duree_mois' => $data['duree_mois'] ?? null,
             'prix_mensuel' => $data['prix_mensuel'] ?? null,
             'prix_total' => $data['prix_total'] ?? null,
             'instruction_no' => $data['instruction_no'] ?? null,
-            'ville_signature' => $data['ville_signature'] ?? null,
-            'date_signature' => $data['date_signature'] ?? null,
+            'ville_signature' => $data['ville_signature'],
+            'date_signature' => $data['date_signature'],
             'caution' => $data['caution'] ?? null,
             'mode_paiement' => $data['mode_paiement'] ?? null,
-            'statut' => $data['statut'] ?? 'draft',
+            'statut' => 'draft',
         ]);
 
         $this->syncArticles($contrat, $request->input('articles', []));
@@ -281,11 +284,11 @@ class ContratController extends Controller
             'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
             'prix_total' => ['nullable', 'numeric', 'min:0'],
             'instruction_no' => ['nullable', 'string', 'max:20'],
-            'ville_signature' => ['nullable', 'string', 'max:100'],
-            'date_signature' => ['nullable', 'date'],
+            'ville_signature' => ['required', 'string', 'max:100'],
+            'date_signature' => ['required', 'date'],
             'caution' => ['nullable', 'numeric', 'min:0'],
             'mode_paiement' => ['nullable', 'string', 'max:100'],
-            'statut' => ['nullable', 'in:draft,active,expired,terminated'],
+            'statut' => ['nullable', 'in:draft,brouillon,active,expired,terminated'],
             'articles' => ['nullable', 'array'],
             'articles.*.id' => ['required_with:articles', 'string'],
             'articles.*.ordre' => ['nullable', 'integer'],
@@ -312,7 +315,6 @@ class ContratController extends Controller
             'date_signature' => $data['date_signature'] ?? null,
             'caution' => $data['caution'] ?? null,
             'mode_paiement' => $data['mode_paiement'] ?? null,
-            'statut' => $data['statut'] ?? null,
         ], fn($v) => $v !== null));
 
         if ($request->has('articles')) {
@@ -353,6 +355,13 @@ class ContratController extends Controller
             return response()->json([
                 'success' => false,
                 'message' => 'Seul un contrat en brouillon peut être activé.',
+            ], 422);
+        }
+
+        if (!$contrat->date_signature || !$contrat->ville_signature) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La date et la ville de signature sont obligatoires avant activation.',
             ], 422);
         }
 
@@ -412,6 +421,26 @@ class ContratController extends Controller
      * open (draft/active) renewal already exists for this contract —
      * both rules enforced in the model, surfaced here as a 422.
      */
+    public function archive(string $id)
+    {
+        $user = auth()->user();
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
+
+        $contrat->archive();
+
+        return response()->json(['success' => true, 'data' => $contrat->fresh()]);
+    }
+
+    public function restore(string $id)
+    {
+        $user = auth()->user();
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
+
+        $contrat->restoreArchive();
+
+        return response()->json(['success' => true, 'data' => $contrat->fresh()]);
+    }
+
     public function renew(string $id)
     {
         $user = auth()->user();
@@ -505,7 +534,8 @@ class ContratController extends Controller
             if (!$entreprise) {
                 return null;
             }
-            $query->where('entreprise_id', $entreprise->id);
+            $query->where('entreprise_id', $entreprise->id)
+                ->whereNull('archived_at');
         } else {
             $query->where('domiciliataire_id', $user->id);
         }
