@@ -174,10 +174,15 @@
           </span>
           <span v-if="showLabels" class="flex-1 truncate leading-none">{{ item.label }}</span>
           <span
-            v-if="item.badge && showLabels"
+            v-if="navBadge(item) && showLabels"
             class="shrink-0 min-w-4.5 h-4.5 rounded-md text-[10px] font-black flex items-center justify-center px-1"
             style="background: #c8a96e; color: #13161f"
-          >{{ item.badge }}</span>
+          >{{ navBadge(item) }}</span>
+          <span
+            v-if="navBadge(item) && !showLabels"
+            class="absolute right-1.5 top-1.5 min-w-[16px] h-4 rounded-full text-[9px] font-black flex items-center justify-center px-1"
+            style="background:#ef4444;color:#ffffff"
+          >{{ navBadge(item) }}</span>
           <span
             v-if="!showLabels"
             class="nav-tooltip pointer-events-none absolute left-full ml-3 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
@@ -240,11 +245,13 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { useNotificationsStore } from '~/stores/notifs'
 import { useSidebar } from '~/composables/useSidebar'
 import { computed, ref, onMounted } from 'vue'
 
 const props  = defineProps<{ nav: any[] }>()
 const auth   = useAuthStore()
+const notifs = useNotificationsStore()
 const router = useRouter()
 const route  = useRoute()
 const { isOpen, isMobileOpen, toggle, toggleMobile, closeMobile } = useSidebar()
@@ -286,6 +293,9 @@ onMounted(() => {
   window.addEventListener('resize', () => {
     isMobile.value = window.innerWidth < 1024
   }, { passive: true })
+  if (auth.isAuthenticated) {
+    notifs.refreshUnreadCount()
+  }
 })
 
 const showLabels = computed(() => isMobile.value ? true : isOpen.value)
@@ -319,6 +329,15 @@ const roleLabel = computed(() => {
 function isActive(to: string): boolean {
   const path = to.split('?')[0]
   return route.path === path || route.path.startsWith(path + '/')
+}
+
+function navBadge(item: any): string | number | null {
+  const path = typeof item.to === 'string' ? item.to.split('?')[0] : ''
+  if (path === '/admin/notifs' || path === '/client/notifs') {
+    if (notifs.unreadCount <= 0) return null
+    return notifs.unreadCount > 99 ? '99+' : notifs.unreadCount
+  }
+  return item.badge ?? null
 }
 
 async function handleLogout(): Promise<void> {

@@ -9,26 +9,23 @@ use Illuminate\Http\Request;
 
 class MessageController extends Controller
 {
-    // Lists direct messages, scoped by role: a client sees messages
-    // received; a domiciliataire sees messages they sent.
+    // Lists direct messages visible to the current user: sent OR received.
     public function index()
     {
         $user = auth()->user();
 
-        if ($user->role === 'client') {
-            $messages = AppNotification::query()
-                ->where('user_id', $user->id)
-                ->whereNotNull('from_user_id')
-                ->with('fromUser:id,nom,prenom')
-                ->latest()
-                ->get();
-        } else {
-            $messages = AppNotification::query()
-                ->where('from_user_id', $user->id)
-                ->with('toUser:id,nom,prenom,email')
-                ->latest()
-                ->get();
-        }
+        $messages = AppNotification::query()
+            ->whereNotNull('from_user_id')
+            ->where(function ($query) use ($user) {
+                $query->where('from_user_id', $user->id)
+                    ->orWhere('user_id', $user->id);
+            })
+            ->with([
+                'fromUser:id,nom,prenom,email',
+                'toUser:id,nom,prenom,email',
+            ])
+            ->latest()
+            ->get();
 
         return response()->json(['success' => true, 'data' => $messages]);
     }
@@ -69,7 +66,10 @@ class MessageController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $notification->load('toUser:id,nom,prenom'),
+            'data' => $notification->load([
+                'fromUser:id,nom,prenom,email',
+                'toUser:id,nom,prenom,email',
+            ]),
         ], 201);
     }
 

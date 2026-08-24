@@ -3,6 +3,7 @@
 // Manages login, register, logout, and session restoration.
 
 import { defineStore } from 'pinia'
+import { useNotificationsStore } from '~/stores/notifs'
 
 export type Role = 'admin' | 'domiciliataire' | 'client'
 export type Status = 'pending' | 'approved' | 'active' | 'rejected'
@@ -18,6 +19,7 @@ export interface AuthUser {
     photoUrl: string | null
     // Drives the "change your password?" prompt shown after login.
     mustChangePassword: boolean
+    unreadNotificationsCount: number
     color: string
 }
 
@@ -75,6 +77,7 @@ export const useAuthStore = defineStore('auth', () => {
             avatar: u.initials ?? buildInitialsFallback(u),
             photoUrl: u.photo_url ?? null,
             mustChangePassword: u.must_change_password ?? false,
+            unreadNotificationsCount: Number(u.unread_notifications_count ?? 0),
             color:
                 u.role === 'admin' ? '#ef4444' :
                     u.role === 'domiciliataire' ? '#c8a96e' : '#60a5fa',
@@ -91,6 +94,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     async function login(payload: { email: string; password: string }): Promise<boolean> {
+        const notifs = useNotificationsStore()
         loading.value = true
         error.value = ''
         try {
@@ -100,6 +104,7 @@ export const useAuthStore = defineStore('auth', () => {
             )
             user.value = buildUser(res.data.user)
             token.value = res.data.token
+            notifs.setUnreadCount(res.data.user?.unread_notifications_count ?? 0)
             saveToStorage()
             return true
         } catch (e: any) {
@@ -147,16 +152,19 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     function logout(): void {
+        const notifs = useNotificationsStore()
         user.value = null
         token.value = ''
         error.value = ''
         isPendingApproval.value = false
+        notifs.reset()
         if (import.meta.client) {
             localStorage.removeItem(getStorageKey())
         }
     }
 
     async function restoreSession(): Promise<void> {
+        const notifs = useNotificationsStore()
         if (!import.meta.client) return
         if (user.value && token.value) return
 
@@ -174,6 +182,7 @@ export const useAuthStore = defineStore('auth', () => {
             // no blank/skeleton flash on reload.
             user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
+            notifs.setUnreadCount(parsed.user?.unread_notifications_count ?? 0)
 
             // Then silently revalidate against the server. Any field that
             // drifted since the cache was written — photoUrl being the
@@ -186,6 +195,7 @@ export const useAuthStore = defineStore('auth', () => {
                     { headers: { Authorization: `Bearer ${token.value}` } }
                 )
                 user.value = buildUser(res.data)
+                notifs.setUnreadCount(res.data?.unread_notifications_count ?? 0)
                 saveToStorage()
             }
         } catch {

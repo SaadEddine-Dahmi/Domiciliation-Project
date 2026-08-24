@@ -6,6 +6,7 @@
 ============================================================ -->
 <script setup lang="ts">
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
+const { error: toastError } = useToast()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -23,17 +24,22 @@ function authHeaders(): Record<string, string> {
 
 const messages      = ref<any[]>([])
 const loading       = ref(true)
+const loadError     = ref('')
 const openMessage   = ref<any | null>(null)
 
 async function load(): Promise<void> {
   loading.value = true
+  loadError.value = ''
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
       `${getApiBase()}/api/messages`,
       { headers: authHeaders() }
     )
     messages.value = res.data ?? []
-  } catch {} finally {
+  } catch (e: any) {
+    loadError.value = e?.data?.message ?? 'Erreur de chargement des messages'
+    toastError?.(loadError.value)
+  } finally {
     loading.value = false
   }
 }
@@ -77,6 +83,10 @@ onMounted(load)
         <div class="h-3 w-48 bg-white/10 rounded mb-2" />
         <div class="h-3 w-24 bg-white/10 rounded" />
       </div>
+    </div>
+
+    <div v-else-if="loadError" class="card p-4 text-red-400 text-sm">
+      {{ loadError }}
     </div>
 
     <div

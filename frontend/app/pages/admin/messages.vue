@@ -27,6 +27,7 @@ function authHeaders(): Record<string, string> {
 const messages    = ref<any[]>([])
 const loading     = ref(true)
 const sending     = ref(false)
+const loadError   = ref('')
 const showCompose = ref(false)
 
 const form = reactive({
@@ -37,13 +38,17 @@ const form = reactive({
 
 async function load(): Promise<void> {
   loading.value = true
+  loadError.value = ''
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
       `${getApiBase()}/api/messages`,
       { headers: authHeaders() }
     )
     messages.value = res.data ?? []
-  } catch {} finally {
+  } catch (e: any) {
+    loadError.value = e?.data?.message ?? 'Erreur de chargement des messages'
+    toastError?.(loadError.value)
+  } finally {
     loading.value = false
   }
 }
@@ -101,8 +106,7 @@ function formatDate(d: string | null): string {
 }
 
 onMounted(async () => {
-  await clientsStore.fetchAll()
-  await load()
+  await Promise.allSettled([clientsStore.fetchAll(), load()])
 })
 </script>
 
@@ -122,6 +126,10 @@ onMounted(async () => {
         <div class="h-3 w-48 bg-white/10 rounded mb-2" />
         <div class="h-3 w-24 bg-white/10 rounded" />
       </div>
+    </div>
+
+    <div v-else-if="loadError" class="card p-4 text-red-400 text-sm">
+      {{ loadError }}
     </div>
 
     <div v-else-if="messages.length" class="space-y-3">
@@ -161,16 +169,17 @@ onMounted(async () => {
         </div>
         <div>
           <label class="f-label">Destinataire *</label>
-          <select v-model="form.client_user_id" class="f-input">
+          <select v-model="form.client_user_id" class="f-input" :disabled="clientsStore.loading || sending">
             <option :value="null" disabled>-- Sélectionner un client --</option>
             <option v-for="c in clientItems.filter(x => x.client_user)" :key="c.client_user.id" :value="c.client_user.id">
               {{ c.raison_sociale }} — {{ c.client_user.nom }} {{ c.client_user.prenom }}
             </option>
           </select>
+          <p v-if="clientsStore.loading" class="text-xs text-app-text/40 mt-1">Chargement des clients...</p>
         </div>
         <div>
           <label class="f-label">Sujet (optionnel)</label>
-          <input v-model="form.subject" class="f-input" placeholder="Ex: Renouvellement de votre contrat..." />
+          <input v-model="form.subject" class="f-input" :disabled="sending" placeholder="Ex: Renouvellement de votre contrat..." />
         </div>
         <div>
           <label class="f-label">Message *</label>
@@ -179,7 +188,7 @@ onMounted(async () => {
           <p class="text-xs text-app-text/40 mt-1 text-right">{{ form.message.length }}/2000</p>
         </div>
         <div class="flex gap-3 justify-end">
-          <button class="btn btn-outline btn-md" @click="showCompose = false">Annuler</button>
+          <button class="btn btn-outline btn-md" :disabled="sending" @click="showCompose = false">Annuler</button>
           <button class="btn btn-gold btn-md"
                   :disabled="sending || !form.client_user_id || !form.message.trim()" @click="send">
             {{ sending ? 'Envoi...' : '✉ Envoyer' }}

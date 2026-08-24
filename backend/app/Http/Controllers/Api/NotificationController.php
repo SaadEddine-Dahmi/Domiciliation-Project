@@ -22,6 +22,20 @@ class NotificationController extends Controller
         return response()->json(['success' => true, 'data' => $rows]);
     }
 
+    public function unreadCount()
+    {
+        $count = AppNotification::query()
+            ->where('user_id', auth()->id())
+            ->whereNull('from_user_id')
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => ['unread_notifications_count' => $count],
+        ]);
+    }
+
     // Marks a single notification as read.
     public function read(int $id)
     {

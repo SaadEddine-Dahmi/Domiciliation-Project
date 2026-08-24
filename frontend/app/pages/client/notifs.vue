@@ -23,9 +23,12 @@
        used elsewhere in the client dashboard.
 -->
 <script setup lang="ts">
+import { useNotificationsStore } from '~/stores/notifs'
+
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { success, error: toastError } = useToast()
+const notifsStore = useNotificationsStore()
 
 /** Base URL for API calls, from runtime config. */
 function getApiBase(): string {
@@ -88,6 +91,7 @@ async function loadAll(): Promise<void> {
       { headers: authHeaders() }
     )
     notifications.value = res.data ?? []
+    await notifsStore.refreshUnreadCount()
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur lors du chargement des notifications')
   } finally {
@@ -118,13 +122,15 @@ const filtered = computed(() => {
 
 /** Marks a single notification as read, optimistically updating local state. */
 async function markRead(id: number): Promise<void> {
+  const n = notifications.value.find(x => x.id === id)
+  const wasUnread = n && !n.is_read
   try {
     await $fetch(`${getApiBase()}/api/notifications/${id}/read`, {
       method: 'POST',
       headers: authHeaders(),
     })
-    const n = notifications.value.find(x => x.id === id)
     if (n) n.is_read = true
+    if (wasUnread) notifsStore.markOneRead()
   } catch {
     toastError?.('Impossible de marquer cette notification comme lue')
   }
@@ -138,6 +144,7 @@ async function markAllRead(): Promise<void> {
       headers: authHeaders(),
     })
     notifications.value.forEach(n => { n.is_read = true })
+    notifsStore.markAllReadLocally()
     success('Toutes les notifications ont été marquées comme lues')
   } catch {
     toastError?.('Impossible de marquer toutes les notifications comme lues')
@@ -306,6 +313,7 @@ onMounted(loadAll)
         class="relative px-4 py-4 pl-5 flex items-center gap-4 flex-wrap sm:flex-nowrap transition-colors"
         :class="i < filtered.length - 1 ? 'border-b' : ''"
         :style="i < filtered.length - 1 ? 'border-color:var(--app-border-2)' : ''"
+        @click="markRead(n.id)"
       >
         <!-- Unread accent bar, full row height, gold -->
         <span
@@ -376,7 +384,7 @@ onMounted(loadAll)
             v-if="n.type === 'document_uploaded' && n.data?.document_id"
             class="text-xs font-semibold mt-1 underline underline-offset-2"
             style="color:#c8a96e"
-            @click="viewDocument(n)"
+            @click.stop="viewDocument(n)"
           >
             Voir le document reçu →
           </button>
@@ -394,7 +402,7 @@ onMounted(loadAll)
             v-if="!n.is_read"
             class="text-xs font-bold px-3 py-1.5 rounded-lg transition-colors"
             style="color:#1f2937;background:#c8a96e"
-            @click="markRead(n.id)"
+            @click.stop="markRead(n.id)"
           >
             Marquer comme lu
           </button>

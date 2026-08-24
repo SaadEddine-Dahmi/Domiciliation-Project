@@ -39,9 +39,24 @@ class AppNotification extends Model
         return $this->belongsTo(User::class, 'user_id');
     }
 
+    public function toUser()
+    {
+        return $this->belongsTo(User::class, 'user_id');
+    }
+
+    public function receiver()
+    {
+        return $this->toUser();
+    }
+
     public function fromUser()
     {
         return $this->belongsTo(User::class, 'from_user_id');
+    }
+
+    public function sender()
+    {
+        return $this->fromUser();
     }
 
     public function alerte()

@@ -1793,6 +1793,7 @@ onMounted(async () => {
           v-if="step > 1"
           type="button"
           class="btn btn-outline btn-md"
+          :disabled="saving"
           @click="prevStep">
           ← Retour
         </button>

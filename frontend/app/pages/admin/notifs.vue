@@ -20,11 +20,13 @@
 // replaced below with a small read-only card explaining the schedule.
 
 import { useAuthStore } from '~/stores/auth'
+import { useNotificationsStore } from '~/stores/notifs'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
+const notifsStore = useNotificationsStore()
 
 const { success, error: toastError } = useToast()
 
@@ -48,6 +50,10 @@ const loading        = ref(true)
 const expandedId     = ref<number | null>(null)
 
 function toggleExpand(id: number): void {
+  const n = notifications.value.find(x => x.id === id)
+  if (n && !n.is_read) {
+    markRead(id)
+  }
   expandedId.value = expandedId.value === id ? null : id
 }
 
@@ -59,6 +65,7 @@ async function loadAll(): Promise<void> {
       { headers: authHeaders() }
     )
     notifications.value = res.data ?? []
+    await notifsStore.refreshUnreadCount()
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur chargement')
   } finally {
@@ -67,10 +74,12 @@ async function loadAll(): Promise<void> {
 }
 
 async function markRead(id: number): Promise<void> {
+  const n = notifications.value.find(x => x.id === id)
+  const wasUnread = n && !n.is_read
   try {
     await $fetch(`${getApiBase()}/api/notifications/${id}/read`, { method: 'POST', headers: authHeaders() })
-    const n = notifications.value.find(x => x.id === id)
     if (n) n.is_read = true
+    if (wasUnread) notifsStore.markOneRead()
   } catch {}
 }
 
@@ -78,6 +87,7 @@ async function markAllRead(): Promise<void> {
   try {
     await $fetch(`${getApiBase()}/api/notifications/read-all`, { method: 'POST', headers: authHeaders() })
     notifications.value.forEach(n => { n.is_read = true })
+    notifsStore.markAllReadLocally()
     success('Toutes les notifications lues')
   } catch {}
 }

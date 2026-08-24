@@ -156,6 +156,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // ── Notifications ────────────────────────────────────────────────────
     Route::get('/notifications', [NotificationController::class, 'index']);
+    Route::get('/notifications/unread-count', [NotificationController::class, 'unreadCount']);
     Route::post('/notifications/{id}/read', [NotificationController::class, 'read']);
     Route::post('/notifications/read-all', [NotificationController::class, 'readAll']);
     Route::get('/notifications/preferences', [NotificationController::class, 'preferences']);

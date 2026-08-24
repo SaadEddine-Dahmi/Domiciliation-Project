@@ -46,7 +46,7 @@ class User extends Authenticatable
     // User (login response, /auth/me, client/admin listings, profile
     // endpoint) so the frontend never has to build avatar logic itself
     // — see UserAvatar.vue, which just reads these two fields.
-    protected $appends = ['photo_url', 'initials'];
+    protected $appends = ['photo_url', 'initials', 'unread_notifications_count'];
 
     // ── Relations ──────────────────────────────────────────
 
@@ -121,6 +121,22 @@ class User extends Authenticatable
         $second = mb_strtoupper(mb_substr(trim((string) $this->prenom), 0, 1));
         $initials = $first . $second;
         return $initials !== '' ? $initials : mb_strtoupper(mb_substr((string) $this->email, 0, 1));
+    }
+
+    public function getUnreadNotificationsCountAttribute(): int
+    {
+        if (!$this->exists) {
+            return 0;
+        }
+
+        try {
+            return $this->appNotifications()
+                ->whereNull('from_user_id')
+                ->where('is_read', false)
+                ->count();
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────
