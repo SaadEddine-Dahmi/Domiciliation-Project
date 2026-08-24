@@ -35,12 +35,14 @@ return new class extends Migration
             $table->date('date_facture')->nullable();
             $table->decimal('montant_total', 10, 2)->nullable();
             $table->enum('statut', ['pending', 'paid', 'cancelled'])->default('pending');
+            $table->timestamp('archived_at')->nullable();
             $table->timestamps();
 
             $table->index('contrat_id');
             $table->index('entreprise_id');
             $table->index('statut');
             $table->index('date_facture');
+            $table->index('archived_at');
         });
     }
 

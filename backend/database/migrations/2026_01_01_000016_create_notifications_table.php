@@ -44,6 +44,8 @@ return new class extends Migration
                 ->cascadeOnUpdate()
                 ->restrictOnDelete();
 
+            $table->string('type')->nullable();
+            $table->json('data')->nullable();
             $table->string('subject', 255)->nullable();
             $table->text('message');
 

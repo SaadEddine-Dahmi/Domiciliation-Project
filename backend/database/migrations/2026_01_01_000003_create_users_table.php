@@ -26,6 +26,10 @@ return new class extends Migration {
 
             $table->string('password');
 
+            // True right after an account is created with a system-generated
+            // password (new client, or a domiciliataire-triggered reset).
+            $table->boolean('must_change_password')->default(false);
+
             // Widened to 30 chars to accommodate international formats
             // with spacing/country codes beyond the original 13-char limit.
             $table->string('telephone', 30)->nullable();

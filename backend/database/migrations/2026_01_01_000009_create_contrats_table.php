@@ -61,6 +61,7 @@ return new class extends Migration {
 
             $table->text('pdf_path')->nullable();
             $table->text('scanned_pdf_path')->nullable();
+            $table->timestamp('archived_at')->nullable();
 
             // Alert scheduling for the expiry-reminder cron job.
             $table->integer('notification_delay_months')->default(1);
@@ -74,6 +75,7 @@ return new class extends Migration {
             $table->index('date_debut');
             $table->index('date_fin');
             $table->index('renewed_from_id');
+            $table->index('archived_at');
         });
     }
 
