@@ -32,6 +32,7 @@ use App\Http\Controllers\Api\MessageController;
 use App\Http\Controllers\Api\NotificationController;
 use App\Http\Controllers\Api\PaiementController;
 use App\Http\Controllers\Api\RepresentantController;
+use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\TemplateController;
 use Illuminate\Support\Facades\Route;
 
@@ -75,6 +76,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // ── Dashboard and profile ───────────────────────────────────────────
     Route::get('/dashboard/stats', [DashboardController::class, 'stats']);
+    Route::get('/search', SearchController::class);
     Route::get('/profile', [DomiciliataireProfileController::class, 'show']);
     Route::put('/profile', [DomiciliataireProfileController::class, 'update']);
 

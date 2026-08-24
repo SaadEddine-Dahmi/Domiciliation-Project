@@ -119,6 +119,7 @@ async function downloadContrat(): Promise<void> {
 }
 
 const unreadMessages = computed(() => messages.value.filter(m => !m.is_read).length)
+const timeline = computed(() => Array.isArray(data.value?.timeline) ? data.value.timeline : [])
 
 const statutColor: Record<string, string> = {
   draft: 'text-yellow-400 bg-yellow-400/10',
@@ -160,6 +161,29 @@ onMounted(load)
     <div v-if="loading" class="grid grid-cols-1 md:grid-cols-2 gap-4">
       <div v-for="i in 2" :key="i" class="card p-5 animate-pulse">
         <div class="h-3 w-24 bg-white/10 rounded mb-3" /><div class="h-6 w-32 bg-white/10 rounded" />
+      </div>
+
+      <div class="card p-5 space-y-3 md:col-span-2">
+        <div class="flex items-center justify-between">
+          <p class="text-xs uppercase text-gold tracking-widest font-bold">Historique recent</p>
+          <NuxtLink to="/client/notifs" class="text-xs text-gold underline">Notifications</NuxtLink>
+        </div>
+        <div v-if="timeline.length" class="space-y-2">
+          <NuxtLink
+            v-for="item in timeline"
+            :key="`${item.type}-${item.title}-${item.date}`"
+            :to="item.target || '/client/notifs'"
+            class="flex items-start gap-3 p-3 rounded-lg hover:bg-white/5 transition"
+          >
+            <div class="w-2 h-2 rounded-full mt-1.5 bg-gold shrink-0" />
+            <div class="min-w-0">
+              <p class="text-sm font-medium truncate">{{ item.title }}</p>
+              <p class="text-xs text-app-text/50 truncate">{{ item.description }}</p>
+              <p class="text-[10px] text-app-text/30">{{ formatDate(item.date) }}</p>
+            </div>
+          </NuxtLink>
+        </div>
+        <p v-else class="text-xs text-app-text/40">Aucun evenement recent.</p>
       </div>
     </div>
 

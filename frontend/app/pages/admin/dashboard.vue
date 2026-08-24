@@ -45,6 +45,11 @@ interface Stats {
   total_clients: number; total_domiciliataires?: number; total_contrats: number
   contrats_actifs: number; contrats_draft: number
   total_documents: number; ca_mensuel: string
+  contrats_expiring_30?: number
+  documents_expiring_30?: number
+  documents_expired?: number
+  factures_overdue?: number
+  factures_partial?: number
 }
 
 const stats          = ref<Stats | null>(null)
@@ -469,6 +474,33 @@ onMounted(loadDashboard)
         <div class="font-serif text-2xl text-gold">{{ stats.ca_mensuel ?? '0' }} <span class="text-sm">DH</span></div>
       </button>
 
+    </div>
+
+    <div v-if="stats && !auth.isAdmin" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+      <button type="button" class="card p-4 text-left stat-card" @click="router.push('/admin/contrats?statut=active_soon')">
+        <div class="text-[11px] text-app-text/40 uppercase mb-2">Renouvellements</div>
+        <div class="font-serif text-2xl" :class="(stats.contrats_expiring_30 ?? 0) > 0 ? 'text-yellow-400' : 'text-gold'">
+          {{ stats.contrats_expiring_30 ?? 0 }}
+        </div>
+        <p class="text-[11px] text-app-text/40 mt-1">Contrats dans les 30 jours</p>
+      </button>
+      <button type="button" class="card p-4 text-left stat-card" @click="router.push('/admin/documents')">
+        <div class="text-[11px] text-app-text/40 uppercase mb-2">Documents a renouveler</div>
+        <div class="font-serif text-2xl" :class="(stats.documents_expiring_30 ?? 0) > 0 ? 'text-yellow-400' : 'text-gold'">
+          {{ stats.documents_expiring_30 ?? 0 }}
+        </div>
+        <p class="text-[11px] text-app-text/40 mt-1">{{ stats.documents_expired ?? 0 }} deja expire(s)</p>
+      </button>
+      <button type="button" class="card p-4 text-left stat-card" @click="router.push('/admin/factures?statut=overdue')">
+        <div class="text-[11px] text-app-text/40 uppercase mb-2">Factures en retard</div>
+        <div class="font-serif text-2xl" :class="(stats.factures_overdue ?? 0) > 0 ? 'text-red-400' : 'text-gold'">
+          {{ stats.factures_overdue ?? 0 }}
+        </div>
+      </button>
+      <button type="button" class="card p-4 text-left stat-card" @click="router.push('/admin/factures?statut=partial')">
+        <div class="text-[11px] text-app-text/40 uppercase mb-2">Paiements partiels</div>
+        <div class="font-serif text-2xl text-sky-400">{{ stats.factures_partial ?? 0 }}</div>
+      </button>
     </div>
 
     <!-- Pending domiciliataire approvals -->

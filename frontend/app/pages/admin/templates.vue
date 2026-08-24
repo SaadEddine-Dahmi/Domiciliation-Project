@@ -87,6 +87,14 @@ const filtered = computed(() => {
   return templates.value.filter(t => t.name?.toLowerCase().includes(q))
 })
 
+function versionLabel(template: TemplateEntity): string {
+  const value = template.updated_at ?? template.created_at
+  if (!value) return 'v1'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return 'v1'
+  return `v${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`
+}
+
 // ── Modal: create ─────────────────────────────────────────
 
 function openCreate(): void {
@@ -222,7 +230,9 @@ onMounted(async () => {
           <div class="flex-1 min-w-0">
             <p class="font-semibold">{{ tpl.name }}</p>
             <p v-if="tpl.description" class="text-sm text-app-text/50 mt-1">{{ tpl.description }}</p>
-            <p class="text-xs text-app-text/40 mt-2">{{ tpl.articles.length }} article(s)</p>
+            <p class="text-xs text-app-text/40 mt-2">
+              {{ tpl.articles.length }} article(s) - {{ versionLabel(tpl) }}
+            </p>
           </div>
           <div class="flex gap-2 flex-shrink-0">
             <button class="btn btn-outline btn-sm" @click="openEdit(tpl)">Modifier</button>

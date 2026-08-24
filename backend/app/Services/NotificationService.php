@@ -134,6 +134,54 @@ class NotificationService
             ]);
         }
     }
+
+    public function notifyDocumentExpiry(Document $document, string $reminderType): void
+    {
+        $document->loadMissing(['entreprise.clientUser', 'entreprise.domiciliataire', 'documentType']);
+
+        $entreprise = $document->entreprise;
+        if (!$entreprise) {
+            return;
+        }
+
+        $displayName = $document->documentType?->name ?? 'Document';
+        $expiryDate = $document->date_expiration?->format('d/m/Y');
+        $message = match ($reminderType) {
+            'document_expiry_30' => "Le document « {$displayName} » expire dans 30 jours ({$expiryDate}).",
+            'document_expiry_7' => "Le document « {$displayName} » expire dans 7 jours ({$expiryDate}).",
+            'document_expiry_1' => "Le document « {$displayName} » expire demain ({$expiryDate}).",
+            'document_expired' => "Le document « {$displayName} » a expire le {$expiryDate}.",
+            default => "Rappel concernant le document « {$displayName} ».",
+        };
+
+        $payload = [
+            'document_id' => $document->id,
+            'entreprise_id' => $entreprise->id,
+            'entreprise' => $entreprise->raison_sociale,
+            'date_expiration' => $expiryDate,
+        ];
+
+        if ($entreprise->domiciliataire_id) {
+            $this->createInApp(
+                userId: $entreprise->domiciliataire_id,
+                contratId: null,
+                type: $reminderType,
+                message: "{$entreprise->raison_sociale} - {$message}",
+                data: $payload,
+            );
+        }
+
+        $clientUser = $this->resolveClientUser($entreprise);
+        if ($clientUser) {
+            $this->createInApp(
+                userId: $clientUser->id,
+                contratId: null,
+                type: $reminderType,
+                message: $message,
+                data: $payload,
+            );
+        }
+    }
     // ── Feature: contract expiry reminders (used by routes/console.php) ────
 
     /**
@@ -236,6 +284,10 @@ class NotificationService
         return match ($type) {
             'contract_legalized' => 'Contrat activé',
             'document_uploaded'  => 'Nouveau document',
+            'document_expiry_30'  => 'Document expire dans 30 jours',
+            'document_expiry_7'   => 'Document expire dans 7 jours',
+            'document_expiry_1'   => 'Document expire demain',
+            'document_expired'    => 'Document expire',
             'pre_expiry_30'      => 'Expiration dans 1 mois',
             'pre_expiry_15'      => 'Expiration dans 15 jours',
             'pre_expiry_3'       => 'Expiration dans 3 jours',

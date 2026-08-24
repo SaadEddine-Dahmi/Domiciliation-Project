@@ -24,7 +24,9 @@
 // through notifyContractReminder().
 
 use App\Models\Alerte;
+use App\Models\AppNotification;
 use App\Models\Contrat;
+use App\Models\Document;
 use App\Services\NotificationService;
 use Carbon\Carbon;
 use Illuminate\Foundation\Inspiring;
@@ -107,3 +109,46 @@ Schedule::call(function () {
         }
     }
 })->dailyAt('08:00')->name('alertes:send')->withoutOverlapping();
+
+// Cron 3: document expiry alerts.
+Schedule::call(function () {
+    $notifications = app(NotificationService::class);
+    $today = Carbon::today();
+
+    foreach ([30, 7, 1] as $daysBefore) {
+        $targetDate = $today->copy()->addDays($daysBefore);
+        $type = "document_expiry_{$daysBefore}";
+
+        $documents = Document::query()
+            ->whereDate('date_expiration', $targetDate)
+            ->with(['entreprise.clientUser', 'entreprise.domiciliataire', 'documentType'])
+            ->get();
+
+        foreach ($documents as $document) {
+            $alreadySent = AppNotification::query()
+                ->where('type', $type)
+                ->where('data->document_id', $document->id)
+                ->exists();
+
+            if (!$alreadySent) {
+                $notifications->notifyDocumentExpiry($document, $type);
+            }
+        }
+    }
+
+    $expiredDocuments = Document::query()
+        ->whereDate('date_expiration', $today->copy()->subDay())
+        ->with(['entreprise.clientUser', 'entreprise.domiciliataire', 'documentType'])
+        ->get();
+
+    foreach ($expiredDocuments as $document) {
+        $alreadySent = AppNotification::query()
+            ->where('type', 'document_expired')
+            ->where('data->document_id', $document->id)
+            ->exists();
+
+        if (!$alreadySent) {
+            $notifications->notifyDocumentExpiry($document, 'document_expired');
+        }
+    }
+})->dailyAt('08:15')->name('documents:expiry-alerts')->withoutOverlapping();

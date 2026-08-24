@@ -41,7 +41,7 @@ function tokenUrl(url: string, mode: 'preview' | 'download' = 'preview'): string
 const factures     = ref<any[]>([])
 const loading      = ref(true)
 const search       = ref('')
-const filterStatut = ref('')
+const filterStatut = ref(typeof route.query.statut === 'string' ? route.query.statut : '')
 
 const previewFacture = ref<any>(null)
 const showPreview    = ref(false)
@@ -88,7 +88,7 @@ const filtered = computed(() => {
     list = list.filter(f => f.archived_at)
   } else {
     list = list.filter(f => !f.archived_at)
-    if (filterStatut.value) list = list.filter(f => f.statut === filterStatut.value)
+    if (filterStatut.value) list = list.filter(f => displayStatut(f) === filterStatut.value)
   }
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
@@ -104,10 +104,12 @@ const filtered = computed(() => {
 const activeFactures = computed(() => factures.value.filter(f => !f.archived_at))
 const archivedCount  = computed(() => factures.value.filter(f => f.archived_at).length)
 const totalAmount    = computed(() => activeFactures.value.reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const paidAmount     = computed(() => activeFactures.value.filter(f => f.statut === 'paid').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const pendingAmount  = computed(() => activeFactures.value.filter(f => f.statut === 'pending').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const paidCount      = computed(() => activeFactures.value.filter(f => f.statut === 'paid').length)
-const pendingCount   = computed(() => activeFactures.value.filter(f => f.statut === 'pending').length)
+const paidAmount     = computed(() => activeFactures.value.reduce((s, f) => s + Number(f.total_paye ?? (displayStatut(f) === 'paid' ? f.montant_total : 0)), 0))
+const pendingAmount  = computed(() => activeFactures.value.reduce((s, f) => s + Number(f.montant_restant ?? (displayStatut(f) === 'paid' ? 0 : f.montant_total)), 0))
+const paidCount      = computed(() => activeFactures.value.filter(f => displayStatut(f) === 'paid').length)
+const partialCount   = computed(() => activeFactures.value.filter(f => displayStatut(f) === 'partial').length)
+const overdueCount   = computed(() => activeFactures.value.filter(f => displayStatut(f) === 'overdue').length)
+const pendingCount   = computed(() => activeFactures.value.filter(f => ['unpaid', 'overdue', 'partial', 'pending'].includes(displayStatut(f))).length)
 
 function fmt(d: string | null): string {
   if (!d) return '—'
@@ -116,13 +118,16 @@ function fmt(d: string | null): string {
 
 const statutCfg: Record<string, { cls: string; label: string }> = {
   paid:      { cls: 'text-green-400 bg-green-400/10',   label: 'Payée' },
+  partial:   { cls: 'text-sky-400 bg-sky-400/10',       label: 'Partielle' },
+  unpaid:    { cls: 'text-yellow-400 bg-yellow-400/10', label: 'Impayee' },
+  overdue:   { cls: 'text-red-400 bg-red-400/10',       label: 'En retard' },
   pending:   { cls: 'text-yellow-400 bg-yellow-400/10', label: 'En attente' },
   cancelled: { cls: 'text-red-400 bg-red-400/10',       label: 'Annulée' },
   archived:  { cls: 'text-slate-300 bg-slate-400/10',   label: 'Archivée' },
 }
 
 function displayStatut(f: any): string {
-  return f.archived_at ? 'archived' : f.statut
+  return f.archived_at ? 'archived' : (f.effective_statut ?? f.statut)
 }
 
 function sc(statut: string) {
@@ -189,6 +194,9 @@ async function deleteFacture(f: any): Promise<void> {
 }
 
 watch(() => route.query.facture_id, openFactureFromQuery)
+watch(() => route.query.statut, value => {
+  filterStatut.value = typeof value === 'string' ? value : ''
+})
 
 onMounted(fetchFactures)
 </script>
@@ -207,7 +215,7 @@ onMounted(fetchFactures)
       </div>
     </div>
 
-    <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
+    <div class="grid grid-cols-1 sm:grid-cols-4 gap-3">
       <div class="card p-4 text-center">
         <p class="text-2xl font-serif" style="color:#c8a96e">{{ totalAmount.toLocaleString('fr-MA') }} DH</p>
         <p class="text-xs mt-1" style="color:var(--app-text-faint)">Total facturé</p>
@@ -219,6 +227,10 @@ onMounted(fetchFactures)
       <div class="card p-4 text-center">
         <p class="text-2xl font-serif text-yellow-400">{{ pendingAmount.toLocaleString('fr-MA') }} DH</p>
         <p class="text-xs mt-1" style="color:var(--app-text-faint)">En attente ({{ pendingCount }})</p>
+      </div>
+      <div class="card p-4 text-center">
+        <p class="text-2xl font-serif" :class="overdueCount ? 'text-red-400' : 'text-sky-400'">{{ overdueCount }}</p>
+        <p class="text-xs mt-1" style="color:var(--app-text-faint)">En retard - {{ partialCount }} partielle(s)</p>
       </div>
     </div>
 
@@ -272,6 +284,22 @@ onMounted(fetchFactures)
         class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
       >
         En attente
+      </button>
+
+      <button
+        @click="filterStatut = 'partial'"
+        :class="filterStatut === 'partial' ? 'bg-sky-400/15 border-sky-400 text-sky-300 font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-sky-400/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        Partielles
+      </button>
+
+      <button
+        @click="filterStatut = 'overdue'"
+        :class="filterStatut === 'overdue' ? 'bg-[#EF4444]/15 border-[#EF4444] text-[#EF4444] font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-[#EF4444]/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        En retard
       </button>
 
       <button 
@@ -328,6 +356,9 @@ onMounted(fetchFactures)
         <p class="text-sm" style="color:var(--app-text-muted)">{{ fmt(f.date_facture) }}</p>
         <p class="text-sm font-bold text-right" style="color:var(--app-text)">
           {{ Number(f.montant_total ?? 0).toLocaleString('fr-MA') }} DH
+          <span v-if="Number(f.montant_restant ?? 0) > 0" class="block text-[10px] font-normal" style="color:var(--app-text-faint)">
+            Reste {{ Number(f.montant_restant ?? 0).toLocaleString('fr-MA') }} DH
+          </span>
         </p>
         <div class="text-center">
           <span class="text-xs px-2.5 py-1 rounded-full font-semibold" :class="sc(displayStatut(f)).cls">

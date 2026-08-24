@@ -84,7 +84,10 @@ class FactureController extends Controller
             ->latest()
             ->get();
 
-        return response()->json(['success' => true, 'data' => $factures]);
+        return response()->json([
+            'success' => true,
+            'data' => $factures->map(fn(Facture $facture) => $this->formatFacture($facture))->values(),
+        ]);
     }
 
     /**
@@ -102,7 +105,7 @@ class FactureController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Facture archivée.',
-            'data' => $facture->fresh(['entreprise', 'contrat', 'paiements']),
+            'data' => $this->formatFacture($facture->fresh(['entreprise', 'contrat', 'paiements'])),
         ]);
     }
 
@@ -121,7 +124,7 @@ class FactureController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Facture restaurée.',
-            'data' => $facture->fresh(['entreprise', 'contrat', 'paiements']),
+            'data' => $this->formatFacture($facture->fresh(['entreprise', 'contrat', 'paiements'])),
         ]);
     }
 
@@ -207,5 +210,32 @@ class FactureController extends Controller
         return $user?->role === 'domiciliataire'
             ? null
             : $this->forbiddenTenantResource();
+    }
+
+    private function formatFacture(Facture $facture): array
+    {
+        $total = (float) $facture->montant_total;
+        $paid = (float) $facture->paiements->sum('montant');
+        $remaining = max($total - $paid, 0);
+        $isOverdue = $remaining > 0
+            && $facture->date_echeance
+            && $facture->date_echeance->isPast()
+            && !$facture->archived_at;
+
+        $effectiveStatus = match (true) {
+            (bool) $facture->archived_at => 'archived',
+            $facture->statut === 'cancelled' => 'cancelled',
+            $remaining <= 0 => 'paid',
+            $paid > 0 => 'partial',
+            $isOverdue => 'overdue',
+            default => 'unpaid',
+        };
+
+        return array_merge($facture->toArray(), [
+            'total_paye' => number_format($paid, 2, '.', ''),
+            'montant_restant' => number_format($remaining, 2, '.', ''),
+            'is_overdue' => $isOverdue,
+            'effective_statut' => $effectiveStatus,
+        ]);
     }
 }

@@ -23,6 +23,38 @@
       {{ title }}
     </h1>
 
+    <div v-if="auth.isAuthenticated" ref="searchRef" class="relative hidden md:block w-[min(34vw,360px)]">
+      <input
+        v-model="searchTerm"
+        class="w-full h-9 rounded-xl px-3 text-sm"
+        style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text);"
+        placeholder="Rechercher..."
+        @focus="searchOpen = true"
+        @keydown.esc="searchOpen = false"
+      />
+      <div
+        v-if="searchOpen && (searchLoading || searchResults.length || searchTerm.length >= 2)"
+        class="absolute left-0 right-0 mt-2 rounded-xl py-2 shadow-xl z-50"
+        style="background:var(--app-surface);border:1px solid var(--app-border);"
+      >
+        <div v-if="searchLoading" class="px-3 py-2 text-xs text-app-text/50">Recherche...</div>
+        <NuxtLink
+          v-for="item in searchResults"
+          :key="`${item.type}-${item.title}-${item.to}`"
+          :to="item.to"
+          class="search-item"
+          @click="closeSearch"
+        >
+          <span class="text-xs uppercase text-gold">{{ item.type }}</span>
+          <span class="font-semibold truncate">{{ item.title }}</span>
+          <span class="text-xs text-app-text/45 truncate">{{ item.subtitle }}</span>
+        </NuxtLink>
+        <div v-if="!searchLoading && !searchResults.length && searchTerm.length >= 2" class="px-3 py-2 text-xs text-app-text/50">
+          Aucun resultat
+        </div>
+      </div>
+    </div>
+
     <div class="flex items-center gap-1.5 sm:gap-2">
 
       <ThemeToggle />
@@ -85,6 +117,29 @@ const { toggleMobile } = useSidebar()
 const router = useRouter()
 const avatarMenuOpen = ref(false)
 const avatarMenuRef = ref<HTMLElement | null>(null)
+const searchRef = ref<HTMLElement | null>(null)
+const searchTerm = ref('')
+const searchResults = ref<any[]>([])
+const searchLoading = ref(false)
+const searchOpen = ref(false)
+let searchTimer: ReturnType<typeof setTimeout> | null = null
+
+function getApiBase(): string {
+  const config = useRuntimeConfig()
+  return (config.public.apiBase as string) ?? ''
+}
+
+function authHeaders(): Record<string, string> {
+  if (!import.meta.client) return {}
+  try {
+    const raw = localStorage.getItem('app_auth')
+    if (!raw) return {}
+    const parsed = JSON.parse(raw)
+    return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
+  } catch {
+    return {}
+  }
+}
 
 function settingsPath(): string {
   return auth.isInternal ? '/admin/settings' : '/client/settings'
@@ -107,10 +162,39 @@ function logout(): void {
   router.push('/login')
 }
 
+function closeSearch(): void {
+  searchOpen.value = false
+  searchTerm.value = ''
+  searchResults.value = []
+}
+
+async function runSearch(term: string): Promise<void> {
+  if (term.trim().length < 2) {
+    searchResults.value = []
+    searchLoading.value = false
+    return
+  }
+  searchLoading.value = true
+  try {
+    const res = await $fetch<{ success: boolean; data: any[] }>(
+      `${getApiBase()}/api/search?q=${encodeURIComponent(term.trim())}`,
+      { headers: authHeaders() },
+    )
+    searchResults.value = res.data ?? []
+  } catch {
+    searchResults.value = []
+  } finally {
+    searchLoading.value = false
+  }
+}
+
 function onPointerDown(event: MouseEvent): void {
   const target = event.target as Node | null
   if (avatarMenuRef.value && target && !avatarMenuRef.value.contains(target)) {
     avatarMenuOpen.value = false
+  }
+  if (searchRef.value && target && !searchRef.value.contains(target)) {
+    searchOpen.value = false
   }
 }
 
@@ -123,6 +207,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   document.removeEventListener('mousedown', onPointerDown)
+  if (searchTimer) clearTimeout(searchTimer)
 })
 
 watch(
@@ -132,6 +217,12 @@ watch(
     else notifs.reset()
   }
 )
+
+watch(searchTerm, value => {
+  if (searchTimer) clearTimeout(searchTimer)
+  searchOpen.value = true
+  searchTimer = setTimeout(() => runSearch(value), 250)
+})
 </script>
 
 <style scoped>
@@ -150,5 +241,14 @@ watch(
 }
 .menu-item.danger {
   color: #ef4444;
+}
+.search-item {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.6rem 0.8rem;
+  color: var(--app-text);
+}
+.search-item:hover {
+  background: var(--nav-hover-bg);
 }
 </style>
