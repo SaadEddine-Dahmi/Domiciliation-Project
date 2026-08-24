@@ -82,6 +82,15 @@ const notifications = ref<any[]>([])
 const loading        = ref(true)
 const search         = ref('')
 const filter         = ref<'all' | 'unread' | 'read'>('all')
+const expandedId     = ref<number | null>(null)
+
+function toggleExpand(id: number): void {
+  const n = notifications.value.find(x => x.id === id)
+  if (n && !n.is_read) {
+    markRead(id)
+  }
+  expandedId.value = expandedId.value === id ? null : id
+}
 
 /** Loads the current user's notifications. */
 async function loadAll(): Promise<void> {
@@ -230,13 +239,16 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
     contratId &&
     (type === 'contract_legalized' || type.startsWith('pre_expiry_') || type === 'post_expiry' || type === 'contract_expired' || message.includes('contrat'))
   ) {
-    return { label: 'Voir le contrat', to: `/client/contrat?contrat_id=${contratId}` }
+    return {
+      label: type === 'contract_legalized' ? 'Voir le contrat légalisé' : 'Voir le contrat',
+      external: withToken(`${getApiBase()}/api/contrats/${contratId}/pdf/stream?mode=preview`),
+    }
   }
 
   return null
 }
 
-async function openNotification(n: any): Promise<void> {
+async function openNotificationTarget(n: any): Promise<void> {
   if (!n.is_read) await markRead(n.id)
   const target = notificationTarget(n)
   if (!target) return
@@ -354,8 +366,8 @@ onMounted(loadAll)
         :style="i < filtered.length - 1 ? 'border-color:var(--app-border-2)' : ''"
         role="button"
         tabindex="0"
-        @click="openNotification(n)"
-        @keydown.enter.prevent="openNotification(n)"
+        @click="toggleExpand(n.id)"
+        @keydown.enter.prevent="toggleExpand(n.id)"
       >
         <!-- Unread accent bar, full row height, gold -->
         <span
@@ -426,7 +438,7 @@ onMounted(loadAll)
             v-if="notificationTarget(n)"
             class="text-xs font-semibold mt-1 underline underline-offset-2"
             style="color:#c8a96e"
-            @click.stop="openNotification(n)"
+            @click.stop="openNotificationTarget(n)"
           >
             {{ notificationTarget(n)?.label }} →
           </button>
@@ -455,6 +467,42 @@ onMounted(loadAll)
           >
             Lue
           </span>
+        </div>
+
+        <div
+          v-if="expandedId === n.id"
+          class="w-full rounded-xl p-4 mt-2 space-y-2 text-sm"
+          style="background:var(--app-surface-2);border:1px solid var(--app-border)"
+          @click.stop
+        >
+          <div class="flex items-center justify-between gap-3 flex-wrap">
+            <p class="font-semibold" style="color:var(--app-text)">
+              {{ titleFor(n) }}
+            </p>
+            <span class="text-xs" style="color:var(--app-text-faint)">
+              {{ dateParts(n.created_at).date }} {{ dateParts(n.created_at).time }}
+            </span>
+          </div>
+          <p style="color:var(--app-text-muted)">{{ n.message }}</p>
+          <div class="pt-1 space-y-1 text-xs" style="color:var(--app-text-muted)">
+            <p v-if="n.data?.contrat_id"><span class="font-medium" style="color:var(--app-text)">Contrat ID :</span> #{{ n.data.contrat_id }}</p>
+            <p v-if="n.data?.entreprise"><span class="font-medium" style="color:var(--app-text)">Entreprise :</span> {{ n.data.entreprise }}</p>
+            <p v-if="n.data?.document"><span class="font-medium" style="color:var(--app-text)">Document :</span> {{ n.data.document }}</p>
+            <p v-if="n.data?.date_expiration"><span class="font-medium" style="color:var(--app-text)">Expiration :</span> {{ n.data.date_expiration }}</p>
+            <p><span class="font-medium" style="color:var(--app-text)">Statut :</span>
+              <span :style="n.is_read ? 'color:#22c55e' : 'color:#f59e0b'">{{ n.is_read ? 'Lue' : 'Non lue' }}</span>
+            </p>
+          </div>
+          <div class="flex gap-2 pt-2 flex-wrap">
+            <button
+              v-if="notificationTarget(n)"
+              class="btn btn-gold btn-sm"
+              @click="openNotificationTarget(n)"
+            >
+              {{ notificationTarget(n)?.label }}
+            </button>
+            <button class="btn btn-outline btn-sm" @click="expandedId = null">Fermer</button>
+          </div>
         </div>
       </div>
     </div>

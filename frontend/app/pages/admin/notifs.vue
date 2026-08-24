@@ -165,7 +165,10 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
     contratId &&
     (type === 'contract_legalized' || type.startsWith('pre_expiry_') || type === 'post_expiry' || type === 'contract_expired' || type === 'renewal_nudge' || message.includes('contrat'))
   ) {
-    return { label: 'Voir le contrat', to: `/admin/contrat?id=${contratId}` }
+    return {
+      label: type === 'contract_legalized' ? 'Voir le contrat légalisé' : 'Voir le contrat',
+      external: withToken(`${getApiBase()}/api/contrats/${contratId}/pdf/stream?mode=preview`),
+    }
   }
 
   if (isAdmin.value && isAccountNotif(n)) {
@@ -175,13 +178,10 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
   return null
 }
 
-async function openNotification(n: any): Promise<void> {
+async function openNotificationTarget(n: any): Promise<void> {
   if (!n.is_read) await markRead(n.id)
   const target = notificationTarget(n)
-  if (!target) {
-    toggleExpand(n.id)
-    return
-  }
+  if (!target) return
   if (target.external) {
     window.open(target.external, '_blank', 'noopener')
     return
@@ -253,7 +253,7 @@ onMounted(loadAll)
         <div class="px-4 py-3.5 flex items-start gap-3 cursor-pointer transition-colors"
              :style="!n.is_read ? 'background:rgba(200,169,110,0.05)'
                      : expandedId === n.id ? 'background:var(--app-surface-2)' : ''"
-             @click="openNotification(n)">
+             @click="toggleExpand(n.id)">
           <div class="w-2 h-2 rounded-full shrink-0 mt-1.5"
                :style="`background:${notifColor(n)};opacity:${n.is_read ? 0.3 : 1}`"/>
           <div class="flex-1 min-w-0">
@@ -307,7 +307,7 @@ onMounted(loadAll)
               </div>
               <div class="flex gap-2 pt-2 flex-wrap">
                 <button v-if="!n.is_read" class="btn btn-outline btn-sm" @click="markRead(n.id)">Marquer comme lu</button>
-                <button v-if="notificationTarget(n)" class="btn btn-gold btn-sm" @click="openNotification(n)">
+                <button v-if="notificationTarget(n)" class="btn btn-gold btn-sm" @click="openNotificationTarget(n)">
                   {{ notificationTarget(n)?.label }}
                 </button>
                 <!-- Shortcut to act on the request — only for Super
