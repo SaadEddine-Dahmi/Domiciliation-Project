@@ -92,9 +92,10 @@ async function refreshReceipt(msg: any): Promise<void> {
 }
 
 function clientName(msg: any): string {
-  return msg.toUser
-    ? `${msg.toUser.nom} ${msg.toUser.prenom}`
-    : clientItems.value.find(c => c.client_user?.id === msg.user_id)?.raison_sociale ?? `Client #${msg.user_id}`
+  const receiver = msg.receiver ?? msg.toUser
+  return receiver
+    ? `${receiver.nom ?? ''} ${receiver.prenom ?? ''}`.trim() || receiver.email
+    : clientItems.value.find(c => c.client_user?.id === (msg.receiver_id ?? msg.user_id))?.raison_sociale ?? `Client #${msg.receiver_id ?? msg.user_id}`
 }
 
 function formatDate(d: string | null): string {
@@ -133,18 +134,18 @@ onMounted(async () => {
     </div>
 
     <div v-else-if="messages.length" class="space-y-3">
-      <div v-for="msg in messages" :key="msg.id" class="card p-4 space-y-2">
+      <div v-for="msg in messages" :key="msg.id" class="card p-4 space-y-2 max-w-full overflow-hidden">
         <div class="flex items-start justify-between gap-3 flex-wrap">
-          <div class="min-w-0 flex-1">
+          <div class="min-w-0 max-w-full flex-1">
             <div class="flex items-center gap-2 flex-wrap">
-              <p class="font-semibold text-sm">{{ clientName(msg) }}</p>
+              <p class="font-semibold text-sm max-w-full break-words [overflow-wrap:anywhere]">{{ clientName(msg) }}</p>
               <span class="text-xs px-2 py-0.5 rounded-full font-medium"
                     :class="msg.is_read ? 'text-green-400 bg-green-400/10' : 'text-app-text/40 bg-white/5'">
                 {{ msg.is_read ? `✓✓ Lu ${formatDate(msg.read_at)}` : '✓ Envoyé' }}
               </span>
             </div>
-            <p v-if="msg.subject" class="text-xs text-gold mt-0.5 font-medium">{{ msg.subject }}</p>
-            <p class="text-sm text-app-text/70 mt-1 line-clamp-2">{{ msg.message }}</p>
+            <p v-if="msg.subject" class="text-xs text-gold mt-0.5 font-medium max-w-full break-words [overflow-wrap:anywhere]">{{ msg.subject }}</p>
+            <p class="text-sm text-app-text/70 mt-1 line-clamp-2 max-w-full break-words [overflow-wrap:anywhere]">{{ msg.message }}</p>
             <p class="text-xs text-app-text/40 mt-1">{{ formatDate(msg.created_at) }}</p>
           </div>
           <button v-if="!msg.is_read" class="btn btn-outline btn-sm flex-shrink-0"

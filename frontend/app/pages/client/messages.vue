@@ -5,8 +5,11 @@
   - Read receipt envoyé au domiciliataire
 ============================================================ -->
 <script setup lang="ts">
+import { useAuthStore } from '~/stores/auth'
+
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const { error: toastError } = useToast()
+const auth = useAuthStore()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -47,7 +50,8 @@ async function load(): Promise<void> {
 /** Ouvre un message + marque comme lu immédiatement */
 async function openMsg(msg: any): Promise<void> {
   openMessage.value = msg
-  if (!msg.is_read) {
+  const isReceived = (msg.receiver_id ?? msg.user_id) === auth.user?.id
+  if (isReceived && !msg.is_read) {
     try {
       await $fetch(`${getApiBase()}/api/messages/${msg.id}/read`, {
         method: 'POST', headers: authHeaders()
@@ -58,7 +62,7 @@ async function openMsg(msg: any): Promise<void> {
   }
 }
 
-const unreadCount = computed(() => messages.value.filter(m => !m.is_read).length)
+const unreadCount = computed(() => messages.value.filter(m => (m.receiver_id ?? m.user_id) === auth.user?.id && !m.is_read).length)
 
 function formatDate(d: string | null): string {
   if (!d) return '-'
@@ -96,7 +100,7 @@ onMounted(load)
     >
       <div
         v-for="(msg, i) in messages" :key="msg.id"
-        class="px-5 py-4 cursor-pointer transition flex items-start gap-3"
+        class="px-5 py-4 cursor-pointer transition flex items-start gap-3 max-w-full"
         :class="[i < messages.length - 1 ? 'border-b' : '']"
         :style="[
           i < messages.length - 1 ? 'border-color: var(--app-border-2)' : '',
@@ -110,13 +114,13 @@ onMounted(load)
           :class="!msg.is_read ? 'bg-gold' : 'bg-transparent'"
         />
 
-        <div class="min-w-0 flex-1">
+        <div class="min-w-0 max-w-full flex-1">
           <div class="flex items-center gap-2 flex-wrap">
-            <p class="text-sm font-semibold" :class="!msg.is_read ? '' : 'text-app-text/70'">
+            <p class="text-sm font-semibold max-w-full break-words [overflow-wrap:anywhere]" :class="!msg.is_read ? '' : 'text-app-text/70'">
               {{ msg.subject || 'Message de votre domiciliataire' }}
             </p>
           </div>
-          <p class="text-xs text-app-text/50 mt-0.5 line-clamp-1">{{ msg.message }}</p>
+          <p class="text-xs text-app-text/50 mt-0.5 line-clamp-1 max-w-full break-words [overflow-wrap:anywhere]">{{ msg.message }}</p>
           <p class="text-xs text-app-text/30 mt-1">{{ formatDate(msg.created_at) }}</p>
         </div>
       </div>
@@ -133,9 +137,9 @@ onMounted(load)
       class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
       @click.self="openMessage = null"
     >
-      <div class="card w-full max-w-lg p-6 space-y-4">
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-lg">
+      <div class="card w-full max-w-lg p-6 space-y-4 overflow-hidden">
+        <div class="flex items-center justify-between gap-3">
+          <h2 class="font-serif text-lg min-w-0 max-w-full break-words [overflow-wrap:anywhere]">
             {{ openMessage.subject || 'Message' }}
           </h2>
           <button class="text-app-text/40 hover:text-white" @click="openMessage = null">✕</button>
@@ -146,7 +150,7 @@ onMounted(load)
         </div>
 
         <div
-          class="rounded-xl p-4 text-sm leading-relaxed whitespace-pre-wrap"
+          class="rounded-xl p-4 text-sm leading-relaxed whitespace-pre-wrap max-w-full break-words [overflow-wrap:anywhere]"
           style="border: 1px solid var(--app-border); background: var(--app-surface-2)"
         >
           {{ openMessage.message }}

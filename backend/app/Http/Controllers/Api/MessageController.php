@@ -27,7 +27,10 @@ class MessageController extends Controller
             ->latest()
             ->get();
 
-        return response()->json(['success' => true, 'data' => $messages]);
+        return response()->json([
+            'success' => true,
+            'data' => $messages->map(fn(AppNotification $message) => $this->formatMessage($message))->values(),
+        ]);
     }
 
     // Sends a direct message from a domiciliataire to one of their
@@ -66,10 +69,10 @@ class MessageController extends Controller
 
         return response()->json([
             'success' => true,
-            'data' => $notification->load([
+            'data' => $this->formatMessage($notification->load([
                 'fromUser:id,nom,prenom,email',
                 'toUser:id,nom,prenom,email',
-            ]),
+            ])),
         ], 201);
     }
 
@@ -95,6 +98,17 @@ class MessageController extends Controller
         return response()->json([
             'success' => true,
             'data' => ['is_read' => $notification->is_read, 'read_at' => $notification->read_at],
+        ]);
+    }
+
+    private function formatMessage(AppNotification $message): array
+    {
+        return array_merge($message->toArray(), [
+            'sender_id' => $message->from_user_id,
+            'receiver_id' => $message->user_id,
+            'sender' => $message->relationLoaded('fromUser') ? $message->fromUser : null,
+            'receiver' => $message->relationLoaded('toUser') ? $message->toUser : null,
+            'is_outgoing' => $message->from_user_id === auth()->id(),
         ]);
     }
 }
