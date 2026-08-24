@@ -26,9 +26,9 @@ class DashboardController extends Controller
                 'data' => [
                     'total_domiciliataires' => $this->safeMetric('admin.total_domiciliataires', fn() => User::where('role', 'domiciliataire')->count(), 0),
                     'total_clients' => $this->safeMetric('admin.total_clients', fn() => Entreprise::count(), 0),
-                    'total_contrats' => $this->safeMetric('admin.total_contrats', fn() => $this->visibleContrats()->count(), 0),
-                    'contrats_actifs' => $this->safeMetric('admin.contrats_actifs', fn() => $this->visibleContrats()->where('statut', 'active')->count(), 0),
-                    'contrats_draft' => $this->safeMetric('admin.contrats_draft', fn() => $this->visibleContrats()->where('statut', 'draft')->count(), 0),
+                    'total_contrats' => 0,
+                    'contrats_actifs' => 0,
+                    'contrats_draft' => 0,
                     'total_documents' => 0,
                     'ca_mensuel' => '0.00',
                     'role' => 'admin',

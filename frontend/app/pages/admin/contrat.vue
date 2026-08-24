@@ -29,6 +29,7 @@ import {
   type TemplateEntity,
 } from "~/services/template.service";
 import ContratPreviewModal from "~/components/ContratPreviewModal.vue";
+import { countryDialCodes } from "~/utils/countryDialCodes";
 
 definePageMeta({ layout: "dashboard", middleware: ["auth"] });
 
@@ -38,7 +39,7 @@ const clientsStore = useClientsStore();
 const articlesStore = useArticlesStore();
 const { success, error: toastError } = useToast();
 
-const dialCodes = ["+212", "+33", "+34", "+1", "+44", "+49", "+39", "+31"];
+const dialCodes = countryDialCodes;
 
 function joinPhone(dialCode: string, number: string): string {
   const local = number.trim().replace(/^0+/, "");
@@ -1305,17 +1306,17 @@ onMounted(async () => {
             </div>
             <div>
               <label class="f-label">Téléphone</label>
-              <div class="flex gap-2">
+              <div class="grid grid-cols-[minmax(130px,0.42fr)_1fr] gap-2">
                 <select
                   v-model="newClientForm.telDialCode"
-                  class="f-input w-28 shrink-0">
-                  <option v-for="code in dialCodes" :key="code" :value="code">
-                    {{ code }}
+                  class="f-input min-w-0">
+                  <option v-for="code in dialCodes" :key="code.iso" :value="code.dialCode">
+                    {{ code.flag }} {{ code.dialCode }} {{ code.country }}
                   </option>
                 </select>
                 <input
                   v-model="newClientForm.telNumber"
-                  class="f-input flex-1"
+                  class="f-input min-w-0"
                   type="tel"
                   placeholder="6XX XXX XXX" />
               </div>

@@ -109,7 +109,7 @@ class ContratController extends Controller
 
         try {
             $query = match ($user->role) {
-                'admin' => $this->adminContratsQuery($request),
+                'admin' => throw new HttpResponseException($this->forbiddenTenantResource()),
                 'domiciliataire' => $this->domiciliataireContratsQuery($request, $user),
                 'client' => $this->clientContratsQuery($user),
                 default => null,
@@ -154,6 +154,9 @@ class ContratController extends Controller
     public function show(string $id)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
 
         $contrat = Contrat::where('domiciliataire_id', $user->id)
             ->with([
@@ -183,6 +186,9 @@ class ContratController extends Controller
     public function store(Request $request)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
 
         $data = $request->validate([
             'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
@@ -255,6 +261,9 @@ class ContratController extends Controller
     public function update(Request $request, string $id)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         if ($blocked = $this->assertEditable($contrat)) {
@@ -335,6 +344,9 @@ class ContratController extends Controller
     public function activate(Request $request, string $id)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         if ($contrat->statut !== 'draft') {
@@ -378,6 +390,9 @@ class ContratController extends Controller
     public function terminate(string $id)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         if ($contrat->statut !== 'active') {
@@ -417,6 +432,9 @@ class ContratController extends Controller
         }
 
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         $contrat->archive();
@@ -434,6 +452,9 @@ class ContratController extends Controller
         }
 
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         $contrat->restoreArchive();
@@ -444,6 +465,9 @@ class ContratController extends Controller
     public function renew(string $id)
     {
         $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
         $contrat = Contrat::where('domiciliataire_id', $user->id)
             ->with(['entreprise.representant', 'articles'])
             ->findOrFail($id);
@@ -473,6 +497,10 @@ class ContratController extends Controller
      */
     public function history(string $id)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $contrat = Contrat::where('domiciliataire_id', auth()->id())->findOrFail($id);
 
         return response()->json([
@@ -536,8 +564,10 @@ class ContratController extends Controller
             }
             $query->where('entreprise_id', $entreprise->id)
                 ->when($this->contratsHaveArchivedAt(), fn($q) => $q->whereNull('archived_at'));
-        } else {
+        } elseif ($user->role === 'domiciliataire') {
             $query->where('domiciliataire_id', $user->id);
+        } else {
+            return null;
         }
 
         return $query->find($id);
@@ -631,6 +661,21 @@ class ContratController extends Controller
         }
 
         return null;
+    }
+
+    private function forbiddenTenantResource(): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => "Accès interdit : les contrats appartiennent aux domiciliataires.",
+        ], 403);
+    }
+
+    private function denyUnlessDomiciliataire(?\App\Models\User $user): ?\Illuminate\Http\JsonResponse
+    {
+        return $user?->role === 'domiciliataire'
+            ? null
+            : $this->forbiddenTenantResource();
     }
 
     private function adminContratsQuery(Request $request): Builder

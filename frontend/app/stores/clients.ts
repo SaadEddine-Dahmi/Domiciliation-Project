@@ -134,14 +134,14 @@ export const useClientsStore = defineStore('clients', () => {
     }
 
     /**
-     * PATCH /api/clients/{id}/reset-password
+     * POST /api/clients/{id}/regenerate-password
      * Always generates a new password server-side — used for a client
      * who's locked out. Returns it once for display in a copy modal.
      */
     async function resetPassword(id: number): Promise<string> {
         const res = await $fetch<{ success: boolean; message: string; generated_password: string }>(
-            `${getApiBase()}/api/clients/${id}/reset-password`,
-            { method: 'PATCH', headers: authHeaders() },
+            `${getApiBase()}/api/clients/${id}/regenerate-password`,
+            { method: 'POST', headers: authHeaders() },
         )
         return res.generated_password
     }

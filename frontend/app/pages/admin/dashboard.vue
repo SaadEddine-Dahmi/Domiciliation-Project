@@ -42,7 +42,7 @@ function authHeaders(): Record<string, string> {
 }
 
 interface Stats {
-  total_clients: number; total_contrats: number
+  total_clients: number; total_domiciliataires?: number; total_contrats: number
   contrats_actifs: number; contrats_draft: number
   total_documents: number; ca_mensuel: string
 }
@@ -97,10 +97,17 @@ async function loadDashboard() {
   await Promise.allSettled([
     loadStats(),
     loadClients(),
-    loadContrats(),
+    auth.isAdmin ? skipContratsForAdmin() : loadContrats(),
     loadMessages(),
     loadPendingUsers(),
   ])
+}
+
+async function skipContratsForAdmin(): Promise<void> {
+  allContrats.value = []
+  recentContrats.value = []
+  contratsError.value = ''
+  contratsLoading.value = false
 }
 
 async function loadStats(): Promise<void> {
@@ -407,15 +414,23 @@ onMounted(loadDashboard)
     </div>
 
     <!-- ══════ Stat cards — clickable ═══════════════════════════════════ -->
-    <div v-if="statsLoading" class="grid grid-cols-2 md:grid-cols-5 gap-4">
-      <div v-for="i in 5" :key="i" class="card p-5 animate-pulse">
+    <div
+      v-if="statsLoading"
+      class="grid grid-cols-2 gap-4"
+      :class="auth.isAdmin ? 'md:grid-cols-2' : 'md:grid-cols-5'"
+    >
+      <div v-for="i in auth.isAdmin ? 2 : 5" :key="i" class="card p-5 animate-pulse">
         <div class="h-3 w-20 bg-white/10 rounded mb-3" /><div class="h-8 w-12 bg-white/10 rounded" />
       </div>
     </div>
 
     <div v-else-if="statsError" class="card p-4 text-red-400 text-sm">{{ statsError }}</div>
 
-    <div v-else-if="stats" class="grid grid-cols-2 md:grid-cols-5 gap-4">
+    <div
+      v-else-if="stats"
+      class="grid grid-cols-2 gap-4"
+      :class="auth.isAdmin ? 'md:grid-cols-2' : 'md:grid-cols-5'"
+    >
 
       <!-- Clients -->
       <button type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/clients')">
@@ -423,20 +438,25 @@ onMounted(loadDashboard)
         <div class="font-serif text-3xl text-gold">{{ stats.total_clients ?? 0 }}</div>
       </button>
 
+      <button v-if="auth.isAdmin" type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/domiciliataires')">
+        <div class="text-[11px] text-app-text/40 uppercase mb-2">Domiciliataires</div>
+        <div class="font-serif text-3xl text-gold">{{ stats.total_domiciliataires ?? 0 }}</div>
+      </button>
+
       <!-- Active contracts -->
-      <button type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=active')">
+      <button v-if="!auth.isAdmin" type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=active')">
         <div class="text-[11px] text-app-text/40 uppercase mb-2">Contrats actifs</div>
         <div class="font-serif text-3xl text-gold">{{ stats.contrats_actifs ?? 0 }}</div>
       </button>
 
       <!-- Draft contracts -->
-      <button type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=draft')">
+      <button v-if="!auth.isAdmin" type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=draft')">
         <div class="text-[11px] text-app-text/40 uppercase mb-2">Brouillons</div>
         <div class="font-serif text-3xl text-gold">{{ stats.contrats_draft ?? 0 }}</div>
       </button>
 
       <!-- Expired contracts -->
-      <button type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=expired')">
+      <button v-if="!auth.isAdmin" type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/contrats?statut=expired')">
         <div class="text-[11px] text-app-text/40 uppercase mb-2">Contrats expirés</div>
         <div class="font-serif text-3xl" :class="expiredContractsCount > 0 ? 'text-red-400' : 'text-gold'">
           {{ expiredContractsCount }}
@@ -444,7 +464,7 @@ onMounted(loadDashboard)
       </button>
 
       <!-- Revenue -->
-      <button type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/paiements')">
+      <button v-if="!auth.isAdmin" type="button" class="card p-5 text-left stat-card" @click="router.push('/admin/paiements')">
         <div class="text-[11px] text-app-text/40 uppercase mb-2">CA ce mois</div>
         <div class="font-serif text-2xl text-gold">{{ stats.ca_mensuel ?? '0' }} <span class="text-sm">DH</span></div>
       </button>
@@ -520,7 +540,7 @@ onMounted(loadDashboard)
     </div>
 
     <!-- ══════ Charts row ═══════════════════════════════════════════════ -->
-    <div v-if="contratsLoading" class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <div v-if="!auth.isAdmin && contratsLoading" class="grid grid-cols-1 lg:grid-cols-3 gap-5">
       <div class="card p-5 lg:col-span-2 animate-pulse">
         <div class="h-4 w-40 bg-white/10 rounded mb-4" />
         <div class="h-40 bg-white/5 rounded" />
@@ -531,11 +551,11 @@ onMounted(loadDashboard)
       </div>
     </div>
 
-    <div v-else-if="contratsError" class="card p-5 text-red-400 text-sm">
+    <div v-else-if="!auth.isAdmin && contratsError" class="card p-5 text-red-400 text-sm">
       {{ contratsError }}
     </div>
 
-    <div v-else class="grid grid-cols-1 lg:grid-cols-3 gap-5">
+    <div v-else-if="!auth.isAdmin" class="grid grid-cols-1 lg:grid-cols-3 gap-5">
 
       <!-- Bar chart: new vs ended contracts per month -->
       <div class="card p-5 lg:col-span-2">
@@ -647,7 +667,7 @@ onMounted(loadDashboard)
     </div>
 
     <!-- ══════ Recent activity ══════════════════════════════════════════ -->
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-5">
+    <div class="grid grid-cols-1 gap-5" :class="auth.isAdmin ? 'md:grid-cols-2' : 'md:grid-cols-3'">
 
       <!-- Derniers clients -->
       <div class="card p-4 space-y-3">
@@ -669,7 +689,7 @@ onMounted(loadDashboard)
       </div>
 
       <!-- Derniers contrats -->
-      <div class="card p-4 space-y-3">
+      <div v-if="!auth.isAdmin" class="card p-4 space-y-3">
         <div class="flex items-center justify-between">
           <h3 class="font-semibold text-sm">Derniers contrats</h3>
           <NuxtLink to="/admin/contrats" class="text-xs text-gold underline">Voir tout</NuxtLink>

@@ -275,13 +275,20 @@ class ClientController extends Controller
     }
 
     /**
-     * PATCH /api/clients/{id}/reset-password
+     * POST /api/clients/{id}/regenerate-password
      * Always generates a new random password (no manual override here —
      * this is the "client is locked out" recovery path, not an edit
      * flow). Flips must_change_password back to true.
      */
     public function resetPassword(int $id)
     {
+        if (auth()->user()?->role !== 'domiciliataire') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Acces interdit.',
+            ], 403);
+        }
+
         $entreprise = Entreprise::query()
             ->where('domiciliataire_id', auth()->id())
             ->findOrFail($id);

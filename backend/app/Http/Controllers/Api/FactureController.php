@@ -47,6 +47,10 @@ class FactureController extends Controller
      */
     private function resolveFacture(int $id, \App\Models\User $user): ?Facture
     {
+        if ($user->role !== 'domiciliataire') {
+            return null;
+        }
+
         return Facture::with(['entreprise', 'contrat', 'domiciliataire', 'paiements'])
             ->where('domiciliataire_id', $user->id)
             ->find($id);
@@ -63,6 +67,10 @@ class FactureController extends Controller
      */
     public function index(Request $request)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $tenantId = auth()->id();
 
         $factures = Facture::query()
@@ -84,6 +92,10 @@ class FactureController extends Controller
      */
     public function archive(int $id)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
         $facture->forceFill(['archived_at' => now()])->save();
 
@@ -99,6 +111,10 @@ class FactureController extends Controller
      */
     public function restore(int $id)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
         $facture->forceFill(['archived_at' => null])->save();
 
@@ -118,6 +134,10 @@ class FactureController extends Controller
      */
     public function destroy(int $id)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
 
         DB::transaction(function () use ($facture) {
@@ -172,5 +192,20 @@ class FactureController extends Controller
         }
 
         return $pdf->stream($filename);
+    }
+
+    private function forbiddenTenantResource(): \Illuminate\Http\JsonResponse
+    {
+        return response()->json([
+            'success' => false,
+            'message' => "Accès interdit : les factures appartiennent aux domiciliataires.",
+        ], 403);
+    }
+
+    private function denyUnlessDomiciliataire(?\App\Models\User $user): ?\Illuminate\Http\JsonResponse
+    {
+        return $user?->role === 'domiciliataire'
+            ? null
+            : $this->forbiddenTenantResource();
     }
 }

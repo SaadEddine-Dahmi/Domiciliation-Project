@@ -16,6 +16,7 @@
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
 import PasswordRevealModal from '~/components/PasswordRevealModal.vue'
+import { countryDialCodes, sortedDialCodeValues } from '~/utils/countryDialCodes'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
@@ -29,7 +30,7 @@ const editId      = ref<number | null>(null)
 const saving      = ref(false)
 const search      = ref('')
 const serverError = ref('')
-const dialCodes = ['+212', '+33', '+34', '+1', '+44', '+49', '+39', '+31']
+const dialCodes = countryDialCodes
 
 function joinPhone(dialCode: string, number: string): string {
   const local = number.trim().replace(/^0+/, '')
@@ -38,7 +39,7 @@ function joinPhone(dialCode: string, number: string): string {
 
 function splitPhone(value: string | null | undefined): { dialCode: string; number: string } {
   const raw = (value ?? '').trim()
-  const matchedCode = dialCodes.find(code => raw.startsWith(code))
+  const matchedCode = sortedDialCodeValues.find(code => raw.startsWith(code))
   if (!matchedCode) return { dialCode: '+212', number: raw.replace(/^\+/, '') }
   return {
     dialCode: matchedCode,
@@ -383,11 +384,11 @@ onMounted(() => clientsStore.fetchAll())
     <Teleport to="body">
       <div
         v-if="showModal"
-        class="fixed inset-0 z-200 flex items-center justify-center p-4"
+        class="fixed inset-0 z-200 flex items-center justify-center p-4 overflow-y-auto"
         style="background:rgba(0,0,0,0.75)"
         @click.self="showModal = false"
       >
-        <div class="card w-full max-w-lg max-h-[90vh] flex flex-col" @click.stop>
+        <div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col" @click.stop>
 
           <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0"
                style="border-bottom:1px solid var(--app-border-2)">
@@ -405,7 +406,7 @@ onMounted(() => clientsStore.fetchAll())
             </button>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div class="flex-1 min-h-0 overflow-y-auto overflow-x-visible px-6 py-5">
             <form class="space-y-4" @submit.prevent="submitEntreprise">
 
               <div>
@@ -442,15 +443,15 @@ onMounted(() => clientsStore.fetchAll())
                 </div>
                 <div>
                   <label class="f-label">Téléphone</label>
-                  <div class="flex gap-2">
-                    <select v-model="form.gerant_dial_code" class="f-input w-28 shrink-0">
-                      <option v-for="code in dialCodes" :key="code" :value="code">
-                        {{ code }}
+                  <div class="grid grid-cols-[minmax(130px,0.42fr)_1fr] gap-2">
+                    <select v-model="form.gerant_dial_code" class="f-input min-w-0">
+                      <option v-for="code in dialCodes" :key="code.iso" :value="code.dialCode">
+                        {{ code.flag }} {{ code.dialCode }} {{ code.country }}
                       </option>
                     </select>
                     <input
                       v-model="form.gerant_phone_number"
-                      class="f-input flex-1"
+                      class="f-input min-w-0"
                       type="tel"
                       placeholder="6 26 01 11 49" />
                   </div>

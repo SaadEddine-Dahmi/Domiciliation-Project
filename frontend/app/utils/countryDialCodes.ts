@@ -1,0 +1,73 @@
+export interface CountryDialCode {
+  iso: string
+  country: string
+  dialCode: string
+  flag: string
+}
+
+export const countryDialCodes: CountryDialCode[] = [
+  { iso: 'MA', country: 'Maroc', dialCode: '+212', flag: 'MA' },
+  { iso: 'FR', country: 'France', dialCode: '+33', flag: 'FR' },
+  { iso: 'US', country: 'Etats-Unis', dialCode: '+1', flag: 'US' },
+  { iso: 'CA', country: 'Canada', dialCode: '+1', flag: 'CA' },
+  { iso: 'GB', country: 'Royaume-Uni', dialCode: '+44', flag: 'GB' },
+  { iso: 'ES', country: 'Espagne', dialCode: '+34', flag: 'ES' },
+  { iso: 'DE', country: 'Allemagne', dialCode: '+49', flag: 'DE' },
+  { iso: 'IT', country: 'Italie', dialCode: '+39', flag: 'IT' },
+  { iso: 'NL', country: 'Pays-Bas', dialCode: '+31', flag: 'NL' },
+  { iso: 'BE', country: 'Belgique', dialCode: '+32', flag: 'BE' },
+  { iso: 'CH', country: 'Suisse', dialCode: '+41', flag: 'CH' },
+  { iso: 'PT', country: 'Portugal', dialCode: '+351', flag: 'PT' },
+  { iso: 'AD', country: 'Andorre', dialCode: '+376', flag: 'AD' },
+  { iso: 'AT', country: 'Autriche', dialCode: '+43', flag: 'AT' },
+  { iso: 'BG', country: 'Bulgarie', dialCode: '+359', flag: 'BG' },
+  { iso: 'CY', country: 'Chypre', dialCode: '+357', flag: 'CY' },
+  { iso: 'CZ', country: 'Tchequie', dialCode: '+420', flag: 'CZ' },
+  { iso: 'DK', country: 'Danemark', dialCode: '+45', flag: 'DK' },
+  { iso: 'EE', country: 'Estonie', dialCode: '+372', flag: 'EE' },
+  { iso: 'FI', country: 'Finlande', dialCode: '+358', flag: 'FI' },
+  { iso: 'GR', country: 'Grece', dialCode: '+30', flag: 'GR' },
+  { iso: 'HR', country: 'Croatie', dialCode: '+385', flag: 'HR' },
+  { iso: 'HU', country: 'Hongrie', dialCode: '+36', flag: 'HU' },
+  { iso: 'IE', country: 'Irlande', dialCode: '+353', flag: 'IE' },
+  { iso: 'IS', country: 'Islande', dialCode: '+354', flag: 'IS' },
+  { iso: 'LU', country: 'Luxembourg', dialCode: '+352', flag: 'LU' },
+  { iso: 'MC', country: 'Monaco', dialCode: '+377', flag: 'MC' },
+  { iso: 'NO', country: 'Norvege', dialCode: '+47', flag: 'NO' },
+  { iso: 'PL', country: 'Pologne', dialCode: '+48', flag: 'PL' },
+  { iso: 'RO', country: 'Roumanie', dialCode: '+40', flag: 'RO' },
+  { iso: 'SE', country: 'Suede', dialCode: '+46', flag: 'SE' },
+  { iso: 'TR', country: 'Turquie', dialCode: '+90', flag: 'TR' },
+  { iso: 'DZ', country: 'Algerie', dialCode: '+213', flag: 'DZ' },
+  { iso: 'TN', country: 'Tunisie', dialCode: '+216', flag: 'TN' },
+  { iso: 'EG', country: 'Egypte', dialCode: '+20', flag: 'EG' },
+  { iso: 'SN', country: 'Senegal', dialCode: '+221', flag: 'SN' },
+  { iso: 'CI', country: "Cote d'Ivoire", dialCode: '+225', flag: 'CI' },
+  { iso: 'CM', country: 'Cameroun', dialCode: '+237', flag: 'CM' },
+  { iso: 'GA', country: 'Gabon', dialCode: '+241', flag: 'GA' },
+  { iso: 'GN', country: 'Guinee', dialCode: '+224', flag: 'GN' },
+  { iso: 'ML', country: 'Mali', dialCode: '+223', flag: 'ML' },
+  { iso: 'MR', country: 'Mauritanie', dialCode: '+222', flag: 'MR' },
+  { iso: 'NG', country: 'Nigeria', dialCode: '+234', flag: 'NG' },
+  { iso: 'ZA', country: 'Afrique du Sud', dialCode: '+27', flag: 'ZA' },
+  { iso: 'AE', country: 'Emirats arabes unis', dialCode: '+971', flag: 'AE' },
+  { iso: 'SA', country: 'Arabie saoudite', dialCode: '+966', flag: 'SA' },
+  { iso: 'QA', country: 'Qatar', dialCode: '+974', flag: 'QA' },
+  { iso: 'BH', country: 'Bahrein', dialCode: '+973', flag: 'BH' },
+  { iso: 'IL', country: 'Israel', dialCode: '+972', flag: 'IL' },
+  { iso: 'JO', country: 'Jordanie', dialCode: '+962', flag: 'JO' },
+  { iso: 'KW', country: 'Koweit', dialCode: '+965', flag: 'KW' },
+  { iso: 'LB', country: 'Liban', dialCode: '+961', flag: 'LB' },
+  { iso: 'OM', country: 'Oman', dialCode: '+968', flag: 'OM' },
+  { iso: 'CN', country: 'Chine', dialCode: '+86', flag: 'CN' },
+  { iso: 'IN', country: 'Inde', dialCode: '+91', flag: 'IN' },
+  { iso: 'JP', country: 'Japon', dialCode: '+81', flag: 'JP' },
+  { iso: 'KR', country: 'Coree du Sud', dialCode: '+82', flag: 'KR' },
+  { iso: 'AU', country: 'Australie', dialCode: '+61', flag: 'AU' },
+  { iso: 'BR', country: 'Bresil', dialCode: '+55', flag: 'BR' },
+  { iso: 'MX', country: 'Mexique', dialCode: '+52', flag: 'MX' },
+]
+
+export const dialCodeValues = Array.from(new Set(countryDialCodes.map(item => item.dialCode)))
+
+export const sortedDialCodeValues = [...dialCodeValues].sort((a, b) => b.length - a.length)

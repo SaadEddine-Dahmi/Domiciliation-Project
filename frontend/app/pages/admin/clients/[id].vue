@@ -20,6 +20,7 @@
 
 import { useClientsStore } from '~/stores/clients'
 import ContratPreviewModal from '~/components/ContratPreviewModal.vue'
+import { countryDialCodes, sortedDialCodeValues } from '~/utils/countryDialCodes'
 
 definePageMeta({
   layout: 'dashboard',
@@ -80,7 +81,7 @@ const isPdf = ref(false)
 
 // Shared contract preview component reference.
 const pdfPreview = ref()
-const dialCodes = ['+212', '+33', '+34', '+1', '+44', '+49', '+39', '+31']
+const dialCodes = countryDialCodes
 
 function joinPhone(dialCode: string, number: string): string {
   const local = number.trim().replace(/^0+/, '')
@@ -89,7 +90,7 @@ function joinPhone(dialCode: string, number: string): string {
 
 function splitPhone(value: string | null | undefined): { dialCode: string; number: string } {
   const raw = (value ?? '').trim()
-  const matchedCode = dialCodes.find(code => raw.startsWith(code))
+  const matchedCode = sortedDialCodeValues.find(code => raw.startsWith(code))
   if (!matchedCode) return { dialCode: '+212', number: raw.replace(/^\+/, '') }
   return {
     dialCode: matchedCode,
@@ -269,6 +270,9 @@ async function submitEdit(): Promise<void> {
 }
 // ── Client status toggle ───────────────────────────────────
 const togglingStatus = ref(false)
+const resettingPassword = ref(false)
+const regeneratedPassword = ref('')
+const showRegeneratedPassword = ref(false)
 
 /**
  * Flips the client's portal access between 'actif' and 'inactif'.
@@ -294,6 +298,35 @@ async function toggleClientStatus(): Promise<void> {
   } finally {
     togglingStatus.value = false
   }
+}
+
+async function regenerateClientPassword(): Promise<void> {
+  if (!client.value || resettingPassword.value) return
+  resettingPassword.value = true
+  try {
+    regeneratedPassword.value = await clientsStore.resetPassword(client.value.id)
+    showRegeneratedPassword.value = true
+    success('Mot de passe regenere')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur lors de la regeneration du mot de passe')
+  } finally {
+    resettingPassword.value = false
+  }
+}
+
+async function copyRegeneratedPassword(): Promise<void> {
+  if (!regeneratedPassword.value) return
+  try {
+    await navigator.clipboard.writeText(regeneratedPassword.value)
+    success('Mot de passe copie')
+  } catch {
+    toastError?.('Copie impossible depuis ce navigateur')
+  }
+}
+
+function selectInputText(event: FocusEvent): void {
+  const input = event.target
+  if (input instanceof HTMLInputElement) input.select()
 }
 
 // ── Documents ───────────────────────────────────────────────
@@ -567,6 +600,13 @@ function openContratPreview(c: any): void {
             </button>
             <button
               class="btn btn-outline btn-sm"
+              :disabled="resettingPassword"
+              @click="regenerateClientPassword"
+            >
+              {{ resettingPassword ? '...' : 'Regenerer le mot de passe' }}
+            </button>
+            <button
+              class="btn btn-outline btn-sm"
               :disabled="togglingStatus"
               @click="toggleClientStatus"
             >
@@ -827,11 +867,11 @@ function openContratPreview(c: any): void {
     <Teleport to="body">
       <div
         v-if="showEditModal"
-        class="fixed inset-0 z-200 flex items-center justify-center p-4"
+        class="fixed inset-0 z-200 flex items-center justify-center p-4 overflow-y-auto"
         style="background: rgba(0,0,0,0.75)"
         @click.self="showEditModal = false"
       >
-        <div class="card w-full max-w-lg max-h-[90vh] flex flex-col" @click.stop>
+        <div class="card w-full max-w-lg max-h-[calc(100vh-2rem)] overflow-hidden flex flex-col" @click.stop>
           <div class="flex items-center justify-between px-6 pt-6 pb-4 shrink-0"
                style="border-bottom: 1px solid var(--app-border-2)">
             <h2 class="font-serif text-xl">Modifier le client</h2>
@@ -842,7 +882,7 @@ function openContratPreview(c: any): void {
             </button>
           </div>
 
-          <div class="flex-1 overflow-y-auto px-6 py-5">
+          <div class="flex-1 min-h-0 overflow-y-auto overflow-x-visible px-6 py-5">
             <form class="space-y-4" @submit.prevent="submitEdit">
               <div>
                 <label class="f-label">Nom de la société *</label>
@@ -873,15 +913,15 @@ function openContratPreview(c: any): void {
                 </div>
                 <div>
                   <label class="f-label">Téléphone</label>
-                  <div class="flex gap-2">
-                    <select v-model="editForm.gerant_dial_code" class="f-input w-28 shrink-0">
-                      <option v-for="code in dialCodes" :key="code" :value="code">
-                        {{ code }}
+                  <div class="grid grid-cols-[minmax(130px,0.42fr)_1fr] gap-2">
+                    <select v-model="editForm.gerant_dial_code" class="f-input min-w-0">
+                      <option v-for="code in dialCodes" :key="code.iso" :value="code.dialCode">
+                        {{ code.flag }} {{ code.dialCode }} {{ code.country }}
                       </option>
                     </select>
                     <input
                       v-model="editForm.gerant_phone_number"
-                      class="f-input flex-1"
+                      class="f-input min-w-0"
                       type="tel"
                       placeholder="6XX XXX XXX" />
                   </div>
@@ -914,6 +954,33 @@ function openContratPreview(c: any): void {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- Regenerated password modal -->
+    <Teleport to="body">
+      <div
+        v-if="showRegeneratedPassword"
+        class="fixed inset-0 z-[220] flex items-center justify-center p-4"
+        style="background: rgba(0,0,0,0.75)"
+        @click.self="showRegeneratedPassword = false"
+      >
+        <div class="card w-full max-w-md p-6 space-y-4" @click.stop>
+          <div>
+            <p class="text-xs uppercase tracking-widest font-bold text-gold">Mot de passe temporaire</p>
+            <h2 class="font-serif text-xl mt-1">Acces client regenere</h2>
+          </div>
+          <input
+            :value="regeneratedPassword"
+            class="f-input font-mono"
+            readonly
+            @focus="selectInputText"
+          />
+          <div class="flex justify-end gap-2">
+            <button class="btn btn-outline btn-md" @click="showRegeneratedPassword = false">Fermer</button>
+            <button class="btn btn-gold btn-md" @click="copyRegeneratedPassword">Copier</button>
           </div>
         </div>
       </div>

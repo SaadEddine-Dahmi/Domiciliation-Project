@@ -52,6 +52,10 @@ class PaiementController extends Controller
      */
     public function index(int $contratId)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $tenantId = auth()->id();
         $contrat  = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
 
@@ -81,6 +85,10 @@ class PaiementController extends Controller
      */
     public function store(Request $request, int $contratId)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $tenantId = auth()->id();
         $contrat  = Contrat::where('domiciliataire_id', $tenantId)
             ->whereIn('statut', ['active', 'draft'])
@@ -168,6 +176,10 @@ class PaiementController extends Controller
      */
     public function summary(int $contratId)
     {
+        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+            return $blocked;
+        }
+
         $tenantId = auth()->id();
         $contrat  = Contrat::where('domiciliataire_id', $tenantId)->findOrFail($contratId);
 
@@ -184,5 +196,15 @@ class PaiementController extends Controller
                 'pourcentage' => $prixTotal > 0 ? round(($totalPaye / $prixTotal) * 100) : 0,
             ],
         ]);
+    }
+
+    private function denyUnlessDomiciliataire(?\App\Models\User $user): ?\Illuminate\Http\JsonResponse
+    {
+        return $user?->role === 'domiciliataire'
+            ? null
+            : response()->json([
+                'success' => false,
+                'message' => "Accès interdit : les paiements appartiennent aux domiciliataires.",
+            ], 403);
     }
 }

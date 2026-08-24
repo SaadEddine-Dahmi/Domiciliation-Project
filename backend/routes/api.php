@@ -139,6 +139,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/clients', [ClientController::class, 'store']);
     Route::get('/clients/{id}', [ClientController::class, 'show']);
     Route::put('/clients/{id}', [ClientController::class, 'update']);
+    Route::post('/clients/{id}/regenerate-password', [ClientController::class, 'resetPassword']);
     Route::put('/clients/{id}/password', [ClientController::class, 'updatePassword']);
     Route::patch('/clients/{id}/status', [ClientController::class, 'toggleStatus']);
     Route::get('/clients/{id}/history', [ClientController::class, 'history']);

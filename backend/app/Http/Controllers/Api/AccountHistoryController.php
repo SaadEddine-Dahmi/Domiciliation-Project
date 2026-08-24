@@ -51,13 +51,17 @@ class AccountHistoryController extends Controller
         $filename = 'historique-modifications-' . now()->format('Y-m-d') . '.' . $format;
 
         if ($format === 'json') {
-            return response()->json([
+            $payload = [
                 'generated_at' => now()->toIso8601String(),
                 'domiciliataire_id' => $tenantId,
                 'total' => $entries->count(),
                 'entries' => $entries->values(),
-            ], 200, [
-                'Content-Disposition' => "attachment; filename={$filename}",
+            ];
+
+            return response(json_encode($payload, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE), 200, [
+                'Content-Type' => 'application/json; charset=UTF-8',
+                'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+                'Cache-Control' => 'no-store, no-cache, must-revalidate',
             ]);
         }
 
@@ -68,7 +72,8 @@ class AccountHistoryController extends Controller
 
         return response($html, 200, [
             'Content-Type' => 'text/html; charset=UTF-8',
-            'Content-Disposition' => "attachment; filename={$filename}",
+            'Content-Disposition' => 'attachment; filename="' . $filename . '"',
+            'Cache-Control' => 'no-store, no-cache, must-revalidate',
         ]);
     }
 
@@ -109,6 +114,36 @@ class AccountHistoryController extends Controller
             ->all();
     }
 
+    private function safeArray(mixed $value): array
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            return is_array($decoded) ? $decoded : [];
+        }
+
+        return [];
+    }
+
+    private function safeChangedFields(mixed $value, array $before = [], array $after = []): array
+    {
+        if (is_array($value)) {
+            return array_values(array_filter($value, fn($field) => is_string($field) && $field !== ''));
+        }
+
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
+            if (is_array($decoded)) {
+                return $this->safeChangedFields($decoded, $before, $after);
+            }
+        }
+
+        return array_values(array_unique(array_merge(array_keys($before), array_keys($after))));
+    }
+
     private function collectEntrepriseHistory(int $tenantId): Collection
     {
         $rows = EntrepriseHistory::where('domiciliataire_id', $tenantId)
@@ -128,17 +163,20 @@ class AccountHistoryController extends Controller
                 $group = $group->values();
 
                 return $group->map(function (EntrepriseHistory $h, int $i) use ($group, $liveById, $entrepriseId) {
-                    $before = $h->data ?? [];
+                    $before = $this->safeArray($h->old_values ?? $h->data ?? []);
                     $next = $group->get($i + 1);
-                    $after = $next ? ($next->data ?? []) : optional($liveById->get($entrepriseId))->toArray();
+                    $after = $next
+                        ? $this->safeArray($next->new_values ?? $next->data ?? [])
+                        : $this->safeArray(optional($liveById->get($entrepriseId))->toArray());
+                    $changedFields = $this->safeChangedFields($h->changed_fields, $before, $after);
 
                     return [
                         'id' => 'entreprise-' . $h->id,
                         'type' => 'entreprise',
                         'action' => $h->action,
                         'label' => $h->entreprise?->raison_sociale ?? "Entreprise #{$entrepriseId}",
-                        'changed_fields' => $h->changed_fields,
-                        'diff' => $this->buildDiff($h->changed_fields, $before, $after),
+                        'changed_fields' => $changedFields,
+                        'diff' => $this->buildDiff($changedFields, $before, $after),
                         'changed_by' => $h->changedBy ? trim("{$h->changedBy->prenom} {$h->changedBy->nom}") : null,
                         'created_at' => $h->created_at,
                     ];
@@ -166,9 +204,12 @@ class AccountHistoryController extends Controller
                 $group = $group->values();
 
                 return $group->map(function (RepresentantHistory $h, int $i) use ($group, $liveById, $representantId) {
-                    $before = $h->data ?? [];
+                    $before = $this->safeArray($h->old_values ?? $h->data ?? []);
                     $next = $group->get($i + 1);
-                    $after = $next ? ($next->data ?? []) : optional($liveById->get($representantId))->toArray();
+                    $after = $next
+                        ? $this->safeArray($next->new_values ?? $next->data ?? [])
+                        : $this->safeArray(optional($liveById->get($representantId))->toArray());
+                    $changedFields = $this->safeChangedFields($h->changed_fields, $before, $after);
 
                     $label = $h->representant
                         ? trim("{$h->representant->prenom} {$h->representant->nom}")
@@ -179,8 +220,8 @@ class AccountHistoryController extends Controller
                         'type' => 'representant',
                         'action' => $h->action,
                         'label' => $label,
-                        'changed_fields' => $h->changed_fields,
-                        'diff' => $this->buildDiff($h->changed_fields, $before, $after),
+                        'changed_fields' => $changedFields,
+                        'diff' => $this->buildDiff($changedFields, $before, $after),
                         'changed_by' => $h->changedBy ? trim("{$h->changedBy->prenom} {$h->changedBy->nom}") : null,
                         'created_at' => $h->created_at,
                     ];
@@ -208,17 +249,20 @@ class AccountHistoryController extends Controller
                 $group = $group->values();
 
                 return $group->map(function (ContratHistory $h, int $i) use ($group, $liveById, $contratId) {
-                    $before = $h->data ?? [];
+                    $before = $this->safeArray($h->old_values ?? $h->data ?? []);
                     $next = $group->get($i + 1);
-                    $after = $next ? ($next->data ?? []) : optional($liveById->get($contratId))->toArray();
+                    $after = $next
+                        ? $this->safeArray($next->new_values ?? $next->data ?? [])
+                        : $this->safeArray(optional($liveById->get($contratId))->toArray());
+                    $changedFields = $this->safeChangedFields($h->changed_fields, $before, $after);
 
                     return [
                         'id' => 'contrat-' . $h->id,
                         'type' => 'contrat',
                         'action' => $h->action,
                         'label' => $h->contrat?->titre_contrat ?? "Contrat #{$contratId}",
-                        'changed_fields' => $h->changed_fields,
-                        'diff' => $this->buildDiff($h->changed_fields, $before, $after),
+                        'changed_fields' => $changedFields,
+                        'diff' => $this->buildDiff($changedFields, $before, $after),
                         'changed_by' => $h->changedBy ? trim("{$h->changedBy->prenom} {$h->changedBy->nom}") : null,
                         'created_at' => $h->created_at,
                     ];

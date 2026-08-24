@@ -415,6 +415,14 @@ function displayValue(v: any): string {
   return String(v)
 }
 
+function filenameFromContentDisposition(header: string | null, fallback: string): string {
+  if (!header) return fallback
+  const utf = header.match(/filename\*\s*=\s*UTF-8''([^;]+)/i)
+  if (utf?.[1]) return decodeURIComponent(utf[1])
+  const ascii = header.match(/filename\s*=\s*"([^"]+)"|filename\s*=\s*([^;]+)/i)
+  return (ascii?.[1] || ascii?.[2] || fallback).trim().replace(/^"|"$/g, '')
+}
+
 const exportingJson = ref(false)
 const exportingHtml = ref(false)
 
@@ -423,14 +431,18 @@ async function requestDataExport(format: 'json' | 'html'): Promise<void> {
   busyRef.value = true
   try {
     const url = `${getApiBase()}/api/account/history/export?format=${format}`
-    const res = await fetch(url, { headers: { ...authHeaders() } })
-    if (!res.ok) throw new Error()
-
-    const blob = await res.blob()
+    const response = await $fetch.raw<Blob>(url, {
+      headers: authHeaders(),
+      responseType: 'blob',
+    })
+    const blob = response._data ?? new Blob()
     const blobUrl = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = blobUrl
-    a.download = `historique-modifications.${format}`
+    a.download = filenameFromContentDisposition(
+      response.headers.get('content-disposition'),
+      `historique-modifications.${format}`,
+    )
     document.body.appendChild(a)
     a.click()
     a.remove()
