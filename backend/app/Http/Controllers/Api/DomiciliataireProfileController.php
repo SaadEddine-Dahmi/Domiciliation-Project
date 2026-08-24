@@ -24,12 +24,13 @@ class DomiciliataireProfileController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role !== 'domiciliataire') {
+        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
 
-        $profile = $user->profile;
-        $rep = $user->representant;
+        $isDomiciliataire = $user->role === 'domiciliataire';
+        $profile = $isDomiciliataire ? $user->profile : null;
+        $rep = $isDomiciliataire ? $user->representant : null;
 
         return response()->json([
             'success' => true,
@@ -42,31 +43,23 @@ class DomiciliataireProfileController extends Controller
                 'initials' => $user->initials,
 
                 'nom_societe' => $profile?->nom_societe,
-
-                // Heading printed at the top of the generated contract.
-                // Nullable — the contract generator falls back to a
-                // default title when this is empty.
                 'contract_title' => $profile?->contract_title,
 
                 'rc' => $profile?->rc,
                 'if_fiscal' => $profile?->if_fiscal,
                 'tp' => $profile?->tp,
 
-                // Array of {label, value}. First entry is the siège
-                // social; every entry after it a succursale — see
-                // ContratController::buildTokenMap().
                 'adresses' => $profile?->adresses_list ?? [],
-
-                // The centre's own legal representative — same shape as
-                // a client's representant. Null until first saved via
-                // DomiciliataireRepresentantController::update().
                 'representant' => $rep,
 
-                'profile_complete' => $user->hasCompleteProfile(),
+                // A Super Admin has no company profile to complete — always
+                // report true so no incomplete-profile banner ever shows for
+                // them. (Frontend already guards this via auth.isAdmin in
+                // showIncompleteDot; this keeps the API consistent with that.)
+                'profile_complete' => $isDomiciliataire ? $user->hasCompleteProfile() : true,
             ],
         ]);
     }
-
     /**
      * PUT /api/profile
      *
@@ -80,7 +73,7 @@ class DomiciliataireProfileController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role !== 'domiciliataire') {
+        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
 
@@ -90,18 +83,12 @@ class DomiciliataireProfileController extends Controller
             'telephone' => ['nullable', 'string', 'max:30'],
 
             'nom_societe' => ['nullable', 'string', 'max:255'],
-
-            // Free text chosen by the domiciliataire — lets each centre
-            // pick the title that appears on their own generated
-            // contracts instead of a hardcoded string.
             'contract_title' => ['nullable', 'string', 'max:255'],
 
             'rc' => ['nullable', 'string', 'max:100'],
             'if_fiscal' => ['nullable', 'string', 'max:100'],
             'tp' => ['nullable', 'string', 'max:100'],
 
-            // First address in the array = siège social.
-            // Every subsequent address = a succursale.
             'adresses' => ['nullable', 'array'],
             'adresses.*.label' => ['required_with:adresses', 'string', 'max:100'],
             'adresses.*.value' => ['required_with:adresses', 'string', 'max:500'],
@@ -114,7 +101,7 @@ class DomiciliataireProfileController extends Controller
 
         $profileFields = array_diff_key($data, $userFields);
 
-        if (!empty($profileFields)) {
+        if ($user->role === 'domiciliataire' && !empty($profileFields)) {
             DomiciliataireProfile::updateOrCreate(
                 ['user_id' => $user->id],
                 $profileFields
@@ -124,7 +111,9 @@ class DomiciliataireProfileController extends Controller
         return response()->json([
             'success' => true,
             'message' => 'Profil mis à jour.',
-            'profile_complete' => $user->fresh()->hasCompleteProfile(),
+            'profile_complete' => $user->role === 'domiciliataire'
+                ? $user->fresh()->hasCompleteProfile()
+                : true,
         ]);
     }
 
@@ -135,7 +124,11 @@ class DomiciliataireProfileController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role !== 'domiciliataire') {
+        // Photo upload is available to any account that has an avatar shown
+        // in the UI — domiciliataire, client, and admin all do (see
+        // UserAvatar.vue, used identically in the sidebar/topbar for every
+        // role).
+        if (!in_array($user->role, ['domiciliataire', 'client', 'admin'], true)) {
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
 
@@ -168,7 +161,7 @@ class DomiciliataireProfileController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role !== 'domiciliataire') {
+        if (!in_array($user->role, ['domiciliataire', 'client', 'admin'], true)) {
             return response()->json(['message' => 'Non autorisé.'], 403);
         }
 
@@ -186,7 +179,6 @@ class DomiciliataireProfileController extends Controller
             ],
         ]);
     }
-
     public function photo(int $userId)
     {
         $user = User::find($userId);

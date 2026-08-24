@@ -2,7 +2,8 @@
 <script setup lang="ts">
 // pages/client/settings.vue
 //
-// Client account settings. A client only ever manages two things here:
+// Client account settings. A client manages three things here:
+//   - their profile photo (avatar shown in the sidebar/topbar)
 //   - their own identity (read-only — name/email come from the account
 //     created for them by their domiciliataire, not self-editable)
 //   - their password
@@ -108,6 +109,17 @@ async function submitPasswordUpdate(): Promise<void> {
     <div>
       <h1 class="font-serif text-2xl">Paramètres <em class="text-gold italic">du compte</em></h1>
       <p class="text-sm mt-1" style="color: var(--app-text-muted)">Gérez vos informations et votre mot de passe</p>
+    </div>
+
+    <!-- ══════════ Photo de profil ═══════════════════════════
+         Self-contained upload/remove control — reads/writes the auth
+         store directly, so the sidebar/topbar avatar updates the
+         instant a change succeeds. Backend now accepts this for both
+         domiciliataire and client roles — see
+         DomiciliataireProfileController::uploadPhoto()/deletePhoto(). -->
+    <div class="card p-5 space-y-3">
+      <p class="text-xs uppercase tracking-widest font-bold" style="color:#c8a96e">Photo de profil</p>
+      <ProfilePhotoUpload />
     </div>
 
     <!-- ══════════ Identité — read-only ══════════════════════
