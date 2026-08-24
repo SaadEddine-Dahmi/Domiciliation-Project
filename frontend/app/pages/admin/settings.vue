@@ -1,4 +1,4 @@
-<!-- pages/admin/settings.vue -->
+﻿<!-- pages/admin/settings.vue -->
 <script setup lang="ts">
 // pages/admin/settings.vue
 //
@@ -21,6 +21,7 @@
 // Backend endpoints used:
 //   GET/PUT     /api/profile
 //   POST/DELETE /api/profile/photo
+//   PUT         /api/account/password
 //   GET         /api/account/history
 //   GET         /api/account/history/export?format=json|html
 
@@ -253,29 +254,53 @@ async function removePhoto(): Promise<void> {
 
 // ══════════════════════════════════════════════════════════════
 // 2. Sécurité — password change
-//    NOTE: no self-service password endpoint exists yet in the
-//    backend provided. This stays client-side validated only until
-//    that endpoint is added (e.g. PUT /api/profile/password).
+//
+// SECURITY FIX: this previously called setTimeout() and faked a
+// success toast without ever contacting the backend — any input in
+// "Mot de passe actuel" was silently accepted and nothing changed in
+// the database. Now calls the real PUT /api/account/password endpoint
+// (AuthController::changePassword), which verifies current_password
+// with Hash::check() server-side before allowing the update.
 // ══════════════════════════════════════════════════════════════
 
 const pw = reactive({ current: '', new_: '', confirm: '' })
 const pwError = ref('')
 const updatingPw = ref(false)
 
-function submitPasswordUpdate(): void {
+async function submitPasswordUpdate(): Promise<void> {
   pwError.value = ''
   if (!pw.current) { pwError.value = 'Renseignez votre mot de passe actuel'; return }
   if (pw.new_.length < 8) { pwError.value = 'Le nouveau mot de passe doit contenir au moins 8 caractères'; return }
   if (pw.new_ !== pw.confirm) { pwError.value = 'La confirmation ne correspond pas au nouveau mot de passe'; return }
 
   updatingPw.value = true
-  // TODO: replace with a real call once a self-service password-update
-  // route exists, e.g. PUT /api/profile/password.
-  setTimeout(() => {
-    updatingPw.value = false
-    success?.('Mot de passe mis à jour')
+  try {
+    await $fetch(`${getApiBase()}/api/account/password`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: {
+        current_password: pw.current,
+        // Laravel's 'confirmed' rule checks 'password' against a field
+        // literally named 'password_confirmation' — not 'confirm'.
+        password: pw.new_,
+        password_confirmation: pw.confirm,
+      },
+    })
+
+    success('Mot de passe mis à jour')
+    auth.clearMustChangePassword()
     pw.current = ''; pw.new_ = ''; pw.confirm = ''
-  }, 300)
+  } catch (e: any) {
+    const msg =
+      e?.data?.errors?.current_password?.[0] ??
+      e?.data?.errors?.password?.[0] ??
+      e?.data?.message ??
+      'Erreur lors de la mise à jour du mot de passe'
+    pwError.value = msg
+    toastError?.(msg)
+  } finally {
+    updatingPw.value = false
+  }
 }
 
 // ══════════════════════════════════════════════════════════════

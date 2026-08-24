@@ -1,4 +1,4 @@
-<!-- pages/client/settings.vue -->
+﻿<!-- pages/client/settings.vue -->
 <script setup lang="ts">
 // pages/client/settings.vue
 //
@@ -11,10 +11,13 @@
 // user-card link at the top of the sidebar (AppSidebar.vue →
 // settingsPath), same as the equivalent admin/domiciliataire pages.
 //
-// NOTE: no self-service password-update endpoint was provided for the
-// client role (same gap as pages/admin/settings.vue). The validation
-// below is real and complete; the submit call is a clearly-marked
-// placeholder until PUT /api/profile/password (or equivalent) exists.
+// SECURITY FIX: the password form used to call setTimeout() and show a
+// fake "Mot de passe mis à jour" toast without ever contacting the
+// backend — any input in "Mot de passe actuel" was silently accepted
+// and nothing changed in the database. This now calls the real
+// PUT /api/account/password endpoint (AuthController::changePassword),
+// which verifies current_password with Hash::check() server-side
+// before allowing the update.
 
 import { useAuthStore } from '~/stores/auth'
 
@@ -24,29 +27,78 @@ const auth  = useAuthStore()
 const toast = useToast()
 const { success, error: toastError } = toast
 
+function getApiBase(): string {
+  const config = useRuntimeConfig()
+  return (config.public.apiBase as string) ?? ''
+}
+
+function authHeaders(): Record<string, string> {
+  return auth.token ? { Authorization: `Bearer ${auth.token}` } : {}
+}
+
 // ══════════════════════════════════════════════════════════════
-// Password change — validated client-side, same rules as the
-// admin/domiciliataire settings page for consistency.
+// Password change
 // ══════════════════════════════════════════════════════════════
 
 const pw = reactive({ current: '', new_: '', confirm: '' })
 const pwError = ref('')
 const updatingPw = ref(false)
 
-function submitPasswordUpdate(): void {
+/**
+ * Client-side pre-checks only cover format (length, match) — they are
+ * NOT a substitute for the server verifying the current password.
+ * The actual authorization decision always happens in
+ * AuthController::changePassword() via Hash::check().
+ */
+async function submitPasswordUpdate(): Promise<void> {
   pwError.value = ''
-  if (!pw.current) { pwError.value = 'Renseignez votre mot de passe actuel'; return }
-  if (pw.new_.length < 8) { pwError.value = 'Le nouveau mot de passe doit contenir au moins 8 caractères'; return }
-  if (pw.new_ !== pw.confirm) { pwError.value = 'La confirmation ne correspond pas au nouveau mot de passe'; return }
+
+  if (!pw.current) {
+    pwError.value = 'Renseignez votre mot de passe actuel'
+    return
+  }
+  if (pw.new_.length < 8) {
+    pwError.value = 'Le nouveau mot de passe doit contenir au moins 8 caractères'
+    return
+  }
+  if (pw.new_ !== pw.confirm) {
+    pwError.value = 'La confirmation ne correspond pas au nouveau mot de passe'
+    return
+  }
 
   updatingPw.value = true
-  // TODO: replace with a real call once a self-service password-update
-  // route exists for the client role, e.g. PUT /api/profile/password.
-  setTimeout(() => {
-    updatingPw.value = false
+  try {
+    await $fetch(`${getApiBase()}/api/account/password`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: {
+        current_password: pw.current,
+        // Laravel's 'confirmed' rule requires this exact key name —
+        // it checks 'password' against 'password_confirmation'.
+        password: pw.new_,
+        password_confirmation: pw.confirm,
+      },
+    })
+
     success('Mot de passe mis à jour')
-    pw.current = ''; pw.new_ = ''; pw.confirm = ''
-  }, 300)
+    auth.clearMustChangePassword()
+    pw.current = ''
+    pw.new_ = ''
+    pw.confirm = ''
+  } catch (e: any) {
+    // 422 from a failed 'current_password' check, or validation errors
+    // on the new password (min length / confirmation mismatch caught
+    // again server-side as a safety net).
+    const msg =
+      e?.data?.errors?.current_password?.[0] ??
+      e?.data?.errors?.password?.[0] ??
+      e?.data?.message ??
+      'Erreur lors de la mise à jour du mot de passe'
+    pwError.value = msg
+    toastError?.(msg)
+  } finally {
+    updatingPw.value = false
+  }
 }
 </script>
 
