@@ -79,6 +79,10 @@ use App\Models\Contrat;
 use App\Models\Entreprise;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Http\Exceptions\HttpResponseException;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\Storage;
 use Laravel\Sanctum\PersonalAccessToken;
 
@@ -103,57 +107,39 @@ class ContratController extends Controller
     {
         $user = auth()->user();
 
-        if ($user->role === 'client') {
-            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+        try {
+            $query = match ($user->role) {
+                'admin' => $this->adminContratsQuery($request),
+                'domiciliataire' => $this->domiciliataireContratsQuery($request, $user),
+                'client' => $this->clientContratsQuery($user),
+                default => null,
+            };
 
-            if (!$entreprise) {
+            if (!$query) {
                 return response()->json(['success' => true, 'data' => []]);
             }
 
-            $contrats = Contrat::where('entreprise_id', $entreprise->id)
-                ->whereNull('archived_at')
-                ->where('statut', 'active')
-                ->with([
-                    'entreprise.representant',
-                    'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                    'renewals:id,renewed_from_id,statut,archived_at',
-                ])
+            $contrats = $query
+                ->with($this->contratIndexRelations())
                 ->latest()
                 ->get();
 
             return response()->json(['success' => true, 'data' => $contrats]);
+        } catch (HttpResponseException $e) {
+            return $e->getResponse();
+        } catch (\Throwable $e) {
+            Log::error('Contrat index failed', [
+                'user_id' => $user?->id,
+                'role' => $user?->role,
+                'message' => $e->getMessage(),
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'data' => [],
+                'message' => 'Erreur lors du chargement des contrats.',
+            ], 200);
         }
-
-        $query = Contrat::where('domiciliataire_id', $user->id)
-            ->when(!$request->boolean('include_archived'), fn($q) => $q->whereNull('archived_at'));
-
-        if ($request->filled('entreprise_id')) {
-            $entrepriseId = (int) $request->query('entreprise_id');
-
-            $belongsToTenant = Entreprise::where('id', $entrepriseId)
-                ->where('domiciliataire_id', $user->id)
-                ->exists();
-
-            if (!$belongsToTenant) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Client introuvable.',
-                ], 404);
-            }
-
-            $query->where('entreprise_id', $entrepriseId);
-        }
-
-        $contrats = $query
-            ->with([
-                'entreprise.representant',
-                'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
-                'renewals:id,renewed_from_id,statut,archived_at',
-            ])
-            ->latest()
-            ->get();
-
-        return response()->json(['success' => true, 'data' => $contrats]);
     }
 
     // ── Show ───────────────────────────────────────────────────────────────────
@@ -174,7 +160,7 @@ class ContratController extends Controller
                 'entreprise.representant',
                 'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
                 'renewedFrom:id,date_debut,date_fin,statut',
-                'renewals:id,renewed_from_id,statut,archived_at',
+                $this->renewalsRelation(),
             ])
             ->findOrFail($id);
 
@@ -423,6 +409,13 @@ class ContratController extends Controller
      */
     public function archive(string $id)
     {
+        if (!$this->contratsHaveArchivedAt()) {
+            return response()->json([
+                'success' => false,
+                'message' => "L'archivage des contrats n'est pas encore disponible.",
+            ], 422);
+        }
+
         $user = auth()->user();
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
@@ -433,6 +426,13 @@ class ContratController extends Controller
 
     public function restore(string $id)
     {
+        if (!$this->contratsHaveArchivedAt()) {
+            return response()->json([
+                'success' => false,
+                'message' => "L'archivage des contrats n'est pas encore disponible.",
+            ], 422);
+        }
+
         $user = auth()->user();
         $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
 
@@ -535,7 +535,7 @@ class ContratController extends Controller
                 return null;
             }
             $query->where('entreprise_id', $entreprise->id)
-                ->whereNull('archived_at');
+                ->when($this->contratsHaveArchivedAt(), fn($q) => $q->whereNull('archived_at'));
         } else {
             $query->where('domiciliataire_id', $user->id);
         }
@@ -631,6 +631,100 @@ class ContratController extends Controller
         }
 
         return null;
+    }
+
+    private function adminContratsQuery(Request $request): Builder
+    {
+        $query = Contrat::query();
+
+        $this->applyArchiveScope($query, $request);
+
+        if ($request->filled('entreprise_id')) {
+            $query->where('entreprise_id', (int) $request->query('entreprise_id'));
+        }
+
+        return $query;
+    }
+
+    private function domiciliataireContratsQuery(Request $request, \App\Models\User $user): Builder
+    {
+        $query = Contrat::where('domiciliataire_id', $user->id);
+
+        $this->applyArchiveScope($query, $request);
+
+        if ($request->filled('entreprise_id')) {
+            $entrepriseId = (int) $request->query('entreprise_id');
+
+            $belongsToTenant = Entreprise::where('id', $entrepriseId)
+                ->where('domiciliataire_id', $user->id)
+                ->exists();
+
+            if (!$belongsToTenant) {
+                throw new HttpResponseException(response()->json([
+                    'success' => false,
+                    'message' => 'Client introuvable.',
+                ], 404));
+            }
+
+            $query->where('entreprise_id', $entrepriseId);
+        }
+
+        return $query;
+    }
+
+    private function clientContratsQuery(\App\Models\User $user): ?Builder
+    {
+        $entreprise = Entreprise::where('client_user_id', $user->id)->first();
+
+        if (!$entreprise) {
+            return null;
+        }
+
+        $query = Contrat::where('entreprise_id', $entreprise->id)
+            ->where('statut', 'active');
+
+        $this->applyArchiveScope($query);
+
+        return $query;
+    }
+
+    private function contratIndexRelations(): array
+    {
+        return [
+            'entreprise.representant',
+            'domiciliataire:id,nom,prenom,email,telephone',
+            'articles' => fn($q) => $q->orderBy('contrat_articles.ordre'),
+            $this->renewalsRelation(),
+        ];
+    }
+
+    private function renewalsRelation(): string
+    {
+        return $this->contratsHaveArchivedAt()
+            ? 'renewals:id,renewed_from_id,statut,archived_at'
+            : 'renewals:id,renewed_from_id,statut';
+    }
+
+    private function applyArchiveScope(Builder $query, ?Request $request = null): Builder
+    {
+        if ($this->contratsHaveArchivedAt() && !($request?->boolean('include_archived') ?? false)) {
+            $query->whereNull('archived_at');
+        }
+
+        return $query;
+    }
+
+    private function contratsHaveArchivedAt(): bool
+    {
+        try {
+            return Schema::hasColumn('contrats', 'archived_at');
+        } catch (\Throwable $e) {
+            Log::warning('Unable to inspect contrats.archived_at column', [
+                'message' => $e->getMessage(),
+            ]);
+
+            return false;
+        }
     }
 
     /**

@@ -24,7 +24,7 @@ class ActivationController extends Controller
         $users = User::where('status', 'pending')
             ->where('role', 'domiciliataire')
             ->latest()
-            ->get(['id', 'nom', 'prenom', 'email', 'telephone', 'created_at']);
+            ->get(['id', 'nom', 'prenom', 'email', 'telephone', 'status', 'activation_date', 'created_at']);
 
         return response()->json(['success' => true, 'data' => $users]);
     }

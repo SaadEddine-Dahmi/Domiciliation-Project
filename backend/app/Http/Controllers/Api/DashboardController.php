@@ -7,6 +7,7 @@ use App\Models\Contrat;
 use App\Models\Entreprise;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
@@ -23,11 +24,11 @@ class DashboardController extends Controller
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'total_domiciliataires' => User::where('role', 'domiciliataire')->count(),
-                    'total_clients' => Entreprise::count(),
-                    'total_contrats' => $this->visibleContrats()->count(),
-                    'contrats_actifs' => $this->visibleContrats()->where('statut', 'active')->count(),
-                    'contrats_draft' => $this->visibleContrats()->where('statut', 'draft')->count(),
+                    'total_domiciliataires' => $this->safeMetric('admin.total_domiciliataires', fn() => User::where('role', 'domiciliataire')->count(), 0),
+                    'total_clients' => $this->safeMetric('admin.total_clients', fn() => Entreprise::count(), 0),
+                    'total_contrats' => $this->safeMetric('admin.total_contrats', fn() => $this->visibleContrats()->count(), 0),
+                    'contrats_actifs' => $this->safeMetric('admin.contrats_actifs', fn() => $this->visibleContrats()->where('statut', 'active')->count(), 0),
+                    'contrats_draft' => $this->safeMetric('admin.contrats_draft', fn() => $this->visibleContrats()->where('statut', 'draft')->count(), 0),
                     'total_documents' => 0,
                     'ca_mensuel' => '0.00',
                     'role' => 'admin',
@@ -41,19 +42,19 @@ class DashboardController extends Controller
             $tenantContrats = fn(): Builder => $this->visibleContrats()
                 ->where('domiciliataire_id', $tenantId);
 
-            $caMensuel = $tenantContrats()
-                ->where('statut', 'active')
-                ->whereMonth('created_at', now()->month)
-                ->whereYear('created_at', now()->year)
-                ->sum('prix_total');
+            $caMensuel = $this->safeMetric('domiciliataire.ca_mensuel', fn() => $tenantContrats()
+                    ->where('statut', 'active')
+                    ->whereMonth('created_at', now()->month)
+                    ->whereYear('created_at', now()->year)
+                    ->sum('prix_total'), 0);
 
             return response()->json([
                 'success' => true,
                 'data' => [
-                    'total_clients' => Entreprise::where('domiciliataire_id', $tenantId)->count(),
-                    'total_contrats' => $tenantContrats()->count(),
-                    'contrats_actifs' => $tenantContrats()->where('statut', 'active')->count(),
-                    'contrats_draft' => $tenantContrats()->where('statut', 'draft')->count(),
+                    'total_clients' => $this->safeMetric('domiciliataire.total_clients', fn() => Entreprise::where('domiciliataire_id', $tenantId)->count(), 0),
+                    'total_contrats' => $this->safeMetric('domiciliataire.total_contrats', fn() => $tenantContrats()->count(), 0),
+                    'contrats_actifs' => $this->safeMetric('domiciliataire.contrats_actifs', fn() => $tenantContrats()->where('statut', 'active')->count(), 0),
+                    'contrats_draft' => $this->safeMetric('domiciliataire.contrats_draft', fn() => $tenantContrats()->where('statut', 'draft')->count(), 0),
                     'total_documents' => 0,
                     'ca_mensuel' => number_format((float) $caMensuel, 2, '.', ''),
                     'role' => 'domiciliataire',
@@ -61,12 +62,12 @@ class DashboardController extends Controller
             ]);
         }
 
-        $entreprise = Entreprise::where('client_user_id', $user->id)
-            ->with([
-                'domiciliataire:id,nom,prenom,email,telephone',
-                'contrats' => fn($q) => $this->applyVisibleContratScope($q)->latest()->limit(1),
-            ])
-            ->first();
+        $entreprise = $this->safeMetric('client.entreprise', fn() => Entreprise::where('client_user_id', $user->id)
+                ->with([
+                    'domiciliataire:id,nom,prenom,email,telephone',
+                    'contrats' => fn($q) => $this->applyVisibleContratScope($q)->latest()->limit(1),
+                ])
+                ->first(), null);
 
         $contrat = $entreprise ? $entreprise->contrats->first() : null;
 
@@ -118,6 +119,20 @@ class DashboardController extends Controller
             return Schema::hasColumn('contrats', 'archived_at');
         } catch (\Throwable) {
             return false;
+        }
+    }
+
+    private function safeMetric(string $key, callable $callback, mixed $fallback): mixed
+    {
+        try {
+            return $callback();
+        } catch (\Throwable $e) {
+            Log::warning('Dashboard metric failed', [
+                'metric' => $key,
+                'message' => $e->getMessage(),
+            ]);
+
+            return $fallback;
         }
     }
 }
