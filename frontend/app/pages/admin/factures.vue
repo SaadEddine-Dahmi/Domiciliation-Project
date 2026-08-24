@@ -3,6 +3,7 @@
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { success, error: toastError } = useToast()
+const route = useRoute()
 
 function getApiBase(): string {
   const config = useRuntimeConfig()
@@ -53,6 +54,13 @@ function openPreview(f: any) {
   previewLoading.value = true
 }
 
+function openFactureFromQuery(): void {
+  const factureId = Number(route.query.facture_id)
+  if (!factureId) return
+  const facture = factures.value.find(f => Number(f.id) === factureId)
+  if (facture) openPreview(facture)
+}
+
 function closePreview() {
   showPreview.value    = false
   previewFacture.value = null
@@ -66,6 +74,7 @@ async function fetchFactures(): Promise<void> {
       { headers: authHeaders() }
     )
     factures.value = res.data ?? []
+    openFactureFromQuery()
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur chargement factures')
   } finally {
@@ -178,6 +187,8 @@ async function deleteFacture(f: any): Promise<void> {
     actionBusyId.value = null
   }
 }
+
+watch(() => route.query.facture_id, openFactureFromQuery)
 
 onMounted(fetchFactures)
 </script>

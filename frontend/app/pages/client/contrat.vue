@@ -20,6 +20,7 @@ import { contratService } from '~/services/contrat.service'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { error: toastError } = useToast()
+const route = useRoute()
 
 const contrats = ref<any[]>([])
 const loading = ref(true)
@@ -31,6 +32,7 @@ async function load(): Promise<void> {
   try {
     const res = await contratService.list()
     contrats.value = res.data ?? []
+    openContractFromQuery()
   } catch (e: any) {
     loadError.value = e?.data?.message ?? 'Erreur de chargement'
   } finally {
@@ -72,6 +74,13 @@ function openPreview(c: any): void {
   showPreview.value = true
 }
 
+function openContractFromQuery(): void {
+  const contratId = Number(route.query.contrat_id)
+  if (!contratId) return
+  const contrat = contrats.value.find(c => Number(c.id) === contratId)
+  if (contrat) openPreview(contrat)
+}
+
 function closePreview(): void {
   showPreview.value = false
   previewUrl.value = ''
@@ -86,6 +95,8 @@ function downloadContrat(c: any): void {
   a.click()
   document.body.removeChild(a)
 }
+
+watch(() => route.query.contrat_id, openContractFromQuery)
 
 onMounted(load)
 </script>

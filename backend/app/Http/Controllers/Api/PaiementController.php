@@ -132,7 +132,16 @@ class PaiementController extends Controller
             AppNotification::create([
                 'user_id'    => $tenantId,
                 'contrat_id' => $contrat->id,
-                'message'    => "💳 Paiement de {$data['montant']} DH enregistré pour {$contrat->entreprise->raison_sociale}.",
+                'type'       => 'payment_received',
+                'subject'    => 'Facture payée',
+                'message'    => "💳 Paiement de {$data['montant']} DH enregistré pour {$contrat->entreprise?->raison_sociale}.",
+                'data'       => [
+                    'contrat_id'  => $contrat->id,
+                    'facture_id'  => $facture->id,
+                    'paiement_id' => $p->id,
+                    'entreprise'  => $contrat->entreprise?->raison_sociale,
+                    'montant'     => $data['montant'],
+                ],
                 'is_read'    => false,
             ]);
 

@@ -27,6 +27,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 const notifsStore = useNotificationsStore()
+const router = useRouter()
 
 const { success, error: toastError } = useToast()
 
@@ -55,6 +56,23 @@ function toggleExpand(id: number): void {
     markRead(id)
   }
   expandedId.value = expandedId.value === id ? null : id
+}
+
+function getRawToken(): string {
+  if (!import.meta.client) return ''
+  try {
+    const raw = localStorage.getItem('app_auth')
+    if (!raw) return ''
+    const parsed = JSON.parse(raw)
+    return parsed?.token ?? ''
+  } catch { return '' }
+}
+
+function withToken(url: string): string {
+  const token = getRawToken()
+  if (!token) return url
+  const sep = url.includes('?') ? '&' : '?'
+  return `${url}${sep}token=${encodeURIComponent(token)}`
 }
 
 async function loadAll(): Promise<void> {
@@ -124,6 +142,53 @@ function isAccountNotif(n: any): boolean {
   return msg.includes('compte') || msg.includes('inscription') || msg.includes('domiciliataire')
 }
 
+function notificationTarget(n: any): { label: string; to?: string; external?: string } | null {
+  const type = n.type ?? ''
+  const data = n.data ?? {}
+  const message = String(n.message ?? '').toLowerCase()
+  const contratId = data.contrat_id ?? n.contrat_id
+
+  if (type === 'document_uploaded' && data.document_id) {
+    return {
+      label: 'Voir le document',
+      external: withToken(`${getApiBase()}/api/documents/${data.document_id}/preview`),
+    }
+  }
+
+  if (data.facture_id || type === 'payment_received' || message.includes('paiement') || message.includes('facture')) {
+    return data.facture_id
+      ? { label: 'Voir la facture', to: `/admin/factures?facture_id=${data.facture_id}` }
+      : { label: 'Voir les paiements', to: '/admin/paiements' }
+  }
+
+  if (
+    contratId &&
+    (type === 'contract_legalized' || type.startsWith('pre_expiry_') || type === 'post_expiry' || type === 'contract_expired' || type === 'renewal_nudge' || message.includes('contrat'))
+  ) {
+    return { label: 'Voir le contrat', to: `/admin/contrat?id=${contratId}` }
+  }
+
+  if (isAdmin.value && isAccountNotif(n)) {
+    return { label: 'Gérer les domiciliataires', to: '/admin/domiciliataires' }
+  }
+
+  return null
+}
+
+async function openNotification(n: any): Promise<void> {
+  if (!n.is_read) await markRead(n.id)
+  const target = notificationTarget(n)
+  if (!target) {
+    toggleExpand(n.id)
+    return
+  }
+  if (target.external) {
+    window.open(target.external, '_blank', 'noopener')
+    return
+  }
+  if (target.to) await router.push(target.to)
+}
+
 onMounted(loadAll)
 </script>
 
@@ -188,7 +253,7 @@ onMounted(loadAll)
         <div class="px-4 py-3.5 flex items-start gap-3 cursor-pointer transition-colors"
              :style="!n.is_read ? 'background:rgba(200,169,110,0.05)'
                      : expandedId === n.id ? 'background:var(--app-surface-2)' : ''"
-             @click="toggleExpand(n.id)">
+             @click="openNotification(n)">
           <div class="w-2 h-2 rounded-full shrink-0 mt-1.5"
                :style="`background:${notifColor(n)};opacity:${n.is_read ? 0.3 : 1}`"/>
           <div class="flex-1 min-w-0">
@@ -242,6 +307,9 @@ onMounted(loadAll)
               </div>
               <div class="flex gap-2 pt-2 flex-wrap">
                 <button v-if="!n.is_read" class="btn btn-outline btn-sm" @click="markRead(n.id)">Marquer comme lu</button>
+                <button v-if="notificationTarget(n)" class="btn btn-gold btn-sm" @click="openNotification(n)">
+                  {{ notificationTarget(n)?.label }}
+                </button>
                 <!-- Shortcut to act on the request — only for Super
                      Admin, and only on account/signup notifications. -->
                 <NuxtLink v-if="isAdmin && isAccountNotif(n)" to="/admin/domiciliataires" class="btn btn-gold btn-sm">

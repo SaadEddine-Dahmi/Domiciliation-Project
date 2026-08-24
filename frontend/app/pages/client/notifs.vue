@@ -29,6 +29,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { success, error: toastError } = useToast()
 const notifsStore = useNotificationsStore()
+const router = useRouter()
 
 /** Base URL for API calls, from runtime config. */
 function getApiBase(): string {
@@ -208,6 +209,44 @@ function viewDocument(n: any): void {
   }
 }
 
+function notificationTarget(n: any): { label: string; to?: string; external?: string } | null {
+  const type = n.type ?? ''
+  const data = n.data ?? {}
+  const message = String(n.message ?? '').toLowerCase()
+  const contratId = data.contrat_id ?? n.contrat_id
+
+  if (type === 'document_uploaded' && data.document_id) {
+    try {
+      return {
+        label: 'Voir le document',
+        external: withToken(`${getApiBase()}/api/documents/${data.document_id}/preview`),
+      }
+    } catch {
+      return null
+    }
+  }
+
+  if (
+    contratId &&
+    (type === 'contract_legalized' || type.startsWith('pre_expiry_') || type === 'post_expiry' || type === 'contract_expired' || message.includes('contrat'))
+  ) {
+    return { label: 'Voir le contrat', to: `/client/contrat?contrat_id=${contratId}` }
+  }
+
+  return null
+}
+
+async function openNotification(n: any): Promise<void> {
+  if (!n.is_read) await markRead(n.id)
+  const target = notificationTarget(n)
+  if (!target) return
+  if (target.external) {
+    window.open(target.external, '_blank', 'noopener')
+    return
+  }
+  if (target.to) await router.push(target.to)
+}
+
 onMounted(loadAll)
 </script>
 
@@ -313,7 +352,10 @@ onMounted(loadAll)
         class="relative px-4 py-4 pl-5 flex items-center gap-4 flex-wrap sm:flex-nowrap transition-colors"
         :class="i < filtered.length - 1 ? 'border-b' : ''"
         :style="i < filtered.length - 1 ? 'border-color:var(--app-border-2)' : ''"
-        @click="markRead(n.id)"
+        role="button"
+        tabindex="0"
+        @click="openNotification(n)"
+        @keydown.enter.prevent="openNotification(n)"
       >
         <!-- Unread accent bar, full row height, gold -->
         <span
@@ -381,12 +423,12 @@ onMounted(loadAll)
             {{ n.message }}
           </p>
           <button
-            v-if="n.type === 'document_uploaded' && n.data?.document_id"
+            v-if="notificationTarget(n)"
             class="text-xs font-semibold mt-1 underline underline-offset-2"
             style="color:#c8a96e"
-            @click.stop="viewDocument(n)"
+            @click.stop="openNotification(n)"
           >
-            Voir le document reçu →
+            {{ notificationTarget(n)?.label }} →
           </button>
         </div>
 
