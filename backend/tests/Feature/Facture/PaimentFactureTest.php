@@ -93,4 +93,71 @@ class PaimentFactureTest extends TestCase
             ->assertOk()
             ->assertHeader('Content-Type', 'application/pdf');
     }
+
+    public function test_domiciliataire_can_archive_and_restore_facture(): void
+    {
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $entreprise = Entreprise::create(['domiciliataire_id' => $tenant->id, 'raison_sociale' => 'CLIENT SARL']);
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'prix_total' => 500,
+            'statut' => 'active',
+        ]);
+
+        $paymentRes = $this->actingAs($tenant, 'sanctum')->postJson("/api/contrats/{$contrat->id}/paiements", [
+            'montant' => 500,
+            'date_paiement' => now()->toDateString(),
+            'mode_paiement' => 'virement',
+        ]);
+
+        $factureId = $paymentRes->json('data.facture.id');
+
+        $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/factures/{$factureId}/archive")
+            ->assertOk()
+            ->assertJsonPath('data.id', $factureId);
+
+        $this->assertDatabaseMissing('factures', ['id' => $factureId, 'archived_at' => null]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->getJson('/api/factures')
+            ->assertOk()
+            ->assertJsonCount(0, 'data');
+
+        $this->actingAs($tenant, 'sanctum')
+            ->postJson("/api/factures/{$factureId}/restore")
+            ->assertOk()
+            ->assertJsonPath('data.archived_at', null);
+    }
+
+    public function test_domiciliataire_can_delete_facture_and_its_payment(): void
+    {
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $entreprise = Entreprise::create(['domiciliataire_id' => $tenant->id, 'raison_sociale' => 'CLIENT SARL']);
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'prix_total' => 500,
+            'statut' => 'active',
+        ]);
+
+        $paymentRes = $this->actingAs($tenant, 'sanctum')->postJson("/api/contrats/{$contrat->id}/paiements", [
+            'montant' => 500,
+            'date_paiement' => now()->toDateString(),
+            'mode_paiement' => 'virement',
+        ]);
+
+        $factureId = $paymentRes->json('data.facture.id');
+        $paiementId = $paymentRes->json('data.id');
+
+        $this->actingAs($tenant, 'sanctum')
+            ->deleteJson("/api/factures/{$factureId}")
+            ->assertOk();
+
+        $this->assertDatabaseMissing('factures', ['id' => $factureId]);
+        $this->assertDatabaseMissing('paiements', ['id' => $paiementId]);
+    }
 }

@@ -2,7 +2,7 @@
 <script setup lang="ts">
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
-const { error: toastError } = useToast()
+const { success, error: toastError } = useToast()
 
 function getApiBase(): string {
   const config = useRuntimeConfig()
@@ -45,6 +45,7 @@ const filterStatut = ref('')
 const previewFacture = ref<any>(null)
 const showPreview    = ref(false)
 const previewLoading = ref(false)
+const actionBusyId   = ref<number | null>(null)
 
 function openPreview(f: any) {
   previewFacture.value = f
@@ -61,7 +62,7 @@ async function fetchFactures(): Promise<void> {
   loading.value = true
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
-      `${getApiBase()}/api/factures`,
+      `${getApiBase()}/api/factures?include_archived=1`,
       { headers: authHeaders() }
     )
     factures.value = res.data ?? []
@@ -74,23 +75,30 @@ async function fetchFactures(): Promise<void> {
 
 const filtered = computed(() => {
   let list = factures.value
-  if (filterStatut.value) list = list.filter(f => f.statut === filterStatut.value)
+  if (filterStatut.value === 'archived') {
+    list = list.filter(f => f.archived_at)
+  } else {
+    list = list.filter(f => !f.archived_at)
+    if (filterStatut.value) list = list.filter(f => f.statut === filterStatut.value)
+  }
   if (search.value.trim()) {
     const q = search.value.toLowerCase()
     list = list.filter(f =>
       f.numero_facture?.toLowerCase().includes(q) ||
       f.entreprise?.raison_sociale?.toLowerCase().includes(q) ||
-      f.statut?.toLowerCase().includes(q)
+      displayStatut(f).toLowerCase().includes(q)
     )
   }
   return list
 })
 
-const totalAmount   = computed(() => factures.value.reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const paidAmount    = computed(() => factures.value.filter(f => f.statut === 'paid').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const pendingAmount = computed(() => factures.value.filter(f => f.statut === 'pending').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
-const paidCount     = computed(() => factures.value.filter(f => f.statut === 'paid').length)
-const pendingCount  = computed(() => factures.value.filter(f => f.statut === 'pending').length)
+const activeFactures = computed(() => factures.value.filter(f => !f.archived_at))
+const archivedCount  = computed(() => factures.value.filter(f => f.archived_at).length)
+const totalAmount    = computed(() => activeFactures.value.reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
+const paidAmount     = computed(() => activeFactures.value.filter(f => f.statut === 'paid').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
+const pendingAmount  = computed(() => activeFactures.value.filter(f => f.statut === 'pending').reduce((s, f) => s + Number(f.montant_total ?? 0), 0))
+const paidCount      = computed(() => activeFactures.value.filter(f => f.statut === 'paid').length)
+const pendingCount   = computed(() => activeFactures.value.filter(f => f.statut === 'pending').length)
 
 function fmt(d: string | null): string {
   if (!d) return '—'
@@ -101,10 +109,74 @@ const statutCfg: Record<string, { cls: string; label: string }> = {
   paid:      { cls: 'text-green-400 bg-green-400/10',   label: 'Payée' },
   pending:   { cls: 'text-yellow-400 bg-yellow-400/10', label: 'En attente' },
   cancelled: { cls: 'text-red-400 bg-red-400/10',       label: 'Annulée' },
+  archived:  { cls: 'text-slate-300 bg-slate-400/10',   label: 'Archivée' },
+}
+
+function displayStatut(f: any): string {
+  return f.archived_at ? 'archived' : f.statut
 }
 
 function sc(statut: string) {
   return statutCfg[statut] ?? { cls: 'text-gray-400 bg-gray-400/10', label: statut }
+}
+
+function replaceFacture(updated: any): void {
+  const index = factures.value.findIndex(f => f.id === updated.id)
+  if (index === -1) return
+  factures.value.splice(index, 1, updated)
+}
+
+async function archiveFacture(f: any): Promise<void> {
+  if (!confirm(`Archiver la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`)) return
+
+  actionBusyId.value = f.id
+  try {
+    const res = await $fetch<{ success: boolean; data: any }>(
+      `${getApiBase()}/api/factures/${f.id}/archive`,
+      { method: 'POST', headers: authHeaders() }
+    )
+    replaceFacture(res.data)
+    success('Facture archivée')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? "Erreur lors de l'archivage")
+  } finally {
+    actionBusyId.value = null
+  }
+}
+
+async function restoreFacture(f: any): Promise<void> {
+  actionBusyId.value = f.id
+  try {
+    const res = await $fetch<{ success: boolean; data: any }>(
+      `${getApiBase()}/api/factures/${f.id}/restore`,
+      { method: 'POST', headers: authHeaders() }
+    )
+    replaceFacture(res.data)
+    success('Facture restaurée')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur lors de la restauration')
+  } finally {
+    actionBusyId.value = null
+  }
+}
+
+async function deleteFacture(f: any): Promise<void> {
+  if (!confirm(`Supprimer définitivement la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`)) return
+
+  actionBusyId.value = f.id
+  try {
+    await $fetch(
+      `${getApiBase()}/api/factures/${f.id}`,
+      { method: 'DELETE', headers: authHeaders() }
+    )
+    factures.value = factures.value.filter(item => item.id !== f.id)
+    if (previewFacture.value?.id === f.id) closePreview()
+    success('Facture supprimée')
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur lors de la suppression')
+  } finally {
+    actionBusyId.value = null
+  }
 }
 
 onMounted(fetchFactures)
@@ -118,7 +190,9 @@ onMounted(fetchFactures)
         <h1 class="font-serif text-2xl">
           Factures <em class="italic" style="color:#c8a96e">&amp; Historique</em>
         </h1>
-        <p class="text-sm mt-1" style="color:var(--app-text-muted)">{{ factures.length }} facture(s) au total</p>
+        <p class="text-sm mt-1" style="color:var(--app-text-muted)">
+          {{ activeFactures.length }} facture(s) active(s) · {{ archivedCount }} archivée(s)
+        </p>
       </div>
     </div>
 
@@ -196,6 +270,14 @@ onMounted(fetchFactures)
       >
         Annulées
       </button>
+
+      <button
+        @click="filterStatut = 'archived'"
+        :class="filterStatut === 'archived' ? 'bg-slate-400/15 border-slate-300 text-slate-100 font-semibold' : 'border-[var(--app-border,#212936)] text-[var(--app-text-faint,#8A94A6)] hover:border-slate-300/50 hover:text-white'"
+        class="px-3 py-1.5 rounded-full border text-xs transition duration-150"
+      >
+        Archivées
+      </button>
     </div>
 
   </div>
@@ -237,8 +319,8 @@ onMounted(fetchFactures)
           {{ Number(f.montant_total ?? 0).toLocaleString('fr-MA') }} DH
         </p>
         <div class="text-center">
-          <span class="text-xs px-2.5 py-1 rounded-full font-semibold" :class="sc(f.statut).cls">
-            {{ sc(f.statut).label }}
+          <span class="text-xs px-2.5 py-1 rounded-full font-semibold" :class="sc(displayStatut(f)).cls">
+            {{ sc(displayStatut(f)).label }}
           </span>
         </div>
         <div class="flex items-center gap-2 shrink-0 justify-end">
@@ -254,6 +336,32 @@ onMounted(fetchFactures)
               <polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
             </svg>
           </a>
+          <button
+            v-if="f.archived_at"
+            class="btn btn-outline btn-sm"
+            title="Restaurer"
+            :disabled="actionBusyId === f.id"
+            @click="restoreFacture(f)"
+          >
+            Restaurer
+          </button>
+          <button
+            v-else
+            class="btn btn-outline btn-sm"
+            title="Archiver"
+            :disabled="actionBusyId === f.id"
+            @click="archiveFacture(f)"
+          >
+            Archiver
+          </button>
+          <button
+            class="btn btn-danger btn-sm"
+            title="Supprimer"
+            :disabled="actionBusyId === f.id"
+            @click="deleteFacture(f)"
+          >
+            Supprimer
+          </button>
         </div>
       </div>
     </div>
@@ -279,8 +387,8 @@ onMounted(fetchFactures)
               {{ previewFacture.numero_facture ?? ('FAC-' + previewFacture.id) }}
             </span>
             <span class="text-sm text-white/60">{{ previewFacture.entreprise?.raison_sociale }}</span>
-            <span class="text-xs px-2 py-0.5 rounded-full font-semibold" :class="sc(previewFacture.statut).cls">
-              {{ sc(previewFacture.statut).label }}
+            <span class="text-xs px-2 py-0.5 rounded-full font-semibold" :class="sc(displayStatut(previewFacture)).cls">
+              {{ sc(displayStatut(previewFacture)).label }}
             </span>
           </div>
           <div class="flex items-center gap-2">

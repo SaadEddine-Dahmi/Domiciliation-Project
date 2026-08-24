@@ -21,6 +21,12 @@ function authHeaders(): Record<string, string> {
   return token ? { Authorization: `Bearer ${token}` } : {}
 }
 
+function tokenUrl(url: string, mode: 'preview' | 'download' = 'preview'): string {
+  const token = getToken()
+  if (!token) return url
+  return `${url}?token=${encodeURIComponent(token)}&mode=${mode}`
+}
+
 const contrats          = ref<any[]>([])
 const paiements         = ref<any[]>([])
 const summary           = ref<any>(null)
@@ -146,6 +152,12 @@ function openFacturePreview(facture: any) {
   pdfPreviewLoading.value = true
 }
 
+function closeFacturePreview(): void {
+  showPdfPreview.value    = false
+  previewFacture.value    = null
+  pdfPreviewLoading.value = false
+}
+
 const statutColor: Record<string, string> = {
   draft:  'text-yellow-400 bg-yellow-400/10',
   active: 'text-green-400 bg-green-400/10',
@@ -265,7 +277,7 @@ onMounted(loadContrats)
                     </svg>
                   </button>
                   <a v-if="p.facture?.id"
-                     :href="`${getApiBase()}/api/factures/${p.facture.id}/pdf?token=${encodeURIComponent(getToken())}&mode=download`"
+                     :href="tokenUrl(`${getApiBase()}/api/factures/${p.facture.id}/pdf`, 'download')"
                      target="_blank" class="btn btn-gold btn-sm" title="Télécharger facture">
                     <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
                       <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
@@ -336,6 +348,45 @@ onMounted(loadContrats)
         </div>
       </div>
     </div>
+
+    <!-- Facture PDF preview modal -->
+    <Teleport to="body">
+      <div v-if="showPdfPreview && previewFacture" class="fixed inset-0 z-300 flex flex-col"
+           style="background:rgba(0,0,0,0.92)">
+        <div class="flex items-center justify-between px-5 py-3 shrink-0"
+             style="background:rgba(0,0,0,0.6);border-bottom:1px solid rgba(255,255,255,0.1)">
+          <div class="min-w-0">
+            <p class="font-mono font-bold truncate" style="color:#c8a96e">
+              {{ previewFacture.numero_facture ?? ('FAC-' + previewFacture.id) }}
+            </p>
+            <p class="text-xs text-white/60">Aperçu facture</p>
+          </div>
+          <div class="flex items-center gap-2">
+            <a :href="tokenUrl(`${getApiBase()}/api/factures/${previewFacture.id}/pdf`, 'download')"
+               target="_blank" class="btn btn-gold btn-sm">
+              Télécharger
+            </a>
+            <button class="w-9 h-9 rounded-xl flex items-center justify-center text-white"
+                    style="background:rgba(255,255,255,0.1)" @click="closeFacturePreview">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+                <path d="M18 6L6 18M6 6l12 12"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+        <div class="flex-1 relative">
+          <div v-if="pdfPreviewLoading" class="absolute inset-0 flex items-center justify-center"
+               style="background:rgba(0,0,0,0.5);z-index:1">
+            <div class="text-center text-white">
+              <div class="w-8 h-8 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto mb-3"/>
+              <p class="text-sm">Chargement du PDF...</p>
+            </div>
+          </div>
+          <iframe :src="tokenUrl(`${getApiBase()}/api/factures/${previewFacture.id}/pdf`, 'preview')"
+                  class="w-full h-full" style="border:none;display:block" @load="pdfPreviewLoading = false" />
+        </div>
+      </div>
+    </Teleport>
 
   </div>
 </template>

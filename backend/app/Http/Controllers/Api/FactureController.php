@@ -1,7 +1,7 @@
 <?php
 // app/Http/Controllers/Api/FactureController.php
 //
-// Read-only access to invoices: listing and PDF generation.
+// Access to invoices: listing, PDF generation, archive/restore, and deletion.
 // Invoices themselves are only ever created by PaiementController::store(),
 // which enforces that montant never exceeds the contract's remaining balance
 // (see remainingBalance() there) — this controller does not duplicate that
@@ -13,6 +13,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Facture;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 use Laravel\Sanctum\PersonalAccessToken;
 
 class FactureController extends Controller
@@ -56,15 +57,17 @@ class FactureController extends Controller
     /**
      * GET /api/factures
      *
-     * Lists all invoices for the authenticated domiciliataire, newest first,
-     * with the fields the invoices list page needs already eager-loaded.
+     * Lists invoices for the authenticated domiciliataire, newest first, with
+     * the fields the invoices list page needs already eager-loaded.
+     * Archived invoices are hidden unless ?include_archived=1 is sent.
      */
-    public function index()
+    public function index(Request $request)
     {
         $tenantId = auth()->id();
 
         $factures = Facture::query()
             ->where('domiciliataire_id', $tenantId)
+            ->when(!$request->boolean('include_archived'), fn($q) => $q->whereNull('archived_at'))
             ->with([
                 'entreprise:id,raison_sociale,adresse,ville,pays,forme_juridique',
                 'contrat:id,date_debut,date_fin,statut,prix_total',
@@ -74,6 +77,58 @@ class FactureController extends Controller
             ->get();
 
         return response()->json(['success' => true, 'data' => $factures]);
+    }
+
+    /**
+     * POST /api/factures/{id}/archive
+     */
+    public function archive(int $id)
+    {
+        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+        $facture->forceFill(['archived_at' => now()])->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Facture archivée.',
+            'data' => $facture->fresh(['entreprise', 'contrat', 'paiements']),
+        ]);
+    }
+
+    /**
+     * POST /api/factures/{id}/restore
+     */
+    public function restore(int $id)
+    {
+        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+        $facture->forceFill(['archived_at' => null])->save();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Facture restaurée.',
+            'data' => $facture->fresh(['entreprise', 'contrat', 'paiements']),
+        ]);
+    }
+
+    /**
+     * DELETE /api/factures/{id}
+     *
+     * A facture created from a payment owns that payment row in this app's
+     * workflow, so deletion removes child paiements first to satisfy the
+     * restrict-on-delete foreign key.
+     */
+    public function destroy(int $id)
+    {
+        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+
+        DB::transaction(function () use ($facture) {
+            $facture->paiements()->delete();
+            $facture->delete();
+        });
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Facture supprimée.',
+        ]);
     }
 
     // ── PDF ────────────────────────────────────────────────────────────────────

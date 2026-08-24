@@ -16,12 +16,14 @@ class Facture extends Model
         'date_facture',
         'date_echeance',
         'numero_facture',
+        'archived_at',
     ];
 
     protected $casts = [
         'date_facture'  => 'date',
         'date_echeance' => 'date',
         'montant_total' => 'decimal:2',
+        'archived_at'   => 'datetime',
     ];
 
     // On creation: backfills domiciliataire_id from the parent contract

@@ -114,6 +114,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
 
     // ── Invoices ─────────────────────────────────────────────────────────
     Route::get('/factures', [FactureController::class, 'index']);
+    Route::post('/factures/{id}/archive', [FactureController::class, 'archive']);
+    Route::post('/factures/{id}/restore', [FactureController::class, 'restore']);
+    Route::delete('/factures/{id}', [FactureController::class, 'destroy']);
 
     // ── Articles (clause library) ───────────────────────────────────────
     Route::get('/articles', [ArticleController::class, 'index']);
