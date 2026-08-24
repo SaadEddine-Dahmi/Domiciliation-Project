@@ -42,6 +42,10 @@ class User extends Authenticatable
         'must_change_password' => 'boolean',
     ];
 
+    // photo_url and initials are computed on every serialization of a
+    // User (login response, /auth/me, client/admin listings, profile
+    // endpoint) so the frontend never has to build avatar logic itself
+    // — see UserAvatar.vue, which just reads these two fields.
     protected $appends = ['photo_url', 'initials'];
 
     // ── Relations ──────────────────────────────────────────
@@ -88,12 +92,24 @@ class User extends Authenticatable
 
     // ── Accessors ──────────────────────────────────────────
 
+    /**
+     * Public URL for this user's profile photo, or null if none is set
+     * (frontend falls back to initials in that case — see
+     * UserAvatar.vue).
+     *
+     * FIX: previously built as url('/api/profile/photo/' . $this->id),
+     * a path that was never registered in routes/api.php — every photo
+     * request 404'd, and the frontend's broken-image fallback silently
+     * swapped in initials, making the failure invisible from the UI.
+     * Now built from the actual registered route name so the two can
+     * never drift apart again.
+     */
     public function getPhotoUrlAttribute(): ?string
     {
         if (!$this->photo_path || !Storage::disk('public')->exists($this->photo_path)) {
             return null;
         }
-        return url('/api/profile/photo/' . $this->id);
+        return route('users.photo', $this->id);
     }
 
     public function getInitialsAttribute(): string
@@ -121,10 +137,12 @@ class User extends Authenticatable
     {
         return $this->role === 'admin';
     }
+
     public function isDomiciliataire(): bool
     {
         return $this->role === 'domiciliataire';
     }
+
     public function isClient(): bool
     {
         return $this->role === 'client';

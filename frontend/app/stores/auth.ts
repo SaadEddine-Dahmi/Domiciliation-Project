@@ -29,6 +29,12 @@ export const useAuthStore = defineStore('auth', () => {
     const error = ref<string>('')
     const isPendingApproval = ref<boolean>(false)
 
+    // Bumped on every confirmed photo upload/removal so components like
+    // UserAvatar.vue can reset their load-failure state even when the
+    // photo URL string itself doesn't change (it's stable per-user —
+    // see User::getPhotoUrlAttribute() on the backend).
+    const photoVersion = ref(0)
+
     const isAuthenticated = computed(() => !!user.value && !!token.value)
     const isAdmin = computed(() => user.value?.role === 'admin')
     const isDomiciliataire = computed(() => user.value?.role === 'domiciliataire')
@@ -150,9 +156,10 @@ export const useAuthStore = defineStore('auth', () => {
         }
     }
 
-    function restoreSession(): void {
+    async function restoreSession(): Promise<void> {
         if (!import.meta.client) return
         if (user.value && token.value) return
+
         try {
             const raw = localStorage.getItem(getStorageKey())
             if (!raw) return
@@ -162,9 +169,30 @@ export const useAuthStore = defineStore('auth', () => {
                 localStorage.removeItem(getStorageKey())
                 return
             }
+
+            // Fast path: paint instantly with the cached snapshot so there's
+            // no blank/skeleton flash on reload.
             user.value = parsed.user ?? null
             token.value = parsed.token ?? ''
+
+            // Then silently revalidate against the server. Any field that
+            // drifted since the cache was written — photoUrl being the
+            // concrete case that bit us, but this guards role/status/name
+            // too — gets corrected here instead of staying stale until the
+            // next login or explicit mutation.
+            if (token.value) {
+                const res = await $fetch<{ success: boolean; data: any }>(
+                    `${getApiBase()}/api/auth/me`,
+                    { headers: { Authorization: `Bearer ${token.value}` } }
+                )
+                user.value = buildUser(res.data)
+                saveToStorage()
+            }
         } catch {
+            // If revalidation fails (expired/invalid token), drop the stale
+            // session entirely rather than keep serving cached-but-wrong data.
+            user.value = null
+            token.value = ''
             localStorage.removeItem(getStorageKey())
         }
     }
@@ -172,6 +200,7 @@ export const useAuthStore = defineStore('auth', () => {
     function setPhoto(photoUrl: string | null): void {
         if (!user.value) return
         user.value = { ...user.value, photoUrl }
+        photoVersion.value++   // forces every UserAvatar instance to reset and retry
         saveToStorage()
     }
 
@@ -187,7 +216,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     return {
-        user, token, loading, error, isPendingApproval,
+        user, token, loading, error, isPendingApproval, photoVersion,
         isAuthenticated, isAdmin, isDomiciliataire, isClient, isInternal,
         login, register, logout, restoreSession, saveToStorage,
         setPhoto, clearMustChangePassword,

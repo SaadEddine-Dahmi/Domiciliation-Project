@@ -589,24 +589,24 @@ onMounted(() => {
           <input v-model="profile.contract_title" class="f-input" placeholder="ex. Contrat de Domiciliation Commerciale" />
         </div>
 
-        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
+        <!-- <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <!-- <div>
             <label class="f-label">Représentant légal</label>
             <input v-model="profile.representant_legal" class="f-input" placeholder="Nom du représentant" />
-          </div>
-          <div>
+          </div> -->
+          <!-- <div>
             <label class="f-label">Qualité du représentant</label>
             <input v-model="profile.identite_representant" class="f-input" placeholder="ex. Gérant" />
-          </div>
-          <div>
+          </div> -->
+          <!-- <div>
             <label class="f-label">Email du représentant</label>
             <input v-model="profile.representant_email" class="f-input" type="email" />
-          </div>
-          <div>
+          </div> -->
+          <!-- <div>
             <label class="f-label">Téléphone du représentant</label>
             <input v-model="profile.representant_telephone" class="f-input" />
-          </div>
-        </div>
+          </div> 
+        </div> -->
 
         <div class="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <div>
