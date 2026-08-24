@@ -44,7 +44,10 @@ watch([rawPhotoUrl, () => auth.photoVersion], () => {
   imageFailed.value = false
 })
 
-const photoUrl = computed(() => (imageFailed.value ? null : rawPhotoUrl.value))
+const photoUrl = computed(() => {
+  if (imageFailed.value || !rawPhotoUrl.value) return null
+  return appendCacheBuster(rawPhotoUrl.value, auth.photoVersion)
+})
 const initials = computed(() => auth.user?.avatar ?? '?')
 
 const wrapperStyle = computed(() => {
@@ -61,6 +64,13 @@ const wrapperStyle = computed(() => {
 
 function onImageError(): void {
   imageFailed.value = true
+}
+
+function appendCacheBuster(url: string, version: number): string {
+  if (!version) return url
+
+  const separator = url.includes('?') ? '&' : '?'
+  return `${url}${separator}_pv=${version}`
 }
 </script>
 

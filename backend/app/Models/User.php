@@ -109,7 +109,10 @@ class User extends Authenticatable
         if (!$this->photo_path || !Storage::disk('public')->exists($this->photo_path)) {
             return null;
         }
-        return route('users.photo', $this->id);
+        return route('users.photo', [
+            'id' => $this->id,
+            'v' => substr(sha1($this->photo_path), 0, 12),
+        ]);
     }
 
     public function getInitialsAttribute(): string

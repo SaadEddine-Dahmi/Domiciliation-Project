@@ -35,12 +35,18 @@
   
   // Shows the freshly picked file immediately; once the local preview is
   // cleared, falls back to whatever the server currently has.
-  const previewUrl = computed(() => localPreview.value ?? auth.user?.photoUrl ?? null)
+  const previewUrl = computed(() => {
+    if (localPreview.value) return localPreview.value
+    if (!auth.user?.photoUrl) return null
+
+    const separator = auth.user.photoUrl.includes('?') ? '&' : '?'
+    return `${auth.user.photoUrl}${separator}_pv=${auth.photoVersion}`
+  })
   
   // Reset the "failed" flag whenever the URL itself changes (new upload,
   // removal, or a fresh page load) so a stale failure doesn't stick
   // around and hide a URL that would actually load fine now.
-  watch(previewUrl, () => { imageFailed.value = false })
+  watch([previewUrl, () => auth.photoVersion], () => { imageFailed.value = false })
   
   const previewStyle = computed(() => ({
     background: (previewUrl.value && !imageFailed.value) ? 'transparent' : `${auth.user?.color}22`,

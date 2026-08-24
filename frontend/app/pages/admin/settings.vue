@@ -206,6 +206,15 @@ function removeAdresse(index: number): void {
 const photoInput = ref<HTMLInputElement | null>(null)
 const uploadingPhoto = ref(false)
 const photoError = ref('')
+const profilePhotoVersion = ref(0)
+
+const profilePhotoUrl = computed(() => {
+  if (!profile.photo_url) return null
+  if (!profilePhotoVersion.value) return profile.photo_url
+
+  const separator = profile.photo_url.includes('?') ? '&' : '?'
+  return `${profile.photo_url}${separator}_pv=${profilePhotoVersion.value}`
+})
 
 function triggerPhotoPicker(): void {
   photoInput.value?.click()
@@ -227,6 +236,8 @@ async function onPhotoChange(e: Event): Promise<void> {
     )
     profile.photo_url = res.data.photo_url
     profile.initials = res.data.initials
+    profilePhotoVersion.value++
+    auth.setPhoto(res.data.photo_url)
     success('Photo de profil mise à jour')
   } catch (e: any) {
     photoError.value = e?.data?.message ?? "Erreur lors de l'envoi de la photo (JPG/PNG/WEBP, 2 Mo max)"
@@ -246,6 +257,8 @@ async function removePhoto(): Promise<void> {
     )
     profile.photo_url = res.data.photo_url
     profile.initials = res.data.initials
+    profilePhotoVersion.value++
+    auth.setPhoto(null)
     success('Photo de profil supprimée')
   } catch (e: any) {
     toastError?.(e?.data?.message ?? 'Erreur lors de la suppression')
@@ -496,7 +509,7 @@ onMounted(() => {
               class="w-16 h-16 rounded-2xl flex items-center justify-center font-bold text-lg overflow-hidden"
               style="background: rgba(200,169,110,0.15); color: #c8a96e"
             >
-              <img v-if="profile.photo_url" :src="profile.photo_url" class="w-full h-full object-cover" alt="Photo de profil" />
+              <img v-if="profilePhotoUrl" :key="profilePhotoUrl" :src="profilePhotoUrl" class="w-full h-full object-cover" alt="Photo de profil" />
               <span v-else>{{ profile.initials }}</span>
 
               <div v-if="uploadingPhoto" class="absolute inset-0 flex items-center justify-center rounded-2xl"
