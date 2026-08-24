@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Article;
+use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
 
 class ArticleController extends Controller
@@ -79,7 +80,15 @@ class ArticleController extends Controller
         }
 
         $article = Article::forTenant(auth()->id())->findOrFail($id);
-        $article->delete();
+
+        try {
+            $article->delete();
+        } catch (QueryException) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cet article est utilise dans un contrat ou un modele et ne peut pas etre supprime.',
+            ], 409);
+        }
 
         return response()->json(['success' => true, 'message' => 'Article supprimé.']);
     }

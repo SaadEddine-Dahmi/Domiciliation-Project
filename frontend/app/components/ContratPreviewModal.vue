@@ -24,13 +24,19 @@ interface LiveDataPayload {
   companyIF?: string
   companyTP?: string
   companyAdresse?: string
+  companyEmail?: string
+  companyTelephone?: string
   companyRepresentant?: string
   companyCIN?: string
   societe?: string
   forme_juridique?: string
+  adresse_domiciliation?: string
   ville_client?: string
   gerantNom?: string
+  gerantPrenom?: string
   gerantCIN?: string
+  nationalite?: string
+  dateNaissance?: string
   tel?: string
   email?: string
   adressePerso?: string
@@ -85,21 +91,31 @@ function buildTokenMap(payload: LiveDataPayload): Record<string, string> {
     domiciliataire_if: payload.companyIF ?? '',
     domiciliataire_tp: payload.companyTP ?? '',
     domiciliataire_adresse: payload.companyAdresse ?? '',
+    domiciliataire_siege_succursales: payload.companyAdresse ?? '',
     domiciliataire_representant: payload.companyRepresentant ?? '',
+    domiciliataire_cin: payload.companyCIN ?? '',
     domiciliataire_identite_representant: payload.companyCIN ?? '',
+    domiciliataire_email: payload.companyEmail ?? '',
+    domiciliataire_telephone: payload.companyTelephone ?? '',
 
     raison_sociale: payload.societe ?? '',
     societe: payload.societe ?? '',
     forme_juridique: payload.forme_juridique ?? '',
+    adresse_domiciliation: payload.adresse_domiciliation ?? payload.companyAdresse ?? '',
+    adresse_entreprise: payload.adresse_domiciliation ?? payload.companyAdresse ?? '',
+    ville: payload.ville_client ?? payload.ville_signature ?? '',
     ville_client: payload.ville_client ?? '',
 
     gerant_nom: payload.gerantNom ?? '',
+    gerant_prenom: payload.gerantPrenom ?? '',
     gerant_identite: payload.gerantCIN ?? '',
     gerant_telephone: payload.tel ?? '',
     telephone: payload.tel ?? '',
     gerant_email: payload.email ?? '',
     email: payload.email ?? '',
     gerant_adresse: payload.adressePerso ?? '',
+    gerant_nationalite: payload.nationalite ?? '',
+    date_naissance: fmtDate(payload.dateNaissance),
 
     date_debut: fmtDate(payload.date_debut),
     date_fin: fmtDate(payload.date_fin),

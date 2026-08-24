@@ -218,7 +218,7 @@ onMounted(() => articlesStore.fetchAll())
               {{ article.is_active ? '⏸' : '▶' }}
             </button>
             <button class="btn btn-outline btn-sm" @click="openEdit(article)">Modifier</button>
-            <button class="btn btn-danger btn-sm" @click="deleteArticle(article.id)">✕</button>
+            <button class="btn btn-danger btn-sm" @click="deleteArticle(article.id)">Supprimer</button>
           </div>
         </div>
         <div class="flex gap-4 text-xs text-app-text/30 border-t border-white/5 pt-2">

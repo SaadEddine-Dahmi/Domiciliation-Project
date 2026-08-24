@@ -111,7 +111,7 @@ class ClientController extends Controller
             'client_nom' => ['required', 'string', 'max:20'],
             'client_prenom' => ['nullable', 'string', 'max:20'],
             'client_email' => ['required', 'email', 'max:50', 'unique:users,email'],
-            'client_telephone' => ['nullable', 'string', 'max:13'],
+            'client_telephone' => ['nullable', 'string', 'max:30'],
 
             // Optional — if omitted or empty, a password is generated.
             'client_password' => ['nullable', 'string', 'min:8'],
@@ -205,7 +205,7 @@ class ClientController extends Controller
             'client_user.nom' => ['nullable', 'string', 'max:20'],
             'client_user.prenom' => ['nullable', 'string', 'max:20'],
             'client_user.email' => ['nullable', 'email', 'max:50'],
-            'client_user.telephone' => ['nullable', 'string', 'max:13'],
+            'client_user.telephone' => ['nullable', 'string', 'max:30'],
         ]);
 
         $entreprise->update([

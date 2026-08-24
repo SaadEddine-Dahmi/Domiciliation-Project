@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Contrat;
 use App\Models\Entreprise;
 use App\Models\User;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\Schema;
 
 class DashboardController extends Controller
 {
@@ -23,9 +25,9 @@ class DashboardController extends Controller
                 'data' => [
                     'total_domiciliataires' => User::where('role', 'domiciliataire')->count(),
                     'total_clients' => Entreprise::count(),
-                    'total_contrats' => Contrat::count(),
-                    'contrats_actifs' => Contrat::where('statut', 'active')->count(),
-                    'contrats_draft' => Contrat::where('statut', 'draft')->count(),
+                    'total_contrats' => $this->visibleContrats()->count(),
+                    'contrats_actifs' => $this->visibleContrats()->where('statut', 'active')->count(),
+                    'contrats_draft' => $this->visibleContrats()->where('statut', 'draft')->count(),
                     'total_documents' => 0,
                     'ca_mensuel' => '0.00',
                     'role' => 'admin',
@@ -36,7 +38,10 @@ class DashboardController extends Controller
         if ($role === 'domiciliataire') {
             $tenantId = $user->id;
 
-            $caMensuel = Contrat::where('domiciliataire_id', $tenantId)
+            $tenantContrats = fn(): Builder => $this->visibleContrats()
+                ->where('domiciliataire_id', $tenantId);
+
+            $caMensuel = $tenantContrats()
                 ->where('statut', 'active')
                 ->whereMonth('created_at', now()->month)
                 ->whereYear('created_at', now()->year)
@@ -46,9 +51,9 @@ class DashboardController extends Controller
                 'success' => true,
                 'data' => [
                     'total_clients' => Entreprise::where('domiciliataire_id', $tenantId)->count(),
-                    'total_contrats' => Contrat::where('domiciliataire_id', $tenantId)->count(),
-                    'contrats_actifs' => Contrat::where('domiciliataire_id', $tenantId)->where('statut', 'active')->count(),
-                    'contrats_draft' => Contrat::where('domiciliataire_id', $tenantId)->where('statut', 'draft')->count(),
+                    'total_contrats' => $tenantContrats()->count(),
+                    'contrats_actifs' => $tenantContrats()->where('statut', 'active')->count(),
+                    'contrats_draft' => $tenantContrats()->where('statut', 'draft')->count(),
                     'total_documents' => 0,
                     'ca_mensuel' => number_format((float) $caMensuel, 2, '.', ''),
                     'role' => 'domiciliataire',
@@ -57,10 +62,13 @@ class DashboardController extends Controller
         }
 
         $entreprise = Entreprise::where('client_user_id', $user->id)
-            ->with(['domiciliataire:id,nom,prenom,email,telephone', 'contrats' => fn($q) => $q->latest()->limit(1)])
+            ->with([
+                'domiciliataire:id,nom,prenom,email,telephone',
+                'contrats' => fn($q) => $this->applyVisibleContratScope($q)->latest()->limit(1),
+            ])
             ->first();
 
-        $contrat = $entreprise?->contrats->first();
+        $contrat = $entreprise ? $entreprise->contrats->first() : null;
 
         return response()->json([
             'success' => true,
@@ -90,5 +98,26 @@ class DashboardController extends Controller
                 'role' => 'client',
             ],
         ]);
+    }
+
+    private function visibleContrats(): Builder
+    {
+        return $this->applyVisibleContratScope(Contrat::query());
+    }
+
+    private function applyVisibleContratScope($query)
+    {
+        return $this->contratsHaveArchivedAt()
+            ? $query->whereNull('archived_at')
+            : $query;
+    }
+
+    private function contratsHaveArchivedAt(): bool
+    {
+        try {
+            return Schema::hasColumn('contrats', 'archived_at');
+        } catch (\Throwable) {
+            return false;
+        }
     }
 }

@@ -38,6 +38,13 @@ const clientsStore = useClientsStore();
 const articlesStore = useArticlesStore();
 const { success, error: toastError } = useToast();
 
+const dialCodes = ["+212", "+33", "+34", "+1", "+44", "+49", "+39", "+31"];
+
+function joinPhone(dialCode: string, number: string): string {
+  const local = number.trim().replace(/^0+/, "");
+  return local ? `${dialCode} ${local}` : "";
+}
+
 const pdfPreview = ref();
 
 function getApiBase(): string {
@@ -169,7 +176,8 @@ const newClientForm = reactive({
   gerantCIN: "",
   dateNaissance: "",
   adressePerso: "",
-  tel: "",
+  telDialCode: "+212",
+  telNumber: "",
   email: "",
   password: "",
 });
@@ -205,7 +213,8 @@ function switchToCreate(): void {
     gerantCIN: "",
     dateNaissance: "",
     adressePerso: "",
-    tel: "",
+    telDialCode: "+212",
+    telNumber: "",
     email: "",
     password: "",
   });
@@ -230,9 +239,9 @@ watch(
   },
 );
 watch(
-  () => newClientForm.tel,
-  (v) => {
-    contract.form.tel = v;
+  () => [newClientForm.telDialCode, newClientForm.telNumber],
+  () => {
+    contract.form.tel = joinPhone(newClientForm.telDialCode, newClientForm.telNumber);
   },
 );
 watch(
@@ -508,7 +517,7 @@ async function nextStep(): Promise<void> {
         client_nom: newClientForm.gerantNom,
         client_email: newClientForm.email,
         client_password: newClientForm.password,
-        client_telephone: newClientForm.tel || undefined,
+        client_telephone: joinPhone(newClientForm.telDialCode, newClientForm.telNumber) || undefined,
         statut: "actif",
         pays: "Maroc",
       });
@@ -617,8 +626,8 @@ function openLivePreview(): void {
       date_debut: contract.form.dateDebut,
       date_fin: contract.form.dateFin,
       date_signature: contract.form.date_signature,
-      redevanceMensuelle: contract.form.redevanceMensuelle,
-      redevanceAnnuelle: contract.form.redevanceAnnuelle,
+      redevanceMensuelle: contract.monthlyTotal,
+      redevanceAnnuelle: contract.grandTotal,
       mode_paiement: contract.form.mode_paiement,
       caution: contract.form.caution,
       companyName: contract.form.companyName,
@@ -626,13 +635,19 @@ function openLivePreview(): void {
       companyIF: contract.form.companyIF,
       companyTP: contract.form.companyTP,
       companyAdresse: contract.form.companyAdresse,
+      companyEmail: contract.form.companyEmail,
+      companyTelephone: contract.form.companyTelephone,
       companyRepresentant: contract.form.companyRepresentant,
       companyCIN: contract.form.companyCIN,
       societe: contract.form.societe,
       forme_juridique: selectedClient.value?.forme_juridique,
+      adresse_domiciliation: contract.form.companyAdresse,
       ville_client: selectedClient.value?.ville,
       gerantNom: contract.form.gerantNom,
+      gerantPrenom: contract.form.gerantPrenom,
       gerantCIN: contract.form.gerantCIN,
+      nationalite: contract.form.nationalite,
+      dateNaissance: contract.form.dateNaissance,
       tel: contract.form.tel,
       email: contract.form.email,
       adressePerso: contract.form.adressePerso,
@@ -1290,10 +1305,20 @@ onMounted(async () => {
             </div>
             <div>
               <label class="f-label">Téléphone</label>
-              <input
-                v-model="newClientForm.tel"
-                class="f-input"
-                placeholder="+212 6XX XXX XXX" />
+              <div class="flex gap-2">
+                <select
+                  v-model="newClientForm.telDialCode"
+                  class="f-input w-28 shrink-0">
+                  <option v-for="code in dialCodes" :key="code" :value="code">
+                    {{ code }}
+                  </option>
+                </select>
+                <input
+                  v-model="newClientForm.telNumber"
+                  class="f-input flex-1"
+                  type="tel"
+                  placeholder="6XX XXX XXX" />
+              </div>
             </div>
             <div>
               <label class="f-label">Email (accès portail) *</label>

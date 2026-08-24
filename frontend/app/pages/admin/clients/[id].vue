@@ -80,6 +80,22 @@ const isPdf = ref(false)
 
 // Shared contract preview component reference.
 const pdfPreview = ref()
+const dialCodes = ['+212', '+33', '+34', '+1', '+44', '+49', '+39', '+31']
+
+function joinPhone(dialCode: string, number: string): string {
+  const local = number.trim().replace(/^0+/, '')
+  return local ? `${dialCode} ${local}` : ''
+}
+
+function splitPhone(value: string | null | undefined): { dialCode: string; number: string } {
+  const raw = (value ?? '').trim()
+  const matchedCode = dialCodes.find(code => raw.startsWith(code))
+  if (!matchedCode) return { dialCode: '+212', number: raw.replace(/^\+/, '') }
+  return {
+    dialCode: matchedCode,
+    number: raw.slice(matchedCode.length).trim(),
+  }
+}
 
 function isImage(name: string): boolean {
   if (!name) return false
@@ -178,7 +194,8 @@ const editForm = reactive({
   gerant_nom: '',
   gerant_prenom: '',
   gerant_email: '',
-  gerant_telephone: '',
+  gerant_dial_code: '+212',
+  gerant_phone_number: '',
   gerant_date_naissance: '',
   gerant_adresse: '',
   gerant_cin: '',
@@ -198,12 +215,14 @@ function openEditModal(): void {
   editServerError.value = ''
 
   const rep = client.value.representant ?? {}
+  const phone = splitPhone(rep.telephone)
 
   editForm.raison_sociale        = client.value.raison_sociale ?? ''
   editForm.gerant_nom            = rep.nom ?? ''
   editForm.gerant_prenom         = rep.prenom ?? ''
   editForm.gerant_email          = rep.email ?? ''
-  editForm.gerant_telephone      = rep.telephone ?? ''
+  editForm.gerant_dial_code      = phone.dialCode
+  editForm.gerant_phone_number   = phone.number
   editForm.gerant_date_naissance = rep.date_naissance ?? ''
   editForm.gerant_adresse        = rep.adresse ?? ''
   editForm.gerant_cin            = rep.cin ?? ''
@@ -226,7 +245,7 @@ async function submitEdit(): Promise<void> {
       cin: editForm.gerant_cin,
       date_naissance: editForm.gerant_date_naissance || undefined,
       adresse: editForm.gerant_adresse || undefined,
-      telephone: editForm.gerant_telephone || undefined,
+      telephone: joinPhone(editForm.gerant_dial_code, editForm.gerant_phone_number) || undefined,
       email: editForm.gerant_email || undefined,
     }
 
@@ -854,7 +873,18 @@ function openContratPreview(c: any): void {
                 </div>
                 <div>
                   <label class="f-label">Téléphone</label>
-                  <input v-model="editForm.gerant_telephone" class="f-input" />
+                  <div class="flex gap-2">
+                    <select v-model="editForm.gerant_dial_code" class="f-input w-28 shrink-0">
+                      <option v-for="code in dialCodes" :key="code" :value="code">
+                        {{ code }}
+                      </option>
+                    </select>
+                    <input
+                      v-model="editForm.gerant_phone_number"
+                      class="f-input flex-1"
+                      type="tel"
+                      placeholder="6XX XXX XXX" />
+                  </div>
                 </div>
                 <div>
                   <label class="f-label">Date de naissance</label>

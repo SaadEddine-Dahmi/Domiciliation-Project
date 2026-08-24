@@ -3,6 +3,8 @@
 namespace Tests\Feature\Article;
 
 use App\Models\Article;
+use App\Models\Contrat;
+use App\Models\Entreprise;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -95,5 +97,29 @@ class ArticleTest extends TestCase
             ->assertJson(['success' => true]);
 
         $this->assertDatabaseMissing('articles', ['id' => $article->id]);
+    }
+
+    public function test_cannot_delete_article_used_by_contract(): void
+    {
+        $user = User::factory()->create(['role' => 'domiciliataire']);
+        $entreprise = Entreprise::factory()->create(['domiciliataire_id' => $user->id]);
+        $article = Article::create([
+            'domiciliataire_id' => $user->id,
+            'title' => 'Used Article',
+            'body' => 'Body',
+            'is_active' => true,
+        ]);
+        $contrat = Contrat::factory()->create([
+            'domiciliataire_id' => $user->id,
+            'entreprise_id' => $entreprise->id,
+        ]);
+        $contrat->articles()->sync([$article->id => ['ordre' => 1]]);
+
+        $this->actingAs($user, 'sanctum')
+            ->deleteJson("/api/articles/{$article->id}")
+            ->assertStatus(409)
+            ->assertJson(['success' => false]);
+
+        $this->assertDatabaseHas('articles', ['id' => $article->id]);
     }
 }

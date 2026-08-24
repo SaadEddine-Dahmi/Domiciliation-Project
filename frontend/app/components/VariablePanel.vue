@@ -37,7 +37,6 @@ const variableGroups: { group: string; color: string; vars: Variable[] }[] = [
       { key: 'domiciliataire_nom',     label: 'Nom',          group: 'Domiciliataire' },
       { key: 'domiciliataire_rc',      label: 'RC',           group: 'Domiciliataire' },
       { key: 'domiciliataire_if',      label: 'IF',           group: 'Domiciliataire' },
-      { key: 'domiciliataire_adresse', label: 'Adresse',      group: 'Domiciliataire' },
     ],
   },
   {
@@ -58,7 +57,6 @@ const variableGroups: { group: string; color: string; vars: Variable[] }[] = [
     vars: [
       { key: 'gerant_nom',         label: 'Nom complet',      group: 'Représentant' },
       { key: 'gerant_cin',         label: 'CIN',              group: 'Représentant' },
-      { key: 'gerant_naissance',   label: 'Date naissance',   group: 'Représentant' },
       { key: 'gerant_adresse',     label: 'Adresse',          group: 'Représentant' },
       { key: 'gerant_telephone',   label: 'Téléphone',        group: 'Représentant' },
       { key: 'gerant_email',       label: 'Email',            group: 'Représentant' },
@@ -69,7 +67,6 @@ const variableGroups: { group: string; color: string; vars: Variable[] }[] = [
     group: 'Contrat',
     color: 'text-gold bg-gold/10 border-gold/20',
     vars: [
-      { key: 'numero_contrat',   label: 'N° Contrat',         group: 'Contrat' },
       { key: 'instruction_no',   label: 'N° Instruction',     group: 'Contrat' },
       { key: 'date_debut',       label: 'Date début',         group: 'Contrat' },
       { key: 'date_fin',         label: 'Date fin',           group: 'Contrat' },

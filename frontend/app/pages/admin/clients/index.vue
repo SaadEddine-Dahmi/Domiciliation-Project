@@ -29,6 +29,22 @@ const editId      = ref<number | null>(null)
 const saving      = ref(false)
 const search      = ref('')
 const serverError = ref('')
+const dialCodes = ['+212', '+33', '+34', '+1', '+44', '+49', '+39', '+31']
+
+function joinPhone(dialCode: string, number: string): string {
+  const local = number.trim().replace(/^0+/, '')
+  return local ? `${dialCode} ${local}` : ''
+}
+
+function splitPhone(value: string | null | undefined): { dialCode: string; number: string } {
+  const raw = (value ?? '').trim()
+  const matchedCode = dialCodes.find(code => raw.startsWith(code))
+  if (!matchedCode) return { dialCode: '+212', number: raw.replace(/^\+/, '') }
+  return {
+    dialCode: matchedCode,
+    number: raw.slice(matchedCode.length).trim(),
+  }
+}
 
 /**
  * client_email/client_password only apply in create mode — they're not
@@ -39,7 +55,8 @@ const form = reactive({
   gerant_nom:            '',
   gerant_prenom:         '',
   gerant_email:          '',
-  gerant_telephone:      '',
+  gerant_dial_code:      '+212',
+  gerant_phone_number:   '',
   gerant_date_naissance: '',
   gerant_adresse:        '', // residence address as on CIN/Passport
   gerant_cin:            '',
@@ -98,7 +115,7 @@ function resetForm(): void {
   Object.assign(form, {
     raison_sociale: '',
     gerant_nom: '', gerant_prenom: '', gerant_email: '',
-    gerant_telephone: '', gerant_date_naissance: '',
+    gerant_dial_code: '+212', gerant_phone_number: '', gerant_date_naissance: '',
     gerant_adresse: '', gerant_cin: '',
     client_email: '', client_password: '',
   })
@@ -116,12 +133,14 @@ function openEdit(client: any): void {
   modalMode.value   = 'edit'
   editId.value      = client.id
   serverError.value = ''
+  const phone = splitPhone(client.representant?.telephone)
   Object.assign(form, {
     raison_sociale:        client.raison_sociale               ?? '',
     gerant_nom:            client.representant?.nom            ?? '',
     gerant_prenom:         client.representant?.prenom         ?? '',
     gerant_email:          client.representant?.email          ?? '',
-    gerant_telephone:      client.representant?.telephone      ?? '',
+    gerant_dial_code:      phone.dialCode,
+    gerant_phone_number:   phone.number,
     gerant_date_naissance: client.representant?.date_naissance ?? '',
     gerant_adresse:        client.representant?.adresse        ?? '',
     gerant_cin:            client.representant?.cin             ?? '',
@@ -135,6 +154,8 @@ async function submitEntreprise(): Promise<void> {
   serverError.value = ''
   saving.value      = true
   try {
+    const gerantTelephone = joinPhone(form.gerant_dial_code, form.gerant_phone_number)
+
     if (modalMode.value === 'create') {
       if (!form.client_email.trim()) {
         serverError.value = "L'email d'accès au portail client est obligatoire."
@@ -150,7 +171,7 @@ async function submitEntreprise(): Promise<void> {
         client_nom:        form.gerant_nom    || 'Non renseigné',
         client_prenom:     form.gerant_prenom || undefined,
         client_email:      form.client_email,
-        client_telephone:  form.gerant_telephone || undefined,
+        client_telephone:  gerantTelephone || undefined,
         client_password:   form.client_password  || undefined,
       })
 
@@ -161,7 +182,7 @@ async function submitEntreprise(): Promise<void> {
         cin:            form.gerant_cin    || 'Non renseigné',
         date_naissance: form.gerant_date_naissance || undefined,
         adresse:        form.gerant_adresse        || undefined,
-        telephone:      form.gerant_telephone      || undefined,
+        telephone:      gerantTelephone            || undefined,
         email:          form.gerant_email          || undefined,
       })
 
@@ -188,7 +209,7 @@ async function submitEntreprise(): Promise<void> {
         cin:            form.gerant_cin,
         date_naissance: form.gerant_date_naissance || undefined,
         adresse:        form.gerant_adresse        || undefined,
-        telephone:      form.gerant_telephone      || undefined,
+        telephone:      gerantTelephone            || undefined,
         email:          form.gerant_email          || undefined,
       })
 
@@ -421,7 +442,18 @@ onMounted(() => clientsStore.fetchAll())
                 </div>
                 <div>
                   <label class="f-label">Téléphone</label>
-                  <input v-model="form.gerant_telephone" class="f-input" type="tel" placeholder="+33 6 26 01 11 49" />
+                  <div class="flex gap-2">
+                    <select v-model="form.gerant_dial_code" class="f-input w-28 shrink-0">
+                      <option v-for="code in dialCodes" :key="code" :value="code">
+                        {{ code }}
+                      </option>
+                    </select>
+                    <input
+                      v-model="form.gerant_phone_number"
+                      class="f-input flex-1"
+                      type="tel"
+                      placeholder="6 26 01 11 49" />
+                  </div>
                 </div>
                 <div>
                   <label class="f-label">Date de naissance</label>
