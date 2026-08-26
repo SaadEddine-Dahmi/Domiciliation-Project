@@ -66,7 +66,7 @@ class ContratLifecycleTest extends TestCase
 
         $res = $this->actingAs($tenant, 'sanctum')->postJson('/api/contrats', [
             'entreprise_id' => $entreprise->id,
-            'titre_contrat' => 'Convention de Domiciliation Commerciale',
+            'titre_contrat' => 'Convention de Domiciliation',
             'date_debut'    => now()->toDateString(),
             'ville_signature' => 'Agadir',
             'date_signature' => now()->toDateString(),
@@ -74,7 +74,7 @@ class ContratLifecycleTest extends TestCase
 
         $res->assertCreated();
         $this->assertEquals(
-            'Convention de Domiciliation Commerciale',
+            'Convention de Domiciliation ',
             $res->json('data.titre_contrat')
         );
     }

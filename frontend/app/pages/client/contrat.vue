@@ -105,7 +105,7 @@ onMounted(load)
   <div class="space-y-5 animate-fade-up max-w-2xl">
     <div>
       <h1 class="font-serif text-2xl">Mon <em class="text-gold italic">contrat</em></h1>
-      <p class="text-app-text/50 text-sm mt-1">Contrat de domiciliation commerciale</p>
+      <p class="text-app-text/50 text-sm mt-1">Contrat de domiciliation</p>
     </div>
 
     <div v-if="loadError" class="card p-4 text-red-400 text-sm">{{ loadError }}</div>

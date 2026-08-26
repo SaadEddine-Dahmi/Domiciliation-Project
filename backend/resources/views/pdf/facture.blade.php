@@ -235,7 +235,7 @@
     </thead>
     <tbody>
       <tr>
-        <td>Domiciliation commerciale - {{ $entreprise?->raison_sociale }}</td>
+        <td>Domiciliation - {{ $entreprise?->raison_sociale }}</td>
         <td>
           {{ $contrat?->date_debut?->format('d/m/Y') }}
           @if($contrat?->date_fin) au {{ $contrat->date_fin->format('d/m/Y') }} @endif

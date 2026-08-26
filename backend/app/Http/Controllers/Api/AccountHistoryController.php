@@ -188,13 +188,17 @@ class AccountHistoryController extends Controller
     private function collectRepresentantHistory(int $tenantId): Collection
     {
         $rows = RepresentantHistory::where('domiciliataire_id', $tenantId)
-            ->with(['changedBy:id,nom,prenom', 'representant:id,nom,prenom,entreprise_id'])
+            ->with(['changedBy:id,nom,prenom', 'representant:id,nom,prenom,representable_id,representable_type'])
             ->orderBy('representant_id')
             ->orderBy('created_at')
             ->get();
 
+        $tenantEntrepriseIds = Entreprise::where('domiciliataire_id', $tenantId)
+            ->pluck('id');
+
         $liveById = Representant::whereIn('id', $rows->pluck('representant_id')->unique())
-            ->whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $tenantId))
+            ->where('representable_type', Entreprise::class)
+            ->whereIn('representable_id', $tenantEntrepriseIds)
             ->get()
             ->keyBy('id');
 

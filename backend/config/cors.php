@@ -19,12 +19,14 @@ return [
     // Set APP_FRONTEND_URL in your .env file
     'allowed_origins' => [
         env('FRONTEND_URL', 'http://localhost:3000'),
-        'http://192.168.100.225:3000',
         'http://localhost:3000',
         'http://127.0.0.1:3000',
     ],
 
-    'allowed_origins_patterns' => [],
+    'allowed_origins_patterns' => [
+        '#^http://localhost:\d+$#',
+        '#^http://127\.0\.0\.1:\d+$#',
+    ],
 
     'allowed_headers' => [
         'Content-Type',

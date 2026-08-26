@@ -110,6 +110,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/contrats/{id}/archive', [ContratController::class, 'archive']);
     Route::post('/contrats/{id}/restore', [ContratController::class, 'restore']);
     Route::post('/contrats/{id}/renew', [ContratController::class, 'renew']);
+    Route::delete('/contrats/{id}', [ContratController::class, 'destroy']);
 
     // ── Payments ─────────────────────────────────────────────────────────
     Route::get('/contrats/{contrat}/paiements', [PaiementController::class, 'index']);

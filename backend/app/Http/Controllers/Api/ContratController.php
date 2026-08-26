@@ -462,6 +462,38 @@ class ContratController extends Controller
         return response()->json(['success' => true, 'data' => $contrat->fresh()]);
     }
 
+    public function destroy(string $id)
+    {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
+
+        $contrat = Contrat::where('domiciliataire_id', $user->id)->findOrFail($id);
+
+        if ($contrat->isLegalised()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ce contrat est légalisé et ne peut pas être supprimé.',
+            ], 422);
+        }
+
+        if ($contrat->statut !== 'draft') {
+            return response()->json([
+                'success' => false,
+                'message' => 'Seuls les brouillons peuvent être supprimés. Archivez ce contrat à la place.',
+            ], 422);
+        }
+
+        $contrat->articles()->detach();
+        $contrat->delete();
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Brouillon supprimé.',
+        ]);
+    }
+
     public function renew(string $id)
     {
         $user = auth()->user();

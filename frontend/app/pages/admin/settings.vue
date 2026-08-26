@@ -611,7 +611,7 @@ onMounted(() => {
               affiché en en-tête de chaque contrat généré — vous choisissez le nom
             </span>
           </label>
-          <input v-model="profile.contract_title" class="f-input" placeholder="ex. Contrat de Domiciliation Commerciale" />
+          <input v-model="profile.contract_title" class="f-input" placeholder="ex. Contrat de Domiciliation" />
         </div>
 
         <!-- <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
