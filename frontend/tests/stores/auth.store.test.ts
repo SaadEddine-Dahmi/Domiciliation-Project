@@ -190,7 +190,11 @@ describe('Auth Store', () => {
 
     // ── restoreSession ───────────────────────────────────────
 
-    it('restoreSession restores user and token from localStorage', () => {
+    it('restoreSession restores user and token from localStorage', async () => {
+        vi.stubGlobal('$fetch', vi.fn().mockResolvedValue({
+            success: true,
+            data: mockApiUser(),
+        }))
         // Write directly to mock localStorage BEFORE creating store
         localStorage.setItem('app_auth', JSON.stringify({
             user: mockApiUser(),
@@ -202,13 +206,13 @@ describe('Auth Store', () => {
         setActivePinia(createPinia())
         const auth = useAuthStore()
 
-        auth.restoreSession()
+        await auth.restoreSession()
 
         expect(auth.token).toBe('restored-token')
         expect(auth.user?.email).toBe('saad@astfisc.ma')
     })
 
-    it('restoreSession clears expired session', () => {
+    it('restoreSession clears expired session', async () => {
         const eightDaysAgo = Date.now() - 8 * 24 * 60 * 60 * 1000
         localStorage.setItem('app_auth', JSON.stringify({
             user: mockApiUser(),
@@ -218,19 +222,19 @@ describe('Auth Store', () => {
 
         setActivePinia(createPinia())
         const auth = useAuthStore()
-        auth.restoreSession()
+        await auth.restoreSession()
 
         expect(auth.token).toBe('')
         expect(auth.user).toBeNull()
         expect(localStorage.getItem('app_auth')).toBeNull()
     })
 
-    it('restoreSession clears corrupted localStorage data', () => {
+    it('restoreSession clears corrupted localStorage data', async () => {
         localStorage.setItem('app_auth', 'not-valid-json{{{')
 
         setActivePinia(createPinia())
         const auth = useAuthStore()
-        auth.restoreSession()
+        await auth.restoreSession()
 
         expect(auth.token).toBe('')
         expect(localStorage.getItem('app_auth')).toBeNull()
@@ -250,7 +254,7 @@ describe('Auth Store', () => {
             user: mockApiUser(), token: 'stale-token', savedAt: Date.now(),
         }))
 
-        auth.restoreSession()
+        await auth.restoreSession()
 
         // Should keep live-token, not overwrite with stale
         expect(auth.token).toBe('live-token')
@@ -266,7 +270,7 @@ describe('Auth Store', () => {
         }))
 
         await auth.login({ email: 'x@x.ma', password: 'p' })
-        expect(auth.user?.avatar).toBe('DA')
+        expect(auth.user?.avatar).toBe('DS')
     })
 
     it('assigns correct color per role', async () => {

@@ -131,55 +131,55 @@ class AstFiscDemoSeeder extends Seeder
 
         $articles = [
             [
-                'title' => 'ARTICLE 1: DUREE',
+                'title' => 'DUREE',
                 'body' => "Le present contrat est prevu pour une duree de {{duree_mois}} Mois qui commencera le {{date_debut}} et se terminera le {{date_fin}}.\nLes deux parties pourront resilier le present contrat par lettre recommandee avec accuse de reception, en respectant le preavis de (1) mois.\nAvant expiration de la duree du preavis, le client devra justifier aupres du {{domiciliataire_nom}} soit de son transfert de siege social soit de la dissolution de son entreprise par la remise d'un extrait de registre du commerce modificatif, A defaut, les honoraires resteront dus jusqu'a justification.",
             ],
             [
-                'title' => 'ARTICLE 2: DEFINITION DES PRESTATIONS',
+                'title' => 'DEFINITION DES PRESTATIONS',
                 'body' => "- Attribution de l'adresse commerciale et postale\n- Reception du courrier destine au client.\nLe centre de domiciliation s'engage a conserver le courrier a destination du client pour une duree n'excedant pas 3 mois a l'expiration de ce delai il decline toute responsabilite par rapport a la perte ou l'engagement de ce courrier.",
             ],
             [
-                'title' => 'ARTICLE 3: FONCTIONNEMENT DU SERVICE',
+                'title' => 'FONCTIONNEMENT DU SERVICE',
                 'body' => "Horaires: les services decrits ci-dessus sont fournis en fonction des horaires qui sont fixes comme suit: Matin de 9h00 a 12h00 - Apres-midi de 15h00 a 17h00 et le samedi matin de 9h00 a 12h00 Sauf dimanche et jour ferie.",
             ],
             [
-                'title' => 'ARTICLE 4: RENOUVELLEMENT',
+                'title' => 'RENOUVELLEMENT',
                 'body' => "La domiciliation est renouvelee, 1 (un) mois avant la date d'echeance.",
             ],
             [
-                'title' => 'ARTICLE 5: RENSEIGNEMENTS',
+                'title' => 'RENSEIGNEMENTS',
                 'body' => "Le signataire du present contrat declare, et certifie sur l'honneur, certifier l'exactitude des renseignements fournis a la societe {{domiciliataire_nom}}.",
             ],
             [
-                'title' => 'ARTICLE 6: RESILIATION',
+                'title' => 'RESILIATION',
                 'body' => "Le domiciliataire se reserve le droit, dans les 8 jours suivant une mise en demeure notifiee au domicilie de resilier le present contrat sans autre formalite dans les cas suivants:\n- Inexecution pour le domicilier de l'une de ses obligations.\n- Fausse information donnee par le domicilier au domiciliataire sur sa situation.\n- Entrave a la bonne marche du domiciliataire et atteinte a sa reputation ou son enseigne.",
             ],
             [
-                'title' => 'ARTICLE 7: OBLIGATIONS',
+                'title' => 'OBLIGATIONS',
                 'body' => "Pendant toute la duree du contrat, le citoyen doit respecter les obligations suivantes :\n- Tenir un dossier sur chaque personne domiciliee qui contient les pieces justificatives relatives aux personnes physiques, leurs Adresses personnelles, numeros de telephone et numeros de carte d'identite, ainsi que leurs adresses-mail, et s'agissant des personnes morales, les documents prouvant les adresses, numeros de telephone numeros et cartes d'identite de Leurs responsables, ainsi que leurs adresses-mail...\n- Veiller a ce que le citoyen soit inscrit au registre du commerce dans un delai de trois mois compter de la date de conclusion Du Contrat...\n- Supportant solidairement le paiement des impots et taxes lies a l'activite exercee par le domicile...",
             ],
             [
-                'title' => 'ARTICLE 8: RESPONSABILITE',
+                'title' => 'RESPONSABILITE',
                 'body' => "Mr. {{domiciliataire_representant}} a decharge {{domiciliataire_nom}} de toute responsabilite concernant les poursuites pour cheques sans provision de la societe {{raison_sociale}}, ainsi que de toutes poursuites pour recouvrement des creances. La societe {{raison_sociale}} doit justifier de son identite, de son domicile. S'il est en personne morale, il doit remettre a {{domiciliataire_nom}} un exemplaire certifie conforme de son statut et de son immatriculation au registre de commerce dans le delai d'(1) un mois.\n{{domiciliataire_nom}} est quitte de tout engagement etabli par la societe {{raison_sociale}} envers L'ETAT, Fournisseurs, Les Etablissement de credits. Etc. Le gerant ou l'administrateur de la societe {{raison_sociale}} s'interdit par sa signature sur le present contrat de donner en nantissements le fonds de commerce de {{domiciliataire_nom}} ou tout autre actif appartenant a celle-ci.",
             ],
             [
-                'title' => 'ARTICLE 9: CLAUSE RESOLUTOIRE',
+                'title' => 'CLAUSE RESOLUTOIRE',
                 'body' => "En cas de litige pour non payement des redevances convenues par le present contrat, tous les frais, honoraires d'Avocat, representations par mandataires, expertises, engages par le domiciliataire, seront entierement et totalement a la charge de {{gerant_nom}} au meme rang que les redevances mensuelles dues, ainsi que tous les frais de justice qui lui incomberaient de droit.",
             ],
             [
-                'title' => 'ARTICLE 10: FRAIS',
+                'title' => 'FRAIS',
                 'body' => "Les frais et droits de la presente sont a la charge du client. En cas de contestation du present seul le tribunal de {{ville_signature}} sera competent.",
             ],
             [
-                'title' => 'ARTICLE 11: MANDAT',
+                'title' => 'MANDAT',
                 'body' => "Le domicilie declare donner mandat a la societe domiciliataire pour recevoir en son nom toute notifications emanant des administrations ou bien des tiers.",
             ],
             [
-                'title' => 'ARTICLE 12: REDEVANCE',
+                'title' => 'REDEVANCE',
                 'body' => "Le present contrat est consenti moyennant une redevance mensuelle de {{prix_mensuel}} dh, soit {{prix_total}} dh Annuelle payable d'avance.",
             ],
             [
-                'title' => 'ARTICLE 13: CONTACT',
+                'title' => 'CONTACT',
                 'body' => "Je certifie, {{gerant_nom}} l'exactitude des informations ci-dessous:\nN° Tel: {{gerant_telephone}}\nEmail: {{gerant_email}}\nAdresse personnelle: {{gerant_adresse}}",
             ],
         ];

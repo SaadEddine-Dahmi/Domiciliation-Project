@@ -25,7 +25,7 @@ class AuthController extends Controller
             'email' => ['required', 'email', 'max:50', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8'],
             'telephone' => ['nullable', 'string', 'max:13'],
-            'role' => ['nullable', 'in:domiciliataire,client,admin'],
+            'role' => ['nullable', 'in:domiciliataire,client'],
         ]);
 
         $role = $data['role'] ?? 'domiciliataire';

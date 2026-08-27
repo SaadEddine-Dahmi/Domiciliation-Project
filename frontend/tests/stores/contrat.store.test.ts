@@ -11,9 +11,9 @@ describe('Contract Store', () => {
 
     // ── Initial state ─────────────────────────────────────────
 
-    it('has default AST-FISC name', () => {
+    it('starts with empty domiciliataire company name', () => {
         const store = useContractStore()
-        expect(store.form.astNom).toBe('AST-FISC SARL AU')
+        expect(store.form.companyName).toBe('')
     })
 
     it('starts with 12 months default', () => {

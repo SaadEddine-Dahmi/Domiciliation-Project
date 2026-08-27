@@ -49,7 +49,17 @@ describe('Auth Middleware Logic', () => {
         expect(auth.isClient).toBe(false)
     })
 
-    it('session restored from valid localStorage grants access', () => {
+    it('session restored from valid localStorage grants access', async () => {
+        vi.stubGlobal('$fetch', vi.fn().mockResolvedValue({
+            success: true,
+            data: {
+                id: 1,
+                nom: 'Test',
+                email: 't@t.ma',
+                role: 'domiciliataire',
+                status: 'active',
+            },
+        }))
         // FIX: set localStorage FIRST, then create fresh pinia + store
         localStorage.setItem('app_auth', JSON.stringify({
             user: {
@@ -64,13 +74,13 @@ describe('Auth Middleware Logic', () => {
         // Fresh pinia ensures no cached state
         setActivePinia(createPinia())
         const auth = useAuthStore()
-        auth.restoreSession()
+        await auth.restoreSession()
 
         expect(auth.isAuthenticated).toBe(true)
         expect(auth.isDomiciliataire).toBe(true)
     })
 
-    it('expired session does not grant access', () => {
+    it('expired session does not grant access', async () => {
         localStorage.setItem('app_auth', JSON.stringify({
             user: { id: 1, email: 't@t.ma', role: 'domiciliataire' },
             token: 'old-token',
@@ -79,7 +89,7 @@ describe('Auth Middleware Logic', () => {
 
         setActivePinia(createPinia())
         const auth = useAuthStore()
-        auth.restoreSession()
+        await auth.restoreSession()
 
         expect(auth.isAuthenticated).toBe(false)
     })

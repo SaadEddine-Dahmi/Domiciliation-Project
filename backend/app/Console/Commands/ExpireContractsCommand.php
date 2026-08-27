@@ -1,5 +1,5 @@
 <?php
-// app/Console/Commands/CheckExpiredContracts.php
+// app/Console/Commands/ExpireContractsCommand.php
 //
 // Daily scheduled job: contracts:expire-check
 //
@@ -24,7 +24,7 @@ use App\Models\AppNotification;
 use App\Models\Contrat;
 use Illuminate\Console\Command;
 
-class CheckExpiredContracts extends Command
+class ExpireContractsCommand extends Command
 {
     protected $signature = 'contracts:expire-check';
     protected $description = 'Transition active contracts past date_fin to expired, and nudge domiciliataires to renew.';

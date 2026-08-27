@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Article;
 use Illuminate\Database\QueryException;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
 
 class ArticleController extends Controller
 {
@@ -80,6 +81,16 @@ class ArticleController extends Controller
         }
 
         $article = Article::forTenant(auth()->id())->findOrFail($id);
+
+        $isUsed = DB::table('contrat_articles')->where('article_id', $article->id)->exists()
+            || DB::table('template_articles')->where('article_id', $article->id)->exists();
+
+        if ($isUsed) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Cet article est utilise dans un contrat ou un modele et ne peut pas etre supprime.',
+            ], 409);
+        }
 
         try {
             $article->delete();

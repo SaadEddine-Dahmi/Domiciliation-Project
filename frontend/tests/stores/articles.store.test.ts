@@ -70,7 +70,7 @@ describe('Articles Store', () => {
 
         await store.fetchAll()
 
-        expect(store.error).toBe('Erreur chargement articles')
+        expect(store.error).toBe('Erreur lors du chargement des articles')
     })
 
     // ── create ───────────────────────────────────────────────

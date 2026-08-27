@@ -43,6 +43,10 @@ export const useAuthStore = defineStore('auth', () => {
     const isClient = computed(() => user.value?.role === 'client')
     const isInternal = computed(() => isAdmin.value || isDomiciliataire.value)
 
+    function isClientRuntime(): boolean {
+        return import.meta.client || typeof window !== 'undefined'
+    }
+
     function getApiBase(): string {
         const config = useRuntimeConfig()
         return (config.public.apiBase as string) ?? ''
@@ -85,7 +89,7 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     function saveToStorage(): void {
-        if (!import.meta.client) return
+        if (!isClientRuntime()) return
         localStorage.setItem(getStorageKey(), JSON.stringify({
             user: user.value,
             token: token.value,
@@ -158,14 +162,14 @@ export const useAuthStore = defineStore('auth', () => {
         error.value = ''
         isPendingApproval.value = false
         notifs.reset()
-        if (import.meta.client) {
+        if (isClientRuntime()) {
             localStorage.removeItem(getStorageKey())
         }
     }
 
     async function restoreSession(): Promise<void> {
         const notifs = useNotificationsStore()
-        if (!import.meta.client) return
+        if (!isClientRuntime()) return
         if (user.value && token.value) return
 
         try {

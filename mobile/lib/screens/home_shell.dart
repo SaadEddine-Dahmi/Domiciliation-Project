@@ -268,7 +268,7 @@ class PremiumSidebar extends StatelessWidget {
             Expanded(
               child: ListView(
                 children: [
-                  SidebarSection(title: 'PRINCIPAL'),
+                  const SidebarSection(title: 'PRINCIPAL'),
                   SidebarItem(icon: Icons.dashboard_outlined, label: 'Tableau de bord', active: selectedIndex == 0, onTap: () => selectPrimary(context, 0)),
                   SidebarItem(icon: Icons.person_outline, label: 'Mon Profil', active: selectedIndex == profileIndex, onTap: () => selectPrimary(context, profileIndex)),
                   if (user.isAdmin)
@@ -282,7 +282,7 @@ class PremiumSidebar extends StatelessWidget {
                     SidebarItem(icon: Icons.payments_outlined, label: 'Factures & Paiements', onTap: () => push(context, PaymentsScreen(api: api), closeDrawer: !permanent)),
                   if (user.isDomiciliataire)
                     SidebarItem(icon: Icons.receipt_long_outlined, label: 'Toutes les Factures', active: selectedIndex == facturesIndex, onTap: () => selectPrimary(context, facturesIndex)),
-                  SidebarSection(title: 'OUTILS'),
+                  const SidebarSection(title: 'OUTILS'),
                   if (user.isDomiciliataire)
                     SidebarItem(icon: Icons.note_add_outlined, label: 'Nouveau Contrat', onTap: () => onOpenSection('new_contract')),
                   if (!user.isAdmin)
@@ -292,7 +292,7 @@ class PremiumSidebar extends StatelessWidget {
                     SidebarItem(icon: Icons.article_outlined, label: 'Articles', onTap: () => push(context, ArticlesScreen(api: api), closeDrawer: !permanent)),
                   if (user.isDomiciliataire)
                     SidebarItem(icon: Icons.dashboard, label: 'Templates', onTap: () => push(context, TemplatesScreen(api: api), closeDrawer: !permanent)),
-                  SidebarSection(title: 'COMMUNICATION'),
+                  const SidebarSection(title: 'COMMUNICATION'),
                   SidebarItem(icon: Icons.mail_outline, label: 'Messages clients', onTap: () => push(context, MessagesScreen(api: api))),
                   SidebarItem(
                     icon: Icons.notifications_outlined,

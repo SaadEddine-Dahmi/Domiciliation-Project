@@ -77,11 +77,13 @@ class DashboardController extends Controller
                         ->whereNotNull('date_expiration')
                         ->whereDate('date_expiration', '<', now()->toDateString())
                         ->count(), 0),
-                    'factures_overdue' => $this->safeMetric('domiciliataire.factures_overdue', fn() => $tenantFactures()
-                        ->whereNotIn('statut', ['paid', 'cancelled'])
-                        ->whereNotNull('date_echeance')
-                        ->whereDate('date_echeance', '<', now()->toDateString())
-                        ->count(), 0),
+                    'factures_overdue' => $this->safeMetric('domiciliataire.factures_overdue', fn() => $this->facturesHaveDateEcheance()
+                        ? $tenantFactures()
+                            ->whereNotIn('statut', ['paid', 'cancelled'])
+                            ->whereNotNull('date_echeance')
+                            ->whereDate('date_echeance', '<', now()->toDateString())
+                            ->count()
+                        : 0, 0),
                     'factures_partial' => $this->safeMetric('domiciliataire.factures_partial', fn() => $tenantFactures()
                         ->whereHas('paiements')
                         ->whereNotIn('statut', ['paid', 'cancelled'])
@@ -165,15 +167,28 @@ class DashboardController extends Controller
         }
     }
 
+    private function facturesHaveDateEcheance(): bool
+    {
+        try {
+            return Schema::hasColumn('factures', 'date_echeance');
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
     private function clientTimeline(Entreprise $entreprise): Collection
     {
         $items = collect();
+
+        $factureColumns = $this->facturesHaveDateEcheance()
+            ? 'factures:id,entreprise_id,numero_facture,montant_total,statut,date_facture,date_echeance,created_at'
+            : 'factures:id,entreprise_id,numero_facture,montant_total,statut,date_facture,created_at';
 
         $entreprise->loadMissing([
             'contrats:id,entreprise_id,titre_contrat,statut,date_debut,date_fin,created_at',
             'documents:id,entreprise_id,document_type_id,date_expiration,created_at',
             'documents.documentType:id,name',
-            'factures:id,entreprise_id,numero_facture,montant_total,statut,date_facture,date_echeance,created_at',
+            $factureColumns,
         ]);
 
         foreach ($entreprise->contrats as $contrat) {

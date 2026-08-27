@@ -2,6 +2,7 @@
 
 namespace Tests\Feature\Representant;
 
+use App\Models\Representant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Tests\TestCase;
@@ -28,10 +29,16 @@ class DomiciliataireProfileTest extends TestCase
     {
         $user = User::factory()->create(['role' => 'domiciliataire']);
 
+        Representant::create([
+            'representable_id' => $user->id,
+            'representable_type' => User::class,
+            'nom' => 'Dupont',
+            'prenom' => 'Jean',
+            'cin' => 'AB123456',
+        ]);
+
         $payload = [
             'nom_societe' => 'Ma Société de Domiciliation',
-            'representant_legal' => 'Jean Dupont',
-            'identite_representant' => 'AB123456',
             'rc' => '123456',
             'if_fiscal' => '789012',
             'tp' => '345678',

@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+node_modules/
+.nuxt/
+.output/
+.data/
+.nitro/
+.cache/
+dist/
+coverage/
+*.log

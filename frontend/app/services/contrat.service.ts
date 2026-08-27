@@ -22,13 +22,17 @@ function getApiBase(): string {
     return (config.public.apiBase as string) ?? ''
 }
 
+function isClientRuntime(): boolean {
+    return import.meta.client || typeof window !== 'undefined'
+}
+
 /**
  * Build the Authorization header from localStorage.
  * Key: 'app_auth' — written by AuthController on successful login.
  * Returns {} when called server-side or when the token is missing.
  */
 function authHeaders(): Record<string, string> {
-    if (!import.meta.client) return {}
+    if (!isClientRuntime()) return {}
     try {
         const raw = localStorage.getItem('app_auth')
         if (!raw) return {}
@@ -46,7 +50,7 @@ function authHeaders(): Record<string, string> {
  * since a browser <iframe>/<a> cannot attach an Authorization header.
  */
 function getToken(): string {
-    if (!import.meta.client) return ''
+    if (!isClientRuntime()) return ''
     try {
         return JSON.parse(localStorage.getItem('app_auth') ?? '{}')?.token ?? ''
     } catch { return '' }
@@ -173,6 +177,13 @@ export const contratService = {
     async renew(id: string): Promise<ApiSuccess<ContratEntity>> {
         return await $fetch(`${getApiBase()}/api/contrats/${id}/renew`, {
             method: 'POST', headers: authHeaders(),
+        })
+    },
+
+    /** DELETE /api/contrats/{id} - remove a draft contract */
+    async deleteDraft(id: string): Promise<{ success: boolean; message?: string }> {
+        return await $fetch(`${getApiBase()}/api/contrats/${id}`, {
+            method: 'DELETE', headers: authHeaders(),
         })
     },
 

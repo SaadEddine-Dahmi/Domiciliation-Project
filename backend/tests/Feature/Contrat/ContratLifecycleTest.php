@@ -38,7 +38,8 @@ class ContratLifecycleTest extends TestCase
         ]);
 
         Representant::create([
-            'entreprise_id' => $entreprise->id,
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
             'nom'           => 'Gerant',
             'cin'           => 'XY123456',
         ]);
@@ -74,7 +75,7 @@ class ContratLifecycleTest extends TestCase
 
         $res->assertCreated();
         $this->assertEquals(
-            'Convention de Domiciliation ',
+            'Convention de Domiciliation',
             $res->json('data.titre_contrat')
         );
     }
@@ -127,8 +128,8 @@ class ContratLifecycleTest extends TestCase
         ]);
     }
 
-    /** Flat array of IDs (not objects) is also accepted by syncArticles(). */
-    public function test_articles_flat_id_array_accepted(): void
+    /** Articles must be sent as objects so the order can be validated explicitly. */
+    public function test_articles_flat_id_array_is_rejected(): void
     {
         [$tenant, $entreprise, $article1] = $this->setupTenantClientArticles();
 
@@ -140,11 +141,8 @@ class ContratLifecycleTest extends TestCase
             'articles'      => [(string) $article1->id],
         ]);
 
-        $res->assertCreated();
-        $this->assertDatabaseHas('contrat_articles', [
-            'contrat_id' => $res->json('data.id'),
-            'article_id' => $article1->id,
-        ]);
+        $res->assertStatus(422)
+            ->assertJsonValidationErrors(['articles.0.id']);
     }
 
     public function test_create_contract_requires_signature_fields(): void
@@ -335,6 +333,91 @@ class ContratLifecycleTest extends TestCase
             ->assertOk();
 
         $this->assertNull($contrat->fresh()->archived_at);
+    }
+
+    public function test_draft_contract_can_be_deleted_with_articles_detached(): void
+    {
+        [$tenant, $entreprise, $article1, $article2] = $this->setupTenantClientArticles();
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'ville_signature' => 'Agadir',
+            'date_signature' => now()->toDateString(),
+            'statut' => 'draft',
+        ]);
+        $contrat->articles()->sync([
+            $article1->id => ['ordre' => 1],
+            $article2->id => ['ordre' => 2],
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->deleteJson("/api/contrats/{$contrat->id}")
+            ->assertOk()
+            ->assertJsonPath('success', true)
+            ->assertJsonPath('message', 'Brouillon supprimé.');
+
+        $this->assertDatabaseMissing('contrats', ['id' => $contrat->id]);
+        $this->assertDatabaseMissing('contrat_articles', ['contrat_id' => $contrat->id]);
+    }
+
+    public function test_active_contract_cannot_be_deleted(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'statut' => 'active',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->deleteJson("/api/contrats/{$contrat->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('success', false);
+
+        $this->assertDatabaseHas('contrats', ['id' => $contrat->id]);
+    }
+
+    public function test_legalised_contract_cannot_be_deleted_even_when_draft(): void
+    {
+        [$tenant, $entreprise] = $this->setupTenantClientArticles();
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'statut' => 'draft',
+            'scanned_pdf_path' => 'contrats/signed/demo.pdf',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')
+            ->deleteJson("/api/contrats/{$contrat->id}")
+            ->assertStatus(422)
+            ->assertJsonPath('message', 'Ce contrat est légalisé et ne peut pas être supprimé.');
+
+        $this->assertDatabaseHas('contrats', ['id' => $contrat->id]);
+    }
+
+    public function test_contract_delete_is_tenant_scoped(): void
+    {
+        [$tenantA, $entrepriseA] = $this->setupTenantClientArticles();
+        $tenantB = User::factory()->create(['role' => 'domiciliataire']);
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenantA->id,
+            'entreprise_id' => $entrepriseA->id,
+            'date_debut' => now(),
+            'statut' => 'draft',
+        ]);
+
+        $this->actingAs($tenantB, 'sanctum')
+            ->deleteJson("/api/contrats/{$contrat->id}")
+            ->assertStatus(404);
+
+        $this->assertDatabaseHas('contrats', ['id' => $contrat->id]);
     }
 
     /** A tenant cannot view/edit another tenant's contract (IDOR). */

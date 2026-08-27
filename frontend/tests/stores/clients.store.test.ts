@@ -109,22 +109,23 @@ describe('Clients Store', () => {
 
     // ── updatePassword ────────────────────────────────────────
 
-    it('updatePassword calls correct endpoint with PUT method', async () => {
+    it('resetPassword calls regenerate endpoint and returns generated password', async () => {
         const store = useClientsStore()
-        const fetchMock = vi.fn().mockResolvedValue({})
+        const fetchMock = vi.fn().mockResolvedValue({
+            success: true,
+            message: 'Mot de passe régénéré.',
+            generated_password: 'newpass123',
+        })
         vi.stubGlobal('$fetch', fetchMock)
 
-        await store.updatePassword(1, 'newpass123', 'newpass123')
+        const password = await store.resetPassword(1)
 
         expect(fetchMock).toHaveBeenCalledWith(
-            expect.stringContaining('/api/clients/1/password'),
+            expect.stringContaining('/api/clients/1/regenerate-password'),
             expect.objectContaining({
-                method: 'PUT',
-                body: {
-                    password: 'newpass123',
-                    password_confirmation: 'newpass123',
-                },
+                method: 'POST',
             })
         )
+        expect(password).toBe('newpass123')
     })
 })

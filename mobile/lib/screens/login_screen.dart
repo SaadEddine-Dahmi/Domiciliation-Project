@@ -89,8 +89,8 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 18),
                 PremiumButton(onPressed: submit, loading: loading, icon: Icons.login_rounded, label: loading ? 'Connexion...' : 'Se connecter'),
                 const SizedBox(height: 32),
-                Row(
-                  children: const [
+                const Row(
+                  children: [
                     Expanded(child: Divider()),
                     Padding(padding: EdgeInsets.symmetric(horizontal: 12), child: Text('Pas encore de compte ?', style: TextStyle(color: AppColors.muted))),
                     Expanded(child: Divider()),

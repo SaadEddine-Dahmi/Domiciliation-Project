@@ -37,7 +37,11 @@ class RepresentantTest extends TestCase
             ]);
 
         $res->assertCreated();
-        $this->assertDatabaseHas('representants', ['entreprise_id' => $entreprise->id, 'cin' => 'BJ422176']);
+        $this->assertDatabaseHas('representants', [
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
+            'cin' => 'BJ422176',
+        ]);
     }
 
     /** Cannot create a second representant for the same entreprise (1-to-1 enforced). */
@@ -46,7 +50,8 @@ class RepresentantTest extends TestCase
         [$tenant, $entreprise] = $this->tenantWithEntreprise();
 
         Representant::create([
-            'entreprise_id' => $entreprise->id,
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
             'nom' => 'First',
             'cin' => 'AA111111',
         ]);
@@ -65,7 +70,8 @@ class RepresentantTest extends TestCase
         [$tenant, $entreprise] = $this->tenantWithEntreprise();
 
         $rep = Representant::create([
-            'entreprise_id' => $entreprise->id,
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
             'nom' => 'Original',
             'cin' => 'CC333333',
         ]);
@@ -88,7 +94,8 @@ class RepresentantTest extends TestCase
     {
         [$tenant, $entreprise] = $this->tenantWithEntreprise();
         Representant::create([
-            'entreprise_id' => $entreprise->id,
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
             'nom' => 'Gerant',
             'cin' => 'DD444444',
         ]);

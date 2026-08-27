@@ -210,7 +210,7 @@ class _ArticleEditorScreenState extends State<ArticleEditorScreen> {
   }
 
   void insertVariable(String key) {
-    final tag = '{{${key}}}';
+    final tag = '{{$key}}';
     final selection = body.selection;
     final text = body.text;
     final start = selection.isValid ? selection.start : text.length;
@@ -336,8 +336,8 @@ class VariablePicker extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: const [
+        const Row(
+          children: [
             Expanded(child: Text('Variables disponibles', style: TextStyle(fontWeight: FontWeight.w900))),
             Text('Touchez pour inserer', style: TextStyle(color: AppColors.soft, fontSize: 12)),
           ],

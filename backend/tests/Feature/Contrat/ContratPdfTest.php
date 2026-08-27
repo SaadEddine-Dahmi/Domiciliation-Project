@@ -28,7 +28,12 @@ class ContratPdfTest extends TestCase
             'domiciliataire_id' => $tenant->id,
             'raison_sociale' => 'CLIENT SARL',
         ]);
-        Representant::create(['entreprise_id' => $entreprise->id, 'nom' => 'Gerant', 'cin' => 'AB123']);
+        Representant::create([
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
+            'nom' => 'Gerant',
+            'cin' => 'AB123',
+        ]);
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
@@ -39,8 +44,9 @@ class ContratPdfTest extends TestCase
 
         $this->get("/api/contrats/{$contrat->id}/pdf/stream")->assertStatus(401);
 
-        $res = $this->actingAs($tenant, 'sanctum')
-            ->get("/api/contrats/{$contrat->id}/pdf/stream");
+        $token = $tenant->createToken('pdf-test')->plainTextToken;
+
+        $res = $this->get("/api/contrats/{$contrat->id}/pdf/stream?token={$token}");
 
         $res->assertOk();
         $res->assertHeader('Content-Type', 'application/pdf');
@@ -56,7 +62,8 @@ class ContratPdfTest extends TestCase
             'raison_sociale' => 'CLIENT SARL',
         ]);
         Representant::create([
-            'entreprise_id' => $entreprise->id,
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
             'nom' => 'ElJadiani',
             'prenom' => 'Youssef',
             'cin' => 'ZZ999999',
@@ -80,14 +87,15 @@ class ContratPdfTest extends TestCase
         ]);
         $contrat->articles()->sync([$article->id => ['ordre' => 1]]);
 
-        $res = $this->actingAs($tenant, 'sanctum')
-            ->get("/api/contrats/{$contrat->id}/pdf/stream");
+        $token = $tenant->createToken('pdf-test')->plainTextToken;
+
+        $res = $this->get("/api/contrats/{$contrat->id}/pdf/stream?token={$token}");
 
         $res->assertOk();
         $this->assertGreaterThan(500, strlen($res->getContent()));
     }
 
-    public function test_generate_pdf_saves_to_disk_and_updates_path(): void
+    public function test_stream_pdf_returns_signed_file_when_contract_is_legalised(): void
     {
         \Illuminate\Support\Facades\Storage::fake('public');
 
@@ -98,22 +106,29 @@ class ContratPdfTest extends TestCase
             'domiciliataire_id' => $tenant->id,
             'raison_sociale' => 'CLIENT SARL',
         ]);
-        Representant::create(['entreprise_id' => $entreprise->id, 'nom' => 'Gerant', 'cin' => 'AB123']);
+        Representant::create([
+            'representable_id' => $entreprise->id,
+            'representable_type' => Entreprise::class,
+            'nom' => 'Gerant',
+            'cin' => 'AB123',
+        ]);
 
         $contrat = Contrat::create([
             'domiciliataire_id' => $tenant->id,
             'entreprise_id' => $entreprise->id,
             'date_debut' => now(),
+            'scanned_pdf_path' => 'contrats/signed/contract.pdf',
         ]);
 
-        $res = $this->actingAs($tenant, 'sanctum')
-            ->postJson("/api/contrats/{$contrat->id}/pdf");
+        \Illuminate\Support\Facades\Storage::disk('public')
+            ->put('contrats/signed/contract.pdf', '%PDF-1.4 signed content');
 
-        $res->assertOk()->assertJson(['success' => true]);
+        $token = $tenant->createToken('pdf-test')->plainTextToken;
 
-        $path = $res->json('data.pdf_path');
-        \Illuminate\Support\Facades\Storage::disk('public')->assertExists($path);
+        $res = $this->get("/api/contrats/{$contrat->id}/pdf/stream?token={$token}&mode=download");
 
-        $this->assertDatabaseHas('contrats', ['id' => $contrat->id, 'pdf_path' => $path]);
+        $res->assertOk();
+        $this->assertSame('%PDF-1.4 signed content', $res->getContent());
+        $this->assertStringContainsString('attachment', $res->headers->get('Content-Disposition'));
     }
 }

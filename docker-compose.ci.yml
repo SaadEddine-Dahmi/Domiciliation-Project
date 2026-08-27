@@ -1,0 +1,39 @@
+services:
+  postgres-test:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: domiciliation_test
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: "123"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d domiciliation_test"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend-test:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.ci
+    depends_on:
+      postgres-test:
+        condition: service_healthy
+    environment:
+      APP_NAME: Laravel
+      APP_ENV: testing
+      APP_KEY: base64:UVxh+5eU8XCTasKjUNLVV0rkNjqU8c4imVpKY3eM460=
+      APP_DEBUG: "true"
+      APP_URL: http://localhost
+      FRONTEND_URL: http://localhost:3000
+      LOG_CHANNEL: stderr
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres-test
+      DB_PORT: 5432
+      DB_DATABASE: domiciliation_test
+      DB_USERNAME: postgres
+      DB_PASSWORD: "123"
+      CACHE_STORE: array
+      SESSION_DRIVER: array
+      QUEUE_CONNECTION: sync
+      MAIL_MAILER: array
+      FILESYSTEM_DISK: local
