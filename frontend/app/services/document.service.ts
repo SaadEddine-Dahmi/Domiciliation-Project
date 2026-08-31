@@ -1,5 +1,13 @@
-// Documents service: upload/import and assign to entreprise
-export interface ApiSuccess<T> { success: boolean; data: T; message?: string }
+// app/services/document.service.ts
+// Calls document metadata, upload, preview, and download endpoints.
+
+import { apiBase } from '~/services/http'
+
+export interface ApiSuccess<T> {
+  success: boolean
+  data: T
+  message?: string
+}
 
 export interface DocumentEntity {
   id: number
@@ -11,17 +19,9 @@ export interface DocumentEntity {
   previous_version_id?: number
 }
 
-// Same base-URL / token pattern as contrat.service.ts's streamPdfUrl() —
-// duplicated here rather than shared because that's how the existing
-// services in this codebase already do it (see contrat.service.ts's own
-// comment on authHeaders()/getToken()).
-function getApiBase(): string {
-  const config = useRuntimeConfig()
-  return (config.public.apiBase as string) ?? ''
-}
-
 function getToken(): string {
-  if (!import.meta.client) return ''
+  if (!import.meta.client && typeof window === 'undefined') return ''
+
   try {
     return JSON.parse(localStorage.getItem('app_auth') ?? '{}')?.token ?? ''
   } catch {
@@ -29,27 +29,19 @@ function getToken(): string {
   }
 }
 
+function streamUrl(id: number, action: 'preview' | 'download'): string {
+  return `${apiBase()}/api/documents/${id}/${action}?token=${encodeURIComponent(getToken())}`
+}
+
 export const documentService = {
   list: (entreprise_id?: number) =>
     $fetch<ApiSuccess<DocumentEntity[]>>('/api/documents', {
-      query: entreprise_id ? { entreprise_id } : undefined,
+      query: { ...(entreprise_id ? { entreprise_id } : {}), per_page: 100 },
     }),
 
-  /**
-   * Builds the URL for DocumentController::preview() — inline view of the
-   * file (PDF renders in the browser's viewer, images render directly).
-   * A browser can't attach an Authorization header to a direct
-   * navigation, <iframe src>, or window.open() target, so the token
-   * travels as a query param instead (see
-   * DocumentController::authenticateViaToken()). Safe to use straight in
-   * an <iframe>, an <img>, or window.open().
-   */
-  previewUrl: (id: number): string =>
-    `${getApiBase()}/api/documents/${id}/preview?token=${encodeURIComponent(getToken())}`,
+  previewUrl: (id: number): string => streamUrl(id, 'preview'),
 
-  /** Same idea, but hits DocumentController::download() — forces a save-as instead of an inline view. */
-  downloadUrl: (id: number): string =>
-    `${getApiBase()}/api/documents/${id}/download?token=${encodeURIComponent(getToken())}`,
+  downloadUrl: (id: number): string => streamUrl(id, 'download'),
 
   upload: async (payload: {
     entreprise_id: number
@@ -58,16 +50,16 @@ export const documentService = {
     previous_version_id?: number
     file: File
   }) => {
-    const fd = new FormData()
-    fd.append('entreprise_id', String(payload.entreprise_id))
-    fd.append('document_type_id', String(payload.document_type_id))
-    if (payload.date_expiration) fd.append('date_expiration', payload.date_expiration)
-    if (payload.previous_version_id) fd.append('previous_version_id', String(payload.previous_version_id))
-    fd.append('file', payload.file)
+    const formData = new FormData()
+    formData.append('entreprise_id', String(payload.entreprise_id))
+    formData.append('document_type_id', String(payload.document_type_id))
+    if (payload.date_expiration) formData.append('date_expiration', payload.date_expiration)
+    if (payload.previous_version_id) formData.append('previous_version_id', String(payload.previous_version_id))
+    formData.append('file', payload.file)
 
     return await $fetch<ApiSuccess<DocumentEntity>>('/api/documents', {
       method: 'POST',
-      body: fd,
+      body: formData,
     })
   },
 

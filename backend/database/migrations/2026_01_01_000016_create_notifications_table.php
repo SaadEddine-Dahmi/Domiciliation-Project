@@ -59,6 +59,8 @@ return new class extends Migration
             $table->index('alert_id');
             $table->index('contrat_id');
             $table->index('is_read');
+            $table->index(['user_id', 'from_user_id', 'created_at']);
+            $table->index(['user_id', 'is_read', 'from_user_id']);
         });
     }
 

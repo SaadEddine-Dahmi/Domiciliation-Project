@@ -1,4 +1,6 @@
 <?php
+// app/Models/Entreprise.php
+// Represents a client company owned by a domiciliataire tenant.
 
 namespace App\Models;
 
@@ -7,12 +9,6 @@ use App\Models\Concerns\HasRepresentant;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 
-/**
- * A client company being domiciled. Its legal identity (raison_sociale,
- * forme_juridique, adresse...) lives here; its legal representative's
- * personal identity (CIN, nom, DOB...) lives in the polymorphic
- * Representant relation via HasRepresentant — never duplicated here.
- */
 class Entreprise extends Model
 {
     use HasFactory, BelongsToTenant, HasRepresentant;
@@ -27,15 +23,13 @@ class Entreprise extends Model
         'pays',
         'capital',
         'date_creation',
-        'statut', // 'actif' | 'inactif' — controls client portal access, see AuthController::login()
+        'statut',
     ];
 
     protected $casts = [
         'date_creation' => 'date',
         'capital' => 'decimal:2',
     ];
-
-    // ── Relations ──────────────────────────────────────────
 
     public function domiciliataire()
     {
@@ -52,9 +46,6 @@ class Entreprise extends Model
         return $this->hasMany(EntrepriseHistory::class, 'entreprise_id')
             ->orderByDesc('created_at');
     }
-
-    // representant() is provided by HasRepresentant:
-    //   morphOne(Representant::class, 'representable')
 
     public function contrats()
     {
@@ -76,8 +67,7 @@ class Entreprise extends Model
         return $this->hasMany(Facture::class);
     }
 
-    // ── Audit trail hook ───────────────────────────────────
-
+    // Records compact history snapshots for account history exports.
     protected static function booted(): void
     {
         static::updating(function (Entreprise $entreprise) {
@@ -105,8 +95,6 @@ class Entreprise extends Model
             ]);
         });
     }
-
-    // ── Helpers ────────────────────────────────────────────
 
     public function isActiveForClient(): bool
     {

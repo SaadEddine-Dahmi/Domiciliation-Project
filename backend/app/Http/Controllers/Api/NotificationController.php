@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\UsesApiPagination;
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
 use App\Support\DatabaseErrorHelper;
@@ -9,17 +10,19 @@ use Illuminate\Http\Request;
 
 class NotificationController extends Controller
 {
+    use UsesApiPagination;
+
     // Lists system notifications for the authenticated user (excludes
     // direct messages, which have their own endpoint via MessageController).
-    public function index()
+    public function index(Request $request)
     {
         $rows = AppNotification::query()
             ->where('user_id', auth()->id())
             ->whereNull('from_user_id')
             ->latest()
-            ->get();
+            ->paginate($this->perPage($request));
 
-        return response()->json(['success' => true, 'data' => $rows]);
+        return response()->json($this->paginatedResponse($rows));
     }
 
     public function unreadCount()

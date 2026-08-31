@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\UsesApiPagination;
 use App\Http\Controllers\Controller;
 use App\Models\AppNotification;
 use App\Models\Entreprise;
@@ -9,8 +10,10 @@ use Illuminate\Http\Request;
 
 class MessageController extends Controller
 {
+    use UsesApiPagination;
+
     // Lists direct messages visible to the current user: sent OR received.
-    public function index()
+    public function index(Request $request)
     {
         $user = auth()->user();
 
@@ -25,12 +28,10 @@ class MessageController extends Controller
                 'toUser:id,nom,prenom,email',
             ])
             ->latest()
-            ->get();
+            ->paginate($this->perPage($request))
+            ->through(fn(AppNotification $message) => $this->formatMessage($message));
 
-        return response()->json([
-            'success' => true,
-            'data' => $messages->map(fn(AppNotification $message) => $this->formatMessage($message))->values(),
-        ]);
+        return response()->json($this->paginatedResponse($messages));
     }
 
     // Sends a direct message from a domiciliataire to one of their

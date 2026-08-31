@@ -43,6 +43,9 @@ return new class extends Migration
             $table->index('statut');
             $table->index('date_facture');
             $table->index('archived_at');
+            $table->index(['domiciliataire_id', 'created_at']);
+            $table->index(['domiciliataire_id', 'archived_at']);
+            $table->index(['domiciliataire_id', 'statut']);
         });
     }
 

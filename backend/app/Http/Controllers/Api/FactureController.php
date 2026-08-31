@@ -1,105 +1,59 @@
 <?php
 // app/Http/Controllers/Api/FactureController.php
-//
-// Access to invoices: listing, PDF generation, archive/restore, and deletion.
-// Invoices themselves are only ever created by PaiementController::store(),
-// which enforces that montant never exceeds the contract's remaining balance
-// (see remainingBalance() there) — this controller does not duplicate that
-// check since it never writes a Facture row.
+// Manages tenant-scoped invoice listing, PDFs, archive, restore, and deletion.
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\AuthorizesApiRoles;
+use App\Http\Controllers\Concerns\UsesApiPagination;
 use App\Http\Controllers\Controller;
 use App\Models\Facture;
+use App\Models\User;
+use App\Services\Auth\QueryTokenAuthenticator;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Laravel\Sanctum\PersonalAccessToken;
 
 class FactureController extends Controller
 {
-    // ── Private helpers ────────────────────────────────────────────────────────
+    use AuthorizesApiRoles;
+    use UsesApiPagination;
 
-    /**
-     * Resolve a user from a ?token= query param.
-     *
-     * Required for PDF endpoints opened directly in the browser or an
-     * <iframe>/<a href> — those requests cannot carry an Authorization header.
-     */
-    private function authenticateViaToken(Request $request): ?\App\Models\User
+    public function __construct(private readonly QueryTokenAuthenticator $queryTokens)
     {
-        $value = $request->query('token');
-        if (!$value)
-            return null;
-
-        $token = PersonalAccessToken::findToken($value);
-        if (!$token)
-            return null;
-        if ($token->expires_at && $token->expires_at->isPast())
-            return null;
-
-        return $token->tokenable;
     }
 
-    /**
-     * Resolve an invoice by ID, tenant-scoped to the given user, with all
-     * relations needed for PDF rendering eager-loaded.
-     */
-    private function resolveFacture(int $id, \App\Models\User $user): ?Facture
-    {
-        if ($user->role !== 'domiciliataire') {
-            return null;
-        }
-
-        return Facture::with(['entreprise', 'contrat', 'domiciliataire', 'paiements'])
-            ->where('domiciliataire_id', $user->id)
-            ->find($id);
-    }
-
-    // ── Index ──────────────────────────────────────────────────────────────────
-
-    /**
-     * GET /api/factures
-     *
-     * Lists invoices for the authenticated domiciliataire, newest first, with
-     * the fields the invoices list page needs already eager-loaded.
-     * Archived invoices are hidden unless ?include_archived=1 is sent.
-     */
     public function index(Request $request)
     {
-        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessRole($user, 'domiciliataire', 'Accès interdit : les factures appartiennent aux domiciliataires.')) {
             return $blocked;
         }
 
-        $tenantId = auth()->id();
-
         $factures = Facture::query()
-            ->where('domiciliataire_id', $tenantId)
-            ->when(!$request->boolean('include_archived'), fn($q) => $q->whereNull('archived_at'))
+            ->where('domiciliataire_id', $user->id)
+            ->when(!$request->boolean('include_archived'), fn($query) => $query->whereNull('archived_at'))
             ->with([
                 'entreprise:id,raison_sociale,adresse,ville,pays,forme_juridique',
                 'contrat:id,date_debut,date_fin,statut,prix_total',
-                'paiements',
             ])
+            ->withSum('paiements as total_paye_raw', 'montant')
             ->latest()
-            ->get();
+            ->paginate($this->perPage($request));
 
-        return response()->json([
-            'success' => true,
-            'data' => $factures->map(fn(Facture $facture) => $this->formatFacture($facture))->values(),
-        ]);
+        return response()->json($this->paginatedResponse(
+            $factures->through(fn(Facture $facture) => $this->formatFacture($facture))
+        ));
     }
 
-    /**
-     * POST /api/factures/{id}/archive
-     */
     public function archive(int $id)
     {
-        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessRole($user, 'domiciliataire', 'Accès interdit : les factures appartiennent aux domiciliataires.')) {
             return $blocked;
         }
 
-        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+        $facture = Facture::where('domiciliataire_id', $user->id)->findOrFail($id);
         $facture->forceFill(['archived_at' => now()])->save();
 
         return response()->json([
@@ -109,16 +63,14 @@ class FactureController extends Controller
         ]);
     }
 
-    /**
-     * POST /api/factures/{id}/restore
-     */
     public function restore(int $id)
     {
-        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessRole($user, 'domiciliataire', 'Accès interdit : les factures appartiennent aux domiciliataires.')) {
             return $blocked;
         }
 
-        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+        $facture = Facture::where('domiciliataire_id', $user->id)->findOrFail($id);
         $facture->forceFill(['archived_at' => null])->save();
 
         return response()->json([
@@ -128,47 +80,26 @@ class FactureController extends Controller
         ]);
     }
 
-    /**
-     * DELETE /api/factures/{id}
-     *
-     * A facture created from a payment owns that payment row in this app's
-     * workflow, so deletion removes child paiements first to satisfy the
-     * restrict-on-delete foreign key.
-     */
     public function destroy(int $id)
     {
-        if ($blocked = $this->denyUnlessDomiciliataire(auth()->user())) {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessRole($user, 'domiciliataire', 'Accès interdit : les factures appartiennent aux domiciliataires.')) {
             return $blocked;
         }
 
-        $facture = Facture::where('domiciliataire_id', auth()->id())->findOrFail($id);
+        $facture = Facture::where('domiciliataire_id', $user->id)->findOrFail($id);
 
         DB::transaction(function () use ($facture) {
             $facture->paiements()->delete();
             $facture->delete();
         });
 
-        return response()->json([
-            'success' => true,
-            'message' => 'Facture supprimée.',
-        ]);
+        return response()->json(['success' => true, 'message' => 'Facture supprimée.']);
     }
 
-    // ── PDF ────────────────────────────────────────────────────────────────────
-
-    /**
-     * GET /api/factures/{id}/pdf?token=xxx&mode=preview|download
-     *
-     * Generates the invoice PDF. Auth is via ?token= query param (not the
-     * Authorization header) because this URL is opened directly in a browser
-     * tab or <iframe>.
-     *
-     *   ?mode=preview  (default) → inline, opens in the tab/iframe
-     *   ?mode=download            → attachment, triggers a file download
-     */
     public function pdf(Request $request, int $id)
     {
-        $user = $this->authenticateViaToken($request);
+        $user = $this->queryTokens->userFromRequest($request);
         if (!$user) {
             return response()->json(['message' => 'Non authentifié.'], 401);
         }
@@ -188,41 +119,44 @@ class FactureController extends Controller
         ])->setPaper('a4', 'portrait');
 
         $filename = 'facture-' . ($facture->numero_facture ?? $facture->id) . '.pdf';
-        $mode = $request->query('mode', 'preview');
 
-        if ($mode === 'download') {
-            return $pdf->download($filename);
+        return $request->query('mode', 'preview') === 'download'
+            ? $pdf->download($filename)
+            : $pdf->stream($filename);
+    }
+
+    private function resolveFacture(int $id, User $user): ?Facture
+    {
+        if ($user->role !== 'domiciliataire') {
+            return null;
         }
 
-        return $pdf->stream($filename);
-    }
-
-    private function forbiddenTenantResource(): \Illuminate\Http\JsonResponse
-    {
-        return response()->json([
-            'success' => false,
-            'message' => "Accès interdit : les factures appartiennent aux domiciliataires.",
-        ], 403);
-    }
-
-    private function denyUnlessDomiciliataire(?\App\Models\User $user): ?\Illuminate\Http\JsonResponse
-    {
-        return $user?->role === 'domiciliataire'
-            ? null
-            : $this->forbiddenTenantResource();
+        return Facture::with(['entreprise', 'contrat', 'domiciliataire', 'paiements'])
+            ->where('domiciliataire_id', $user->id)
+            ->find($id);
     }
 
     private function formatFacture(Facture $facture): array
     {
         $total = (float) $facture->montant_total;
-        $paid = (float) $facture->paiements->sum('montant');
+        $paid = (float) ($facture->total_paye_raw ?? $facture->paiements->sum('montant'));
         $remaining = max($total - $paid, 0);
         $isOverdue = $remaining > 0
             && $facture->date_echeance
             && $facture->date_echeance->isPast()
             && !$facture->archived_at;
 
-        $effectiveStatus = match (true) {
+        return array_merge($facture->toArray(), [
+            'total_paye' => number_format($paid, 2, '.', ''),
+            'montant_restant' => number_format($remaining, 2, '.', ''),
+            'is_overdue' => $isOverdue,
+            'effective_statut' => $this->effectiveStatus($facture, $paid, $remaining, $isOverdue),
+        ]);
+    }
+
+    private function effectiveStatus(Facture $facture, float $paid, float $remaining, bool $isOverdue): string
+    {
+        return match (true) {
             (bool) $facture->archived_at => 'archived',
             $facture->statut === 'cancelled' => 'cancelled',
             $remaining <= 0 => 'paid',
@@ -230,12 +164,5 @@ class FactureController extends Controller
             $isOverdue => 'overdue',
             default => 'unpaid',
         };
-
-        return array_merge($facture->toArray(), [
-            'total_paye' => number_format($paid, 2, '.', ''),
-            'montant_restant' => number_format($remaining, 2, '.', ''),
-            'is_overdue' => $isOverdue,
-            'effective_statut' => $effectiveStatus,
-        ]);
     }
 }

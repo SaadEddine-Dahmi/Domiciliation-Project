@@ -147,6 +147,7 @@ describe('contratService', () => {
 
     expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/contrats', {
       headers: {},
+      query: { per_page: 100 },
     })
   })
 })

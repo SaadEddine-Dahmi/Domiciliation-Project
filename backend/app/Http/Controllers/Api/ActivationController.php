@@ -1,7 +1,10 @@
 <?php
+// app/Http/Controllers/Api/ActivationController.php
+// Handles admin approval and rejection of pending tenant accounts.
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\AuthorizesApiRoles;
 use App\Http\Controllers\Controller;
 use App\Models\User;
 use App\Services\ActivationService;
@@ -9,16 +12,16 @@ use Illuminate\Http\Request;
 
 class ActivationController extends Controller
 {
-    public function __construct(private ActivationService $service)
+    use AuthorizesApiRoles;
+
+    public function __construct(private readonly ActivationService $service)
     {
     }
 
-    // Lists all domiciliataire accounts awaiting admin approval,
-    // newest first. Admin-only.
     public function pending()
     {
-        if (auth()->user()->role !== 'admin') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole(auth()->user(), 'admin')) {
+            return $blocked;
         }
 
         $users = User::where('status', 'pending')
@@ -29,56 +32,54 @@ class ActivationController extends Controller
         return response()->json(['success' => true, 'data' => $users]);
     }
 
-    // Approves a pending domiciliataire account with a future-or-today
-    // activation date. Rejects if the account isn't actually pending
-    // or isn't a domiciliataire, preventing re-approval or misuse on
-    // clients/admins.
     public function approve(Request $request, int $id)
     {
-        if (auth()->user()->role !== 'admin') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole(auth()->user(), 'admin')) {
+            return $blocked;
         }
 
-        $request->validate([
+        $data = $request->validate([
             'activation_date' => ['required', 'date', 'after_or_equal:today'],
         ]);
 
         $user = User::findOrFail($id);
-
-        if ($user->status !== 'pending' || $user->role !== 'domiciliataire') {
-            return response()->json([
-                'message' => 'Ce compte ne peut pas être approuvé. Statut actuel : ' . $user->status,
-            ], 422);
+        if ($blocked = $this->denyInvalidPendingAccount($user, 'approuvé')) {
+            return $blocked;
         }
 
-        $this->service->approve($user, $request->activation_date);
+        $this->service->approve($user, $data['activation_date']);
 
         return response()->json(['success' => true, 'message' => 'Compte approuvé.']);
     }
 
-    // Rejects a pending domiciliataire account with a required reason.
-    // Same guard as approve() — only pending domiciliataire accounts
-    // can be rejected.
     public function reject(Request $request, int $id)
     {
-        if (auth()->user()->role !== 'admin') {
-            return response()->json(['message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole(auth()->user(), 'admin')) {
+            return $blocked;
         }
 
-        $request->validate([
+        $data = $request->validate([
             'reason' => ['required', 'string', 'max:500'],
         ]);
 
         $user = User::findOrFail($id);
-
-        if ($user->status !== 'pending' || $user->role !== 'domiciliataire') {
-            return response()->json([
-                'message' => 'Ce compte ne peut pas être rejeté. Statut actuel : ' . $user->status,
-            ], 422);
+        if ($blocked = $this->denyInvalidPendingAccount($user, 'rejeté')) {
+            return $blocked;
         }
 
-        $this->service->reject($user, $request->reason);
+        $this->service->reject($user, $data['reason']);
 
         return response()->json(['success' => true, 'message' => 'Compte rejeté.']);
+    }
+
+    private function denyInvalidPendingAccount(User $user, string $action): ?\Illuminate\Http\JsonResponse
+    {
+        if ($user->status === 'pending' && $user->role === 'domiciliataire') {
+            return null;
+        }
+
+        return response()->json([
+            'message' => "Ce compte ne peut pas être {$action}. Statut actuel : {$user->status}",
+        ], 422);
     }
 }

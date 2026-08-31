@@ -41,6 +41,8 @@ return new class extends Migration {
             $table->index('client_user_id');
             $table->index('raison_sociale');
             $table->index('statut');
+            $table->index(['domiciliataire_id', 'created_at']);
+            $table->index(['domiciliataire_id', 'statut']);
         });
     }
 

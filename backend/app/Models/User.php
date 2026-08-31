@@ -1,4 +1,6 @@
 <?php
+// app/Models/User.php
+// Represents an authenticated platform user and role-specific account state.
 
 namespace App\Models;
 
@@ -27,10 +29,6 @@ class User extends Authenticatable
         'rejection_reason',
         'notification_preferences',
         'photo_path',
-        // True when the current password was system-generated (new
-        // client account, or a domiciliataire-triggered reset) and the
-        // owner has not yet chosen their own. See ClientController and
-        // AuthController::changePassword().
         'must_change_password',
     ];
 
@@ -42,13 +40,7 @@ class User extends Authenticatable
         'must_change_password' => 'boolean',
     ];
 
-    // photo_url and initials are computed on every serialization of a
-    // User (login response, /auth/me, client/admin listings, profile
-    // endpoint) so the frontend never has to build avatar logic itself
-    // — see UserAvatar.vue, which just reads these two fields.
     protected $appends = ['photo_url', 'initials', 'unread_notifications_count'];
-
-    // ── Relations ──────────────────────────────────────────
 
     public function profile()
     {
@@ -90,25 +82,12 @@ class User extends Authenticatable
         return $this->belongsTo(User::class, 'approved_by');
     }
 
-    // ── Accessors ──────────────────────────────────────────
-
-    /**
-     * Public URL for this user's profile photo, or null if none is set
-     * (frontend falls back to initials in that case — see
-     * UserAvatar.vue).
-     *
-     * FIX: previously built as url('/api/profile/photo/' . $this->id),
-     * a path that was never registered in routes/api.php — every photo
-     * request 404'd, and the frontend's broken-image fallback silently
-     * swapped in initials, making the failure invisible from the UI.
-     * Now built from the actual registered route name so the two can
-     * never drift apart again.
-     */
     public function getPhotoUrlAttribute(): ?string
     {
         if (!$this->photo_path || !Storage::disk('public')->exists($this->photo_path)) {
             return null;
         }
+
         return route('users.photo', [
             'id' => $this->id,
             'v' => substr(sha1($this->photo_path), 0, 12),
@@ -120,6 +99,7 @@ class User extends Authenticatable
         $first = mb_strtoupper(mb_substr(trim((string) $this->nom), 0, 1));
         $second = mb_strtoupper(mb_substr(trim((string) $this->prenom), 0, 1));
         $initials = $first . $second;
+
         return $initials !== '' ? $initials : mb_strtoupper(mb_substr((string) $this->email, 0, 1));
     }
 
@@ -139,17 +119,13 @@ class User extends Authenticatable
         }
     }
 
-    // ── Helpers ────────────────────────────────────────────
-
     public function isActive(): bool
     {
         if ($this->status !== 'active') {
             return false;
         }
-        if ($this->activation_date && $this->activation_date->isFuture()) {
-            return false;
-        }
-        return true;
+
+        return !$this->activation_date || !$this->activation_date->isFuture();
     }
 
     public function isAdmin(): bool

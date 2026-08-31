@@ -1,37 +1,29 @@
 <?php
+// app/Http/Controllers/Api/RepresentantController.php
+// Manages tenant-scoped client company representatives.
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\Entreprise;
+use App\Services\Representants\RepresentantService;
 use Illuminate\Http\Request;
 
 class RepresentantController extends Controller
 {
-    /**
-     * GET /entreprises/{entreprise}/representant
-     * Returns the single representant — null if not created yet.
-     */
-    public function show(int $entrepriseId)
+    public function __construct(private readonly RepresentantService $representants)
     {
-        $entreprise = Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
-
-        return response()->json([
-            'success' => true,
-            'data' => $entreprise->representant,
-        ]);
     }
 
-    /**
-     * POST /entreprises/{entreprise}/representant
-     * Creates the representant — fails if one already exists.
-     */
+    public function show(int $entrepriseId)
+    {
+        $entreprise = $this->representants->tenantEntreprise(auth()->id(), $entrepriseId);
+
+        return response()->json(['success' => true, 'data' => $entreprise->representant]);
+    }
+
     public function store(Request $request, int $entrepriseId)
     {
-        $entreprise = Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
-
+        $entreprise = $this->representants->tenantEntreprise(auth()->id(), $entrepriseId);
         if ($entreprise->representant()->exists()) {
             return response()->json([
                 'success' => false,
@@ -39,93 +31,74 @@ class RepresentantController extends Controller
             ], 422);
         }
 
-        $data = $request->validate([
-            'nom' => ['required', 'string', 'max:100'],
-            'prenom' => ['nullable', 'string', 'max:100'],
-            'cin' => ['required', 'string', 'max:50'],
-            'nationalite' => ['nullable', 'string', 'max:100'],
-            'date_naissance' => ['nullable', 'date'],
-            'adresse' => ['nullable', 'string'],
-            'telephone' => ['nullable', 'string', 'max:50'],
-            'email' => ['nullable', 'email', 'max:150'],
-        ]);
-
-        $rep = $entreprise->representant()->create($data);
-
-        return response()->json(['success' => true, 'data' => $rep], 201);
+        return response()->json([
+            'success' => true,
+            'data' => $this->representants->create($entreprise, $request->validate($this->createRules())),
+        ], 201);
     }
 
-    /**
-     * PUT /entreprises/{entreprise}/representant
-     * Updates the single representant, or creates it if it doesn't exist yet.
-     * Idempotent — the frontend doesn't need to know in advance whether
-     * the representant already exists.
-     */
     public function update(Request $request, int $entrepriseId)
     {
-        $entreprise = Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
+        $entreprise = $this->representants->tenantEntreprise(auth()->id(), $entrepriseId);
+        $data = $request->validate($this->updateRules());
 
-        $data = $request->validate([
-            'nom' => ['sometimes', 'string', 'max:100'],
+        if ($this->representants->needsRequiredIdentity($entreprise, $data)) {
+            return $this->missingIdentityResponse();
+        }
+
+        [$representant, $created] = $this->representants->upsert($entreprise, $data);
+
+        return response()->json(['success' => true, 'data' => $representant], $created ? 201 : 200);
+    }
+
+    public function destroy(int $entrepriseId)
+    {
+        $entreprise = $this->representants->tenantEntreprise(auth()->id(), $entrepriseId);
+        $this->representants->delete($entreprise);
+
+        return response()->json(['success' => true, 'message' => 'Représentant supprimé.']);
+    }
+
+    public function history(int $entrepriseId)
+    {
+        $entreprise = $this->representants->tenantEntreprise(auth()->id(), $entrepriseId);
+        $representant = $entreprise->representant()->firstOrFail();
+
+        return response()->json([
+            'success' => true,
+            'data' => $representant->history()->with('changedBy:id,nom,prenom')->get(),
+        ]);
+    }
+
+    private function createRules(): array
+    {
+        return $this->baseRules(['nom' => 'required', 'cin' => 'required']);
+    }
+
+    private function updateRules(): array
+    {
+        return $this->baseRules(['nom' => 'sometimes', 'cin' => 'sometimes']);
+    }
+
+    private function baseRules(array $required): array
+    {
+        return [
+            'nom' => [$required['nom'], 'string', 'max:100'],
             'prenom' => ['nullable', 'string', 'max:100'],
-            'cin' => ['sometimes', 'string', 'max:50'],
+            'cin' => [$required['cin'], 'string', 'max:50'],
             'nationalite' => ['nullable', 'string', 'max:100'],
             'date_naissance' => ['nullable', 'date'],
             'adresse' => ['nullable', 'string'],
             'telephone' => ['nullable', 'string', 'max:50'],
             'email' => ['nullable', 'email', 'max:150'],
-        ]);
-
-        $rep = $entreprise->representant;
-
-        if (!$rep) {
-            if (empty($data['nom']) || empty($data['cin'])) {
-                return response()->json([
-                    'success' => false,
-                    'message' => 'Nom et CIN sont requis pour créer le représentant.',
-                ], 422);
-            }
-
-            $rep = $entreprise->representant()->create($data);
-
-            return response()->json(['success' => true, 'data' => $rep], 201);
-        }
-
-        $rep->update($data);
-
-        return response()->json(['success' => true, 'data' => $rep->fresh()]);
+        ];
     }
 
-    /**
-     * DELETE /entreprises/{entreprise}/representant
-     */
-    public function destroy(int $entrepriseId)
+    private function missingIdentityResponse(): \Illuminate\Http\JsonResponse
     {
-        $entreprise = Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
-
-        $entreprise->representant()->firstOrFail()->delete();
-
         return response()->json([
-            'success' => true,
-            'message' => 'Représentant supprimé.',
-        ]);
-    }
-
-    /**
-     * GET /entreprises/{entreprise}/representant/history
-     */
-    public function history(int $entrepriseId)
-    {
-        $entreprise = Entreprise::where('domiciliataire_id', auth()->id())
-            ->findOrFail($entrepriseId);
-
-        $rep = $entreprise->representant()->firstOrFail();
-
-        return response()->json([
-            'success' => true,
-            'data' => $rep->history()->with('changedBy:id,nom,prenom')->get(),
-        ]);
+            'success' => false,
+            'message' => 'Nom et CIN sont requis pour créer le représentant.',
+        ], 422);
     }
 }

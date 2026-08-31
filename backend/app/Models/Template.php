@@ -1,10 +1,12 @@
 <?php
+// app/Models/Template.php
+// Represents an ordered reusable contract template for a tenant.
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
 class Template extends Model
 {
@@ -17,12 +19,6 @@ class Template extends Model
         return $this->belongsTo(User::class, 'domiciliataire_id');
     }
 
-    /**
-     * Ordered set of articles attached to this template.
-     * Pivot 'ordre' preserves the display order chosen by the domiciliataire
-     * so it can be reproduced instantly when the template is loaded into
-     * a new contract wizard.
-     */
     public function articles()
     {
         return $this->belongsToMany(Article::class, 'template_articles')
@@ -30,10 +26,6 @@ class Template extends Model
             ->withTimestamps();
     }
 
-    /**
-     * Filter templates by tenant (domiciliataire).
-     * Usage: Template::forTenant(auth()->id())->get()
-     */
     public function scopeForTenant(Builder $query, int $tenantId): Builder
     {
         return $query->where('domiciliataire_id', $tenantId);

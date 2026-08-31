@@ -33,6 +33,7 @@ return new class extends Migration {
             $table->timestamps();
 
             $table->index('domiciliataire_id');
+            $table->index(['domiciliataire_id', 'created_at']);
         });
     }
 

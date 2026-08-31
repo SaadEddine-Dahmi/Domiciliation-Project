@@ -18,6 +18,21 @@ RUN apt-get update \
         zip \
         gd \
         opcache \
+    && { \
+        echo "opcache.enable=1"; \
+        echo "opcache.enable_cli=1"; \
+        echo "opcache.validate_timestamps=0"; \
+        echo "opcache.memory_consumption=192"; \
+        echo "opcache.interned_strings_buffer=16"; \
+        echo "opcache.max_accelerated_files=20000"; \
+      } > /usr/local/etc/php/conf.d/opcache.ini \
+    && { \
+        echo "[www]"; \
+        echo "pm.max_children = 10"; \
+        echo "pm.start_servers = 2"; \
+        echo "pm.min_spare_servers = 1"; \
+        echo "pm.max_spare_servers = 4"; \
+      } > /usr/local/etc/php-fpm.d/zz-pfe.conf \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

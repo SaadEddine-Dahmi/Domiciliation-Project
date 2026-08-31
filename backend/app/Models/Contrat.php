@@ -1,9 +1,11 @@
 <?php
+// app/Models/Contrat.php
+// Represents a domiciliation contract and its lifecycle state.
 
 namespace App\Models;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
 
 class Contrat extends Model
 {
@@ -42,26 +44,11 @@ class Contrat extends Model
         'caution' => 'decimal:2',
     ];
 
-    /**
-     * FIX: Eloquent's default JSON serialization for 'date'-cast attributes
-     * emits a full ISO-8601 datetime string (e.g.
-     * "2026-08-18T00:00:00.000000Z"). Native <input type="date"> elements
-     * in the Nuxt wizard reject anything that isn't strictly "yyyy-MM-dd",
-     * silently failing to populate date_debut/date_fin/date_signature when
-     * resuming a draft or renewal — this is the browser console warning
-     * "does not conform to the required format, yyyy-MM-dd".
-     *
-     * Overriding serializeDate() applies to every date-cast attribute on
-     * this model (date_debut, date_fin, date_signature, next_alert_date)
-     * everywhere the model is serialized to JSON — API responses, Eloquent
-     * ->toArray(), etc. — without needing per-field formatting anywhere else.
-     */
+    // Keeps JSON dates compatible with native date inputs.
     protected function serializeDate(\DateTimeInterface $date): string
     {
         return $date->format('Y-m-d');
     }
-
-    // ── Relations ──────────────────────────────────────────
 
     public function domiciliataire()
     {
@@ -106,8 +93,7 @@ class Contrat extends Model
         return $this->hasMany(Contrat::class, 'renewed_from_id');
     }
 
-    // ── Audit trail hook ───────────────────────────────────
-
+    // Records compact history snapshots for user-facing audits.
     protected static function booted(): void
     {
         static::updating(function (Contrat $contrat) {
@@ -135,8 +121,6 @@ class Contrat extends Model
             ]);
         });
     }
-
-    // ── State machine ──────────────────────────────────────
 
     public function activate(): void
     {
@@ -193,8 +177,6 @@ class Contrat extends Model
         return $this->statut === 'active' && $this->archived_at === null;
     }
 
-    // ── Renewal ──────────────────────────────────────────────
-
     public function hasOpenRenewal(): bool
     {
         return $this->renewals()->whereIn('statut', ['draft', 'active'])->exists();
@@ -216,10 +198,7 @@ class Contrat extends Model
             throw new \DomainException('Seul un contrat actif ou expiré peut être renouvelé.');
         }
 
-        $newStart = $this->date_fin
-            ? $this->date_fin->copy()->addDay()
-            : now();
-
+        $newStart = $this->date_fin ? $this->date_fin->copy()->addDay() : now();
         $newEnd = $this->duree_mois
             ? $newStart->copy()->addMonths($this->duree_mois)->subDay()
             : null;
@@ -242,13 +221,13 @@ class Contrat extends Model
             'statut' => 'draft',
         ]);
 
-        $articleSync = $this->articles()
-            ->orderBy('contrat_articles.ordre')
-            ->get()
-            ->mapWithKeys(fn($a) => [$a->id => ['ordre' => $a->pivot->ordre]])
-            ->toArray();
-
-        $draft->articles()->sync($articleSync);
+        $draft->articles()->sync(
+            $this->articles()
+                ->orderBy('contrat_articles.ordre')
+                ->get()
+                ->mapWithKeys(fn($article) => [$article->id => ['ordre' => $article->pivot->ordre]])
+                ->toArray()
+        );
 
         return $draft;
     }

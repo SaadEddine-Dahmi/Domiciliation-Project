@@ -25,6 +25,7 @@ return new class extends Migration
 
             $table->index('domiciliataire_id');
             $table->index('name');
+            $table->index(['domiciliataire_id', 'created_at']);
         });
     }
 

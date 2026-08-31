@@ -36,7 +36,7 @@ async function load(): Promise<void> {
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
       `${getApiBase()}/api/messages`,
-      { headers: authHeaders() }
+      { headers: authHeaders(), query: { per_page: 100 } }
     )
     messages.value = res.data ?? []
   } catch (e: any) {

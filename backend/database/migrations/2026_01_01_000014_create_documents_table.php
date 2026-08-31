@@ -45,6 +45,8 @@ return new class extends Migration
             $table->index('document_type_id');
             $table->index('uploaded_by_user');
             $table->index('date_expiration');
+            $table->index(['entreprise_id', 'created_at']);
+            $table->index(['entreprise_id', 'date_expiration']);
         });
     }
 

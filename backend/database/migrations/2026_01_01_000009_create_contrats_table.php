@@ -76,6 +76,10 @@ return new class extends Migration {
             $table->index('date_fin');
             $table->index('renewed_from_id');
             $table->index('archived_at');
+            $table->index(['domiciliataire_id', 'created_at']);
+            $table->index(['domiciliataire_id', 'statut', 'archived_at']);
+            $table->index(['entreprise_id', 'statut', 'archived_at']);
+            $table->index(['statut', 'date_fin']);
         });
     }
 

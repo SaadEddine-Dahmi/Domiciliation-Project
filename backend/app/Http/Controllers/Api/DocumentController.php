@@ -1,331 +1,128 @@
 <?php
+// app/Http/Controllers/Api/DocumentController.php
+// Manages tenant-scoped document uploads, metadata, and protected streams.
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Controllers\Concerns\AuthorizesApiRoles;
+use App\Http\Controllers\Concerns\UsesApiPagination;
 use App\Http\Controllers\Controller;
-use App\Models\Document;
-use App\Models\Entreprise;
+use App\Services\Auth\QueryTokenAuthenticator;
+use App\Services\Documents\DocumentService;
+use App\Services\Documents\DocumentStorageService;
 use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Storage;
-use Laravel\Sanctum\PersonalAccessToken;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DocumentController extends Controller
 {
-    // Picks the private storage disk if configured, otherwise falls
-    // back to 'local' — used consistently for every file operation below.
-    private function disk(): string
-    {
-        $disks = array_keys(config('filesystems.disks', []));
-        return in_array('private', $disks, true) ? 'private' : 'local';
+    use AuthorizesApiRoles;
+    use UsesApiPagination;
+
+    public function __construct(
+        private readonly DocumentService $documents,
+        private readonly DocumentStorageService $storage,
+        private readonly QueryTokenAuthenticator $queryTokens,
+    ) {
     }
 
-    // Resolves a user from a ?token= query param instead of an
-    // Authorization header, since browsers cannot attach custom
-    // headers to direct navigation/iframe requests.
-    private function authenticateViaToken(Request $request): ?\App\Models\User
-    {
-        $tokenValue = $request->query('token');
-        if (!$tokenValue)
-            return null;
-
-        $token = PersonalAccessToken::findToken($tokenValue);
-        if (!$token)
-            return null;
-
-        if ($token->expires_at && $token->expires_at->isPast())
-            return null;
-
-        return $token->tokenable;
-    }
-
-    // Lists documents scoped by role: a client sees only their own
-    // entreprise's documents; a domiciliataire sees only their tenant's;
-    // an admin sees everything, optionally filtered by entreprise_id.
     public function index(Request $request)
     {
         $user = auth()->user();
-        $role = $user->role;
+        $entrepriseId = $request->filled('entreprise_id') ? (int) $request->query('entreprise_id') : null;
 
-        if ($role === 'client') {
-            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
-            if (!$entreprise)
-                return response()->json(['success' => true, 'data' => []]);
-
-            $docs = Document::query()
-                ->with(['documentType'])
-                ->where('entreprise_id', $entreprise->id)
-                ->orderByDesc('created_at')
-                ->get()
-                ->map(fn($d) => $this->formatDoc($d, $user));
-
-            return response()->json(['success' => true, 'data' => $docs]);
-        }
-
-        if ($role === 'domiciliataire') {
-            $query = Document::query()
-                ->with(['entreprise:id,raison_sociale', 'documentType'])
-                ->whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
-                ->orderByDesc('created_at');
-
-            if ($request->filled('entreprise_id')) {
-                $query->where('entreprise_id', (int) $request->entreprise_id);
-            }
-
-            return response()->json([
-                'success' => true,
-                'data' => $query->get()->map(fn($d) => $this->formatDoc($d, $user, withEntreprise: true)),
-            ]);
-        }
-
-        $query = Document::query()
-            ->with(['entreprise:id,raison_sociale', 'documentType:id,name'])
-            ->orderByDesc('created_at');
-
-        if ($request->filled('entreprise_id')) {
-            $query->where('entreprise_id', (int) $request->entreprise_id);
-        }
-
-        return response()->json([
-            'success' => true,
-            'data' => $query->get()->map(fn($d) => $this->formatDoc($d, $user, withEntreprise: true)),
-        ]);
+        return response()->json($this->paginatedResponse(
+            $this->documents->paginateFor($user, $this->perPage($request), $entrepriseId)
+        ));
     }
 
-    // Uploads a new document and links it to an entreprise. A
-    // domiciliataire can only upload for their own tenant's entreprises.
     public function store(Request $request)
     {
         $user = auth()->user();
-
-        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
-            return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole($user, ['domiciliataire', 'admin'])) {
+            return $blocked;
         }
 
-        $data = $request->validate([
-            'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
-            'document_type_id' => ['required', 'integer', 'exists:document_types,id'],
-            'date_expiration' => ['nullable', 'date'],
-            'previous_version_id' => ['nullable', 'integer', 'exists:documents,id'],
+        $data = $request->validate($this->writeRules() + [
             'file' => ['required', 'file', 'max:10240', 'mimes:pdf,jpg,jpeg,png,doc,docx'],
         ]);
 
-        if ($user->role === 'domiciliataire') {
-            $entreprise = Entreprise::where('domiciliataire_id', $user->id)->findOrFail($data['entreprise_id']);
-        } else {
-            $entreprise = Entreprise::findOrFail($data['entreprise_id']);
-        }
-
-        $path = $request->file('file')->store('documents/' . $entreprise->id, $this->disk());
-
-        $doc = Document::create([
-            'entreprise_id' => $entreprise->id,
-            'document_type_id' => $data['document_type_id'],
-            'file_path' => $path,
-            'date_expiration' => $data['date_expiration'] ?? null,
-            'uploaded_by_user' => $user->id,
-            'previous_version_id' => $data['previous_version_id'] ?? null,
-        ]);
-
         return response()->json([
             'success' => true,
-            'data' => $this->formatDoc(
-                $doc->load(['entreprise:id,raison_sociale', 'documentType']),
-                $user,
-                withEntreprise: true
-            ),
+            'data' => $this->documents->create($user, $data, $request->file('file')),
         ], 201);
     }
 
-    // Updates a document's metadata (type, expiration, version link).
     public function update(Request $request, int $id)
     {
         $user = auth()->user();
-
-        if (!in_array($user->role, ['domiciliataire', 'admin'], true)) {
-            return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole($user, ['domiciliataire', 'admin'])) {
+            return $blocked;
         }
-
-        $data = $request->validate([
-            'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
-            'document_type_id' => ['required', 'integer', 'exists:document_types,id'],
-            'date_expiration' => ['nullable', 'date'],
-            'previous_version_id' => ['nullable', 'integer', 'exists:documents,id'],
-        ]);
-
-        if ($user->role === 'domiciliataire') {
-            $doc = Document::whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
-                ->findOrFail($id);
-
-            Entreprise::where('domiciliataire_id', $user->id)->findOrFail($data['entreprise_id']);
-        } else {
-            $doc = Document::findOrFail($id);
-            Entreprise::findOrFail($data['entreprise_id']);
-        }
-
-        $doc->update($data);
 
         return response()->json([
             'success' => true,
-            'data' => $this->formatDoc(
-                $doc->fresh(['entreprise:id,raison_sociale', 'documentType']),
-                $user,
-                withEntreprise: true
-            ),
+            'data' => $this->documents->update($user, $id, $request->validate($this->writeRules())),
         ]);
     }
 
-    // Deletes a document's file from disk and its database record.
     public function destroy(int $id)
     {
         $user = auth()->user();
-
-        if ($user->role === 'client') {
-            return response()->json(['success' => false, 'message' => 'Non autorisé.'], 403);
+        if ($blocked = $this->denyUnlessRole($user, ['domiciliataire', 'admin'])) {
+            return $blocked;
         }
 
-        if ($user->role === 'domiciliataire') {
-            $doc = Document::whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id))
-                ->findOrFail($id);
-        } else {
-            $doc = Document::findOrFail($id);
-        }
-
-        if (Storage::disk($this->disk())->exists($doc->file_path)) {
-            Storage::disk($this->disk())->delete($doc->file_path);
-        }
-
-        $doc->delete();
+        $this->documents->delete($user, $id);
 
         return response()->json(['success' => true, 'message' => 'Document supprimé.']);
     }
 
-    // Streams a document as a forced download, authenticated via the
-    // ?token= query param (see authenticateViaToken()).
     public function download(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
-        $user = $this->authenticateViaToken($request);
-        if (!$user)
-            return response()->json(['message' => 'Non authentifié.'], 401);
+        $document = $this->resolveDocumentFromQueryToken($request, $id);
+        if ($document instanceof \Illuminate\Http\JsonResponse) {
+            return $document;
+        }
 
-        $doc = $this->resolveDocForUser($id, $user);
-        if (!$doc)
-            return response()->json(['message' => 'Document introuvable.'], 404);
+        abort_unless($this->storage->exists($document), 404);
 
-        abort_unless(Storage::disk($this->disk())->exists($doc->file_path), 404);
-
-        $originalName = $doc->documentType?->name
-            ? $doc->documentType->name . '.' . pathinfo($doc->file_path, PATHINFO_EXTENSION)
-            : basename($doc->file_path);
-
-        $mime = $this->mimeType($doc->file_path);
-
-        return response()->streamDownload(function () use ($doc) {
-            $stream = Storage::disk($this->disk())->readStream($doc->file_path);
-            fpassthru($stream);
-            if (is_resource($stream))
-                fclose($stream);
-        }, $originalName, [
-            'Content-Type' => $mime,
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
+        return $this->storage->streamDownload($document, $this->documents->downloadName($document));
     }
 
-    // Streams a document inline for browser preview (no download prompt).
     public function preview(Request $request, int $id): StreamedResponse|\Illuminate\Http\JsonResponse
     {
-        $user = $this->authenticateViaToken($request);
-        if (!$user)
+        $document = $this->resolveDocumentFromQueryToken($request, $id);
+        if ($document instanceof \Illuminate\Http\JsonResponse) {
+            return $document;
+        }
+
+        abort_unless($this->storage->exists($document), 404);
+
+        return $this->storage->streamInline($document);
+    }
+
+    private function resolveDocumentFromQueryToken(Request $request, int $id): \App\Models\Document|\Illuminate\Http\JsonResponse
+    {
+        $user = $this->queryTokens->userFromRequest($request);
+        if (!$user) {
             return response()->json(['message' => 'Non authentifié.'], 401);
+        }
 
-        $doc = $this->resolveDocForUser($id, $user);
-        if (!$doc)
+        $document = $this->documents->resolveReadableDocument($user, $id);
+        if (!$document) {
             return response()->json(['message' => 'Document introuvable.'], 404);
-
-        abort_unless(Storage::disk($this->disk())->exists($doc->file_path), 404);
-
-        $mime = $this->mimeType($doc->file_path);
-        $size = Storage::disk($this->disk())->size($doc->file_path);
-
-        return response()->stream(function () use ($doc) {
-            $stream = Storage::disk($this->disk())->readStream($doc->file_path);
-            fpassthru($stream);
-            if (is_resource($stream))
-                fclose($stream);
-        }, 200, [
-            'Content-Type' => $mime,
-            'Content-Length' => $size,
-            'Content-Disposition' => 'inline; filename="' . basename($doc->file_path) . '"',
-            'Cache-Control' => 'no-store, no-cache',
-            'X-Content-Type-Options' => 'nosniff',
-        ]);
-    }
-
-    // Resolves a document by ID, scoped to what the given user is
-    // allowed to see (own entreprise for client, own tenant for
-    // domiciliataire, unrestricted for admin).
-    private function resolveDocForUser(int $id, \App\Models\User $user): ?Document
-    {
-        $query = Document::with(['documentType', 'entreprise:id,raison_sociale']);
-
-        if ($user->role === 'client') {
-            $entreprise = Entreprise::where('client_user_id', $user->id)->first();
-            if (!$entreprise)
-                return null;
-            $query->where('entreprise_id', $entreprise->id);
-        } elseif ($user->role === 'domiciliataire') {
-            $query->whereHas('entreprise', fn($q) => $q->where('domiciliataire_id', $user->id));
         }
 
-        return $query->find($id);
+        return $document;
     }
 
-    // Maps a file extension to its MIME type for response headers.
-    private function mimeType(string $path): string
+    private function writeRules(): array
     {
-        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-
-        return match ($ext) {
-            'pdf' => 'application/pdf',
-            'jpg', 'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'doc' => 'application/msword',
-            'docx' => 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            default => 'application/octet-stream',
-        };
-    }
-
-    // Shapes a Document model into the JSON structure the frontend
-    // expects, including download/preview URLs and optional entreprise info.
-    private function formatDoc(Document $doc, \App\Models\User $user, bool $withEntreprise = false): array
-    {
-        $ext = strtolower(pathinfo($doc->file_path ?? '', PATHINFO_EXTENSION));
-
-        $base = [
-            'id' => $doc->id,
-            'document_type_id' => $doc->document_type_id,
-            'name' => $doc->documentType?->name ?? 'Document',
-            'extension' => $ext,
-            'is_pdf' => $ext === 'pdf',
-            'document_type' => $doc->documentType ? [
-                'id' => $doc->documentType->id,
-                'name' => $doc->documentType->name,
-            ] : null,
-            'date_expiration' => $doc->date_expiration?->format('Y-m-d'),
-            'created_at' => $doc->created_at,
-            'download_url' => url("/api/documents/{$doc->id}/download"),
-            'preview_url' => url("/api/documents/{$doc->id}/preview"),
-            'file_path' => null,
+        return [
+            'entreprise_id' => ['required', 'integer', 'exists:entreprises,id'],
+            'document_type_id' => ['required', 'integer', 'exists:document_types,id'],
+            'date_expiration' => ['nullable', 'date'],
+            'previous_version_id' => ['nullable', 'integer', 'exists:documents,id'],
         ];
-
-        if ($withEntreprise && $doc->relationLoaded('entreprise')) {
-            $base['entreprise_id'] = $doc->entreprise_id;
-            $base['entreprise'] = $doc->entreprise ? [
-                'id' => $doc->entreprise->id,
-                'raison_sociale' => $doc->entreprise->raison_sociale,
-            ] : null;
-        }
-
-        return $base;
     }
 }

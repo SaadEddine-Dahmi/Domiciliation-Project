@@ -1,14 +1,22 @@
 services:
   portainer:
-    image: portainer/portainer-ce:latest
-    container_name: pfe_portainer
+    image: ${PORTAINER_IMAGE:?Set PORTAINER_IMAGE to a pinned Portainer CE tag, for example portainer/portainer-ce:2.x.x}
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    command:
+      - --http-disabled
     ports:
-      - "9000:9000"
-      - "9443:9443"
+      - "${PORTAINER_HTTPS_PORT:-9443}:9443"
     volumes:
       - portainer_data:/data
       - /var/run/docker.sock:/var/run/docker.sock
+    stop_grace_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   portainer_data:

@@ -70,8 +70,8 @@ async function fetchFactures(): Promise<void> {
   loading.value = true
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
-      `${getApiBase()}/api/factures?include_archived=1`,
-      { headers: authHeaders() }
+      `${getApiBase()}/api/factures`,
+      { headers: authHeaders(), query: { include_archived: 1, per_page: 100 } }
     )
     factures.value = res.data ?? []
     openFactureFromQuery()

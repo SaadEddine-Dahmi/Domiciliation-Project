@@ -1,14 +1,12 @@
+// app/services/notification.service.ts
+// Calls notification listing and read-state endpoints.
+
 export interface ApiSuccess<T> {
   success: boolean
   data: T
   message?: string
 }
 
-// Mirrors AppNotification's $fillable + casts (see app/Models/AppNotification.php).
-// `data` and `type`/`subject` were missing here even though
-// NotificationController::index() already returns them — the page needs
-// `data.document_id` / `data.contrat_id` to know what a notification
-// links to, and `type`/`subject` to label it.
 export interface NotificationEntity {
   id: number
   user_id: number
@@ -26,15 +24,18 @@ export interface NotificationEntity {
 }
 
 export const notificationService = {
-  list: () => $fetch<ApiSuccess<NotificationEntity[]>>('/api/notifications'),
+  list: () =>
+    $fetch<ApiSuccess<NotificationEntity[]>>('/api/notifications', {
+      query: { per_page: 100 },
+    }),
 
   markRead: (id: number) =>
     $fetch<ApiSuccess<NotificationEntity>>(`/api/notifications/${id}/read`, {
       method: 'POST',
     }),
 
-  // Matches NotificationController::readAll() / POST /api/notifications/read-all.
-  // The page called this already, but it never existed on the service.
   markAllRead: () =>
-    $fetch<ApiSuccess<null>>('/api/notifications/read-all', { method: 'POST' }),
+    $fetch<ApiSuccess<null>>('/api/notifications/read-all', {
+      method: 'POST',
+    }),
 }

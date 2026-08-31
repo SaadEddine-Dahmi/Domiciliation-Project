@@ -11,6 +11,10 @@
         -Server
     }
 
+    handle /health {
+        respond "ok" 200
+    }
+
     handle /api/* {
         reverse_proxy backend-nginx:80
     }

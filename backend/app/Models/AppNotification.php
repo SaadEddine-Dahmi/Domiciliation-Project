@@ -1,4 +1,6 @@
 <?php
+// app/Models/AppNotification.php
+// Represents user-facing notifications and messages.
 
 namespace App\Models;
 
@@ -9,10 +11,6 @@ class AppNotification extends Model
 {
     use HasFactory;
 
-    // FIX: the real migration (2026_01_01_000016_create_notifications_table.php)
-    // creates a table called `notifications`, not `app_notifications`. Every
-    // AppNotification::create(...) call in the app was silently failing
-    // with a QueryException because of this mismatch.
     protected $table = 'notifications';
 
     protected $fillable = [

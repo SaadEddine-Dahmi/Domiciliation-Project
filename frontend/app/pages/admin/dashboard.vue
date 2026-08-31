@@ -133,7 +133,7 @@ async function loadClients(): Promise<void> {
   clientsLoading.value = true
   clientsError.value = ''
   try {
-    const clientsRes = await $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/clients`, { headers: authHeaders() })
+    const clientsRes = await $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/clients`, { headers: authHeaders(), query: { per_page: 100 } })
     const clientsData  = Array.isArray(clientsRes.data)  ? clientsRes.data  : []
 
     allClients.value  = clientsData
@@ -151,7 +151,7 @@ async function loadContrats(): Promise<void> {
   contratsLoading.value = true
   contratsError.value = ''
   try {
-    const contratsRes = await $fetch<{ success: boolean; data: any[]; message?: string }>(`${getApiBase()}/api/contrats`, { headers: authHeaders() })
+    const contratsRes = await $fetch<{ success: boolean; data: any[]; message?: string }>(`${getApiBase()}/api/contrats`, { headers: authHeaders(), query: { per_page: 100 } })
     if (contratsRes.success === false) {
       throw new Error(contratsRes.message ?? 'Erreur de chargement des contrats')
     }
@@ -172,7 +172,7 @@ async function loadMessages(): Promise<void> {
   messagesLoading.value = true
   messagesError.value = ''
   try {
-    const msgsRes = await $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/messages`, { headers: authHeaders() })
+    const msgsRes = await $fetch<{ success: boolean; data: any[] }>(`${getApiBase()}/api/messages`, { headers: authHeaders(), query: { per_page: 100 } })
     recentMessages.value = (msgsRes.data ?? []).slice(0, 4)
   } catch (e: any) {
     recentMessages.value = []

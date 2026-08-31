@@ -1,34 +1,35 @@
 <?php
+// app/Http/Controllers/Api/DocumentTypeController.php
+// Exposes the shared document type catalog.
 
 namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
-use App\Models\DocumentType;
+use App\Services\DocumentCatalogService;
 use Illuminate\Http\Request;
 
 class DocumentTypeController extends Controller
 {
-    // Lists all document types in the platform-wide catalog, alphabetically.
+    public function __construct(private readonly DocumentCatalogService $catalog)
+    {
+    }
+
     public function index()
     {
         return response()->json([
             'success' => true,
-            'data' => DocumentType::orderBy('name')->get(),
+            'data' => $this->catalog->all(),
         ]);
     }
 
-    // Creates a new document type. Any authenticated domiciliataire can
-    // add types since the catalog is shared, not tenant-scoped.
     public function store(Request $request)
     {
-        $data = $request->validate([
+        $type = $this->catalog->create($request->validate([
             'name' => ['required', 'string', 'max:100', 'unique:document_types,name'],
             'is_required' => ['boolean'],
             'has_expiration' => ['boolean'],
             'description' => ['nullable', 'string', 'max:500'],
-        ]);
-
-        $type = DocumentType::create($data);
+        ]));
 
         return response()->json(['success' => true, 'data' => $type], 201);
     }
