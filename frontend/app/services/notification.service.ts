@@ -1,6 +1,8 @@
 // app/services/notification.service.ts
 // Calls notification listing and read-state endpoints.
 
+import { apiBase, authHeaders } from '~/services/http'
+
 export interface ApiSuccess<T> {
   success: boolean
   data: T
@@ -25,17 +27,20 @@ export interface NotificationEntity {
 
 export const notificationService = {
   list: () =>
-    $fetch<ApiSuccess<NotificationEntity[]>>('/api/notifications', {
+    $fetch<ApiSuccess<NotificationEntity[]>>(`${apiBase()}/api/notifications`, {
       query: { per_page: 100 },
+      headers: authHeaders(),
     }),
 
   markRead: (id: number) =>
-    $fetch<ApiSuccess<NotificationEntity>>(`/api/notifications/${id}/read`, {
+    $fetch<ApiSuccess<NotificationEntity>>(`${apiBase()}/api/notifications/${id}/read`, {
       method: 'POST',
+      headers: authHeaders(),
     }),
 
   markAllRead: () =>
-    $fetch<ApiSuccess<null>>('/api/notifications/read-all', {
+    $fetch<ApiSuccess<null>>(`${apiBase()}/api/notifications/read-all`, {
       method: 'POST',
+      headers: authHeaders(),
     }),
 }

@@ -8,7 +8,7 @@ function getToken(): string {
   if (!import.meta.client && typeof window === 'undefined') return ''
 
   try {
-    return JSON.parse(localStorage.getItem('app_auth') ?? '{}')?.token ?? ''
+    return JSON.parse(localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth') ?? '{}')?.token ?? ''
   } catch {
     return ''
   }

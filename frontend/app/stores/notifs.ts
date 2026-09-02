@@ -1,25 +1,9 @@
 import { defineStore } from 'pinia'
+import { apiBase, authHeaders } from '~/services/http'
 
 interface CountResponse {
     success: boolean
     data?: { unread_notifications_count?: number }
-}
-
-function authHeaders(): Record<string, string> {
-    if (!import.meta.client) return {}
-    try {
-        const raw = localStorage.getItem('app_auth')
-        if (!raw) return {}
-        const parsed = JSON.parse(raw)
-        return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
-    } catch {
-        return {}
-    }
-}
-
-function apiBase(): string {
-    const config = useRuntimeConfig()
-    return (config.public.apiBase as string) ?? ''
 }
 
 export const useNotificationsStore = defineStore('notifications', () => {

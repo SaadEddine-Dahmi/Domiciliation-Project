@@ -42,7 +42,7 @@ function getApiBase(): string {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return { Accept: 'application/json' }
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth')
     if (!raw) return { Accept: 'application/json' }
     const parsed = JSON.parse(raw)
     const headers: Record<string, string> = { Accept: 'application/json' }
@@ -56,7 +56,7 @@ function authHeaders(): Record<string, string> {
 function withToken(url: string): string {
   if (!import.meta.client) return url
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth')
     if (!raw) return url
     const parsed = JSON.parse(raw)
     const token = parsed?.token

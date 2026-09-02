@@ -1,3 +1,5 @@
+import { apiBase, authHeaders } from '~/services/http'
+
 export interface ApiSuccess<T> {
   success: boolean
   data: T
@@ -12,5 +14,8 @@ export interface DashboardStats {
 }
 
 export const dashboardService = {
-  stats: () => $fetch<ApiSuccess<DashboardStats>>('/api/dashboard/stats'),
+  stats: () =>
+    $fetch<ApiSuccess<DashboardStats>>(`${apiBase()}/api/dashboard/stats`, {
+      headers: authHeaders(),
+    }),
 }

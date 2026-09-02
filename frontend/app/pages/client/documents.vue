@@ -12,7 +12,7 @@ function getApiBase() {
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth')
     if (!raw) return {}
     const parsed = JSON.parse(raw)
     return parsed?.token ? { Authorization: `Bearer ${parsed.token}` } : {}
@@ -24,7 +24,7 @@ function authHeaders(): Record<string, string> {
 function getRawToken(): string {
   if (!import.meta.client) return ''
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth')
     if (!raw) return ''
     const parsed = JSON.parse(raw)
     return parsed?.token ?? ''

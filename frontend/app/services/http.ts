@@ -6,11 +6,16 @@ export function apiBase(): string {
   return (config.public.apiBase as string) ?? ''
 }
 
+export function authStorageKey(): string {
+  const config = useRuntimeConfig()
+  return (config.public.authStorageKey as string) ?? 'app_auth'
+}
+
 export function authHeaders(): Record<string, string> {
   if (!import.meta.client && typeof window === 'undefined') return {}
 
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem(authStorageKey())
     if (!raw) return {}
 
     const parsed = JSON.parse(raw)

@@ -52,7 +52,7 @@ const iframeUrl = ref<string | null>(null)
 function getRawToken(): string {
   if (!import.meta.client) return ''
   try {
-    const raw = localStorage.getItem('app_auth')
+    const raw = localStorage.getItem((useRuntimeConfig().public.authStorageKey as string) ?? 'app_auth')
     if (!raw) return ''
     const parsed = JSON.parse(raw)
     return parsed?.token ?? ''
