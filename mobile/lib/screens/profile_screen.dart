@@ -1,26 +1,45 @@
+// lib/screens/profile_screen.dart
+//
+// Profile — redesigned to match the mockup for the domiciliataire role:
+//   - Completion ring card ("Profil complété à X%") with a shortcut link.
+//   - "IDENTITÉ ENTREPRISE" section (edit pencil -> inline edit sheet).
+//   - "CONTACT" section (edit pencil -> inline edit sheet).
+//   - "ADRESSES" section: reorderable list with per-row edit/delete, and
+//     an "+ Ajouter" action, mirroring AddressListEditor.vue on web.
+//
+// Data source: GET/PUT /api/profile (DomiciliaireProfileController).
+// adresses is a JSON array of {label, value} objects; index 0 is treated
+// as the siège social by convention on the backend, but this screen does
+// not enforce that — it just preserves whatever order the user sets.
+//
+// Completion percentage logic mirrors User::hasCompleteProfile() on the
+// backend (nom_societe, representant_legal, at least one address) plus
+// RC/IF for a finer-grained ring, matching the mockup's "80%" example.
+
 import 'package:flutter/material.dart';
 
 import '../core/api_client.dart';
 import '../core/api_exception.dart';
-import '../models/app_user.dart';
 import '../theme/app_design.dart';
 import '../widgets/error_banner.dart';
+import '../widgets/premium_button.dart';
 import '../widgets/premium_card.dart';
+import '../widgets/premium_text_field.dart';
 
 class ProfileScreen extends StatefulWidget {
-  const ProfileScreen({super.key, required this.api, required this.user});
+  const ProfileScreen({super.key, required this.api});
 
   final ApiClient api;
-  final AppUser user;
 
   @override
   State<ProfileScreen> createState() => _ProfileScreenState();
 }
 
 class _ProfileScreenState extends State<ProfileScreen> {
-  Map<String, dynamic>? profile;
-  String? error;
+  Map<String, dynamic> data = {};
+  List<Map<String, String>> addresses = [];
   bool loading = true;
+  String? error;
 
   @override
   void initState() {
@@ -29,13 +48,17 @@ class _ProfileScreenState extends State<ProfileScreen> {
   }
 
   Future<void> load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
     try {
-      final data = await widget.api.profile();
+      final res = await widget.api.profile();
       if (!mounted) return;
       setState(() {
-        profile = data;
+        data = Map<String, dynamic>.from(res as Map);
+        addresses = _normalise(data['adresses'] ?? data['addresses']);
         loading = false;
-        error = null;
       });
     } catch (e) {
       if (!mounted) return;
@@ -46,177 +69,309 @@ class _ProfileScreenState extends State<ProfileScreen> {
     }
   }
 
+  List<Map<String, String>> _normalise(dynamic raw) {
+    if (raw is! List) return [];
+    return raw
+        .map((item) => item is Map
+            ? {
+                'label': '${item['label'] ?? ''}',
+                'value': '${item['value'] ?? ''}'
+              }
+            : {'label': '', 'value': '$item'})
+        .where((a) => a['value']!.trim().isNotEmpty)
+        .toList()
+        .cast<Map<String, String>>();
+  }
+
+  int get completionPercent {
+    final checks = [
+      '${data['nom_societe'] ?? ''}'.trim().isNotEmpty,
+      '${data['representant_legal'] ?? ''}'.trim().isNotEmpty,
+      '${data['identite_representant'] ?? ''}'.trim().isNotEmpty,
+      '${data['rc'] ?? ''}'.trim().isNotEmpty,
+      '${data['if_fiscal'] ?? ''}'.trim().isNotEmpty,
+      addresses.isNotEmpty,
+    ];
+    return ((checks.where((c) => c).length / checks.length) * 100).round();
+  }
+
+  Future<void> saveField(Map<String, dynamic> partial) async {
+    try {
+      await widget.api.updateProfile(partial);
+      await load();
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : e.toString())),
+      );
+    }
+  }
+
+  Future<void> saveAddresses(List<Map<String, String>> updated) async {
+    final valid = updated
+        .where((a) =>
+            a['label']!.trim().isNotEmpty && a['value']!.trim().isNotEmpty)
+        .toList();
+    try {
+      await widget.api.updateProfile({'adresses': valid});
+      setState(() => addresses = valid);
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : e.toString())),
+      );
+    }
+  }
+
+  Future<void> editIdentitySheet() async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditIdentitySheet(data: data),
+    );
+    if (result != null) await saveField(result);
+  }
+
+  Future<void> editContactSheet() async {
+    final result = await showModalBottomSheet<Map<String, dynamic>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditContactSheet(data: data),
+    );
+    if (result != null) await saveField(result);
+  }
+
+  Future<void> addOrEditAddress({int? index}) async {
+    final existing = index == null ? null : addresses[index];
+    final result = await showModalBottomSheet<Map<String, String>>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _EditAddressSheet(existing: existing),
+    );
+    if (result == null) return;
+
+    final updated = [...addresses];
+    if (index == null) {
+      updated.add(result);
+    } else {
+      updated[index] = result;
+    }
+    await saveAddresses(updated);
+  }
+
+  Future<void> removeAddress(int index) async {
+    final updated = [...addresses]..removeAt(index);
+    await saveAddresses(updated);
+  }
+
   @override
   Widget build(BuildContext context) {
-    if (loading) return const Center(child: CircularProgressIndicator());
-
-    final data = profile ?? {};
-    final company = textValue(data['nom_societe'], fallback: widget.user.name);
-    final percent = profileCompletion(data);
-    final addresses = normaliseAddresses(data['adresses'] ?? data['addresses']);
-    final representant = data['representant'] is Map ? data['representant'] as Map : const {};
-
     return Scaffold(
-      body: RefreshIndicator(
-        onRefresh: load,
-        child: ListView(
-          padding: const EdgeInsets.all(AppSpacing.page),
-          children: [
-            if (error != null) ...[
-              ErrorBanner(message: error!),
-              const SizedBox(height: 14),
-            ],
-            PremiumCard(
-              child: Row(
+      appBar: AppBar(title: const Text('Profil')),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : RefreshIndicator(
+              onRefresh: load,
+              child: ListView(
+                padding: const EdgeInsets.all(AppSpacing.page),
                 children: [
-                  SizedBox(
-                    width: 92,
-                    height: 92,
-                    child: Stack(
-                      alignment: Alignment.center,
+                  if (error != null) ...[
+                    ErrorBanner(message: error!),
+                    const SizedBox(height: 14)
+                  ],
+                  PremiumCard(
+                    child: Row(
                       children: [
-                        CircularProgressIndicator(
-                          value: percent / 100,
-                          strokeWidth: 8,
-                          color: AppColors.primaryGold,
-                          backgroundColor: AppColors.surfaceRaised,
+                        SizedBox(
+                          width: 76,
+                          height: 76,
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              CircularProgressIndicator(
+                                value: completionPercent / 100,
+                                strokeWidth: 7,
+                                color: AppColors.primaryGold,
+                                backgroundColor: AppColors.surfaceRaised,
+                              ),
+                              Text('$completionPercent%',
+                                  style: const TextStyle(
+                                      fontFamily: 'Fraunces',
+                                      fontSize: 19,
+                                      fontWeight: FontWeight.w800,
+                                      color: AppColors.primaryGold)),
+                            ],
+                          ),
                         ),
-                        Text('$percent%', style: const TextStyle(fontFamily: 'Fraunces', fontSize: 24, fontWeight: FontWeight.w900, color: AppColors.primaryGold)),
+                        const SizedBox(width: 16),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text('Profil complété à $completionPercent%',
+                                  style: const TextStyle(
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 14.5)),
+                              const SizedBox(height: 4),
+                              const Text(
+                                'Complétez votre profil pour accéder à toutes les fonctionnalités.',
+                                style: TextStyle(
+                                    color: AppColors.muted, fontSize: 12),
+                              ),
+                              if (completionPercent < 100) ...[
+                                const SizedBox(height: 6),
+                                GestureDetector(
+                                  onTap: editIdentitySheet,
+                                  child: const Text('Compléter maintenant →',
+                                      style: TextStyle(
+                                          color: AppColors.primaryGold,
+                                          fontWeight: FontWeight.w800,
+                                          fontSize: 12.5)),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 18),
-                  Expanded(
+                  const SizedBox(height: 16),
+                  _Section(
+                    title: 'IDENTITÉ ENTREPRISE',
+                    onEdit: editIdentitySheet,
+                    rows: [
+                      _row('Raison sociale', data['nom_societe']),
+                      _row(
+                          'Forme juridique', data['forme_juridique'] ?? 'SARL'),
+                      _row('Capital social', data['capital_social']),
+                      _row('ICE', data['ice'] ?? data['if_fiscal']),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  _Section(
+                    title: 'CONTACT',
+                    onEdit: editContactSheet,
+                    rows: [
+                      _row(
+                          'Nom complet',
+                          '${data['prenom'] ?? ''} ${data['nom'] ?? ''}'
+                              .trim()),
+                      _row('Email', data['email']),
+                      _row('Téléphone', data['telephone']),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  PremiumCard(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Profil complete a $percent%', style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900)),
-                        const SizedBox(height: 6),
-                        const Text('Ces informations alimentent vos contrats et documents.', style: TextStyle(color: AppColors.muted)),
-                      ],
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(height: 14),
-            _SectionCard(
-              title: 'Identite entreprise',
-              rows: [
-                _InfoRow('Raison sociale', company),
-                _InfoRow('Forme juridique', textValue(data['forme_juridique'], fallback: 'SARL')),
-                _InfoRow('Capital social', moneyValue(data['capital_social'] ?? data['capital'])),
-                _InfoRow('ICE', textValue(data['ice'], fallback: textValue(data['if_fiscal']))),
-                _InfoRow('RC', textValue(data['rc'])),
-                _InfoRow('TP', textValue(data['tp'])),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SectionCard(
-              title: 'Contact',
-              rows: [
-                _InfoRow('Nom complet', displayName(data)),
-                _InfoRow('Email', widget.user.email),
-                _InfoRow('Telephone', textValue(data['telephone'])),
-              ],
-            ),
-            const SizedBox(height: 14),
-            _SectionCard(
-              title: 'Representant legal',
-              rows: [
-                _InfoRow('Nom', '${textValue(representant['prenom'])} ${textValue(representant['nom'])}'.trim()),
-                _InfoRow('CIN / Passeport', textValue(representant['cin'] ?? data['identite_representant'])),
-                _InfoRow('Nationalite', textValue(representant['nationalite'])),
-                _InfoRow('Email', textValue(representant['email'] ?? data['representant_email'])),
-                _InfoRow('Telephone', textValue(representant['telephone'] ?? data['representant_telephone'])),
-              ],
-            ),
-            const SizedBox(height: 14),
-            PremiumCard(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const _SectionTitle('Adresses'),
-                  const SizedBox(height: 10),
-                  if (addresses.isEmpty)
-                    const Text('Aucune adresse renseignee.', style: TextStyle(color: AppColors.muted))
-                  else
-                    for (final address in addresses)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 10),
-                        child: Row(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+                        Row(
                           children: [
-                            const Icon(Icons.location_on_outlined, color: AppColors.primaryGold),
-                            const SizedBox(width: 10),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(address.label, style: const TextStyle(fontWeight: FontWeight.w900)),
-                                  Text(address.value, style: const TextStyle(color: AppColors.muted)),
-                                ],
-                              ),
+                            const Expanded(
+                              child: Text('ADRESSES',
+                                  style: TextStyle(
+                                      color: AppColors.primaryGold,
+                                      fontWeight: FontWeight.w900,
+                                      fontSize: 12,
+                                      letterSpacing: 1)),
+                            ),
+                            TextButton.icon(
+                              onPressed: () => addOrEditAddress(),
+                              icon: const Icon(Icons.add, size: 16),
+                              label: const Text('Ajouter'),
                             ),
                           ],
                         ),
-                      ),
+                        const SizedBox(height: 8),
+                        if (addresses.isEmpty)
+                          const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 10),
+                            child: Text('Aucune adresse enregistrée.',
+                                style: TextStyle(color: AppColors.muted)),
+                          )
+                        else
+                          ReorderableListView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            itemCount: addresses.length,
+                            onReorder: (oldIndex, newIndex) {
+                              if (newIndex > oldIndex) newIndex -= 1;
+                              final updated = [...addresses];
+                              final moved = updated.removeAt(oldIndex);
+                              updated.insert(newIndex, moved);
+                              saveAddresses(updated);
+                            },
+                            itemBuilder: (context, index) {
+                              final address = addresses[index];
+                              return Padding(
+                                key: ValueKey(
+                                    '${address['label']}-${address['value']}-$index'),
+                                padding: const EdgeInsets.only(bottom: 8),
+                                child: Row(
+                                  children: [
+                                    const Icon(Icons.drag_indicator,
+                                        color: AppColors.faint, size: 18),
+                                    const SizedBox(width: 6),
+                                    const Icon(Icons.location_on_outlined,
+                                        size: 17, color: AppColors.primaryGold),
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: [
+                                          Text(address['label'] ?? '',
+                                              style: const TextStyle(
+                                                  fontWeight: FontWeight.w800,
+                                                  fontSize: 13)),
+                                          Text(address['value'] ?? '',
+                                              style: const TextStyle(
+                                                  color: AppColors.muted,
+                                                  fontSize: 12)),
+                                        ],
+                                      ),
+                                    ),
+                                    IconButton(
+                                      onPressed: () =>
+                                          addOrEditAddress(index: index),
+                                      icon: const Icon(Icons.edit_outlined,
+                                          size: 17,
+                                          color: AppColors.primaryGold),
+                                    ),
+                                    IconButton(
+                                      onPressed: () => removeAddress(index),
+                                      icon: const Icon(Icons.delete_outline,
+                                          size: 17, color: AppColors.red),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            },
+                          ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 40),
                 ],
               ),
             ),
-          ],
-        ),
-      ),
     );
   }
 
-  int profileCompletion(Map<String, dynamic> data) {
-    final rep = data['representant'] is Map ? data['representant'] as Map : const {};
-    final checks = [
-      plainValue(data['nom_societe']).isNotEmpty,
-      plainValue(rep['nom'] ?? data['representant_legal']).isNotEmpty,
-      plainValue(rep['cin'] ?? data['identite_representant']).isNotEmpty,
-      plainValue(data['rc']).isNotEmpty,
-      plainValue(data['if_fiscal']).isNotEmpty,
-      normaliseAddresses(data['adresses'] ?? data['addresses']).isNotEmpty,
-    ];
-    return ((checks.where((item) => item).length / checks.length) * 100).round();
-  }
-
-  List<_ProfileAddress> normaliseAddresses(dynamic raw) {
-    if (raw is! List) return const [];
-    return raw.asMap().entries.map((entry) {
-      final item = entry.value;
-      if (item is Map) {
-        return _ProfileAddress(textValue(item['label'], fallback: 'Adresse ${entry.key + 1}'), textValue(item['value'] ?? item['adresse'] ?? item['address']));
-      }
-      return _ProfileAddress('Adresse ${entry.key + 1}', textValue(item));
-    }).where((item) => item.value.isNotEmpty).toList();
-  }
-
-  String textValue(Object? value, {String fallback = '-'}) {
-    final text = '${value ?? ''}'.trim();
-    return text.isEmpty ? fallback : text;
-  }
-
-  String plainValue(Object? value) => '${value ?? ''}'.trim();
-
-  String displayName(Map<String, dynamic> data) {
-    final fullName = '${plainValue(data['prenom'])} ${plainValue(data['nom'])}'.trim();
-    return fullName.isEmpty ? widget.user.name : fullName;
-  }
-
-  String moneyValue(Object? value) {
-    final text = textValue(value, fallback: '');
-    return text.isEmpty ? '-' : '$text DH';
-  }
+  _InfoRow _row(String label, dynamic value) =>
+      _InfoRow(label, '${value ?? ''}'.trim().isEmpty ? '-' : '$value');
 }
 
-class _SectionCard extends StatelessWidget {
-  const _SectionCard({required this.title, required this.rows});
+class _Section extends StatelessWidget {
+  const _Section(
+      {required this.title, required this.rows, required this.onEdit});
 
   final String title;
   final List<_InfoRow> rows;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -224,22 +379,37 @@ class _SectionCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _SectionTitle(title),
-          const SizedBox(height: 12),
+          Row(
+            children: [
+              Expanded(
+                child: Text(title,
+                    style: const TextStyle(
+                        color: AppColors.primaryGold,
+                        fontWeight: FontWeight.w900,
+                        fontSize: 12,
+                        letterSpacing: 1)),
+              ),
+              IconButton(
+                  onPressed: onEdit,
+                  icon: const Icon(Icons.edit_outlined,
+                      size: 17, color: AppColors.primaryGold)),
+            ],
+          ),
           for (final row in rows)
             Padding(
-              padding: const EdgeInsets.only(bottom: 9),
+              padding: const EdgeInsets.only(bottom: 8),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(child: Text(row.label, style: const TextStyle(color: AppColors.muted))),
-                  const SizedBox(width: 12),
                   Expanded(
-                    child: Text(
-                      row.value.isEmpty ? '-' : row.value,
-                      textAlign: TextAlign.right,
-                      style: const TextStyle(fontWeight: FontWeight.w800),
-                    ),
+                      child: Text(row.label,
+                          style: const TextStyle(
+                              color: AppColors.muted, fontSize: 13))),
+                  Expanded(
+                    child: Text(row.value,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(
+                            fontWeight: FontWeight.w800, fontSize: 13)),
                   ),
                 ],
               ),
@@ -250,30 +420,234 @@ class _SectionCard extends StatelessWidget {
   }
 }
 
-class _SectionTitle extends StatelessWidget {
-  const _SectionTitle(this.text);
+class _InfoRow {
+  const _InfoRow(this.label, this.value);
+  final String label;
+  final String value;
+}
 
-  final String text;
+/// Edit sheet for the "IDENTITÉ ENTREPRISE" section. Returns a partial
+/// payload compatible with PUT /api/profile on save, or null on cancel.
+class _EditIdentitySheet extends StatefulWidget {
+  const _EditIdentitySheet({required this.data});
+
+  final Map<String, dynamic> data;
+
+  @override
+  State<_EditIdentitySheet> createState() => _EditIdentitySheetState();
+}
+
+class _EditIdentitySheetState extends State<_EditIdentitySheet> {
+  late final nomSociete =
+      TextEditingController(text: '${widget.data['nom_societe'] ?? ''}');
+  late final representant =
+      TextEditingController(text: '${widget.data['representant_legal'] ?? ''}');
+  late final identite = TextEditingController(
+      text: '${widget.data['identite_representant'] ?? ''}');
+  late final rc = TextEditingController(text: '${widget.data['rc'] ?? ''}');
+  late final ifFiscal =
+      TextEditingController(text: '${widget.data['if_fiscal'] ?? ''}');
+  late final tp = TextEditingController(text: '${widget.data['tp'] ?? ''}');
+
+  @override
+  void dispose() {
+    for (final c in [nomSociete, representant, identite, rc, ifFiscal, tp]) {
+      c.dispose();
+    }
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Text(
-      text.toUpperCase(),
-      style: const TextStyle(color: AppColors.primaryGold, fontWeight: FontWeight.w900, fontSize: 12, letterSpacing: 1),
+    return _SheetShell(
+      title: 'Identité entreprise',
+      onSave: () => Navigator.pop(context, {
+        'nom_societe': nomSociete.text.trim(),
+        'representant_legal': representant.text.trim(),
+        'identite_representant': identite.text.trim(),
+        'rc': rc.text.trim(),
+        'if_fiscal': ifFiscal.text.trim(),
+        'tp': tp.text.trim(),
+      }),
+      children: [
+        PremiumTextField(
+            controller: nomSociete,
+            label: 'Raison sociale',
+            icon: Icons.business_outlined),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: representant,
+            label: 'Représentant légal',
+            icon: Icons.person_outline),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: identite,
+            label: 'CIN / Passeport représentant',
+            icon: Icons.badge_outlined),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: rc, label: 'RC', icon: Icons.numbers_outlined),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: ifFiscal,
+            label: 'Identifiant fiscal (IF)',
+            icon: Icons.numbers_outlined),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: tp,
+            label: 'Taxe professionnelle (TP)',
+            icon: Icons.numbers_outlined),
+      ],
     );
   }
 }
 
-class _InfoRow {
-  const _InfoRow(this.label, this.value);
+/// Edit sheet for the "CONTACT" section.
+class _EditContactSheet extends StatefulWidget {
+  const _EditContactSheet({required this.data});
 
-  final String label;
-  final String value;
+  final Map<String, dynamic> data;
+
+  @override
+  State<_EditContactSheet> createState() => _EditContactSheetState();
 }
 
-class _ProfileAddress {
-  const _ProfileAddress(this.label, this.value);
+class _EditContactSheetState extends State<_EditContactSheet> {
+  late final nom = TextEditingController(text: '${widget.data['nom'] ?? ''}');
+  late final prenom =
+      TextEditingController(text: '${widget.data['prenom'] ?? ''}');
+  late final telephone =
+      TextEditingController(text: '${widget.data['telephone'] ?? ''}');
 
-  final String label;
-  final String value;
+  @override
+  void dispose() {
+    nom.dispose();
+    prenom.dispose();
+    telephone.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SheetShell(
+      title: 'Contact',
+      onSave: () => Navigator.pop(context, {
+        'nom': nom.text.trim(),
+        'prenom': prenom.text.trim(),
+        'telephone': telephone.text.trim(),
+      }),
+      children: [
+        PremiumTextField(
+            controller: nom, label: 'Nom', icon: Icons.person_outline),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: prenom, label: 'Prénom', icon: Icons.person_outline),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: telephone,
+            label: 'Téléphone',
+            icon: Icons.call_outlined,
+            keyboardType: TextInputType.phone),
+      ],
+    );
+  }
+}
+
+/// Edit sheet for a single address entry (label + value).
+class _EditAddressSheet extends StatefulWidget {
+  const _EditAddressSheet({this.existing});
+
+  final Map<String, String>? existing;
+
+  @override
+  State<_EditAddressSheet> createState() => _EditAddressSheetState();
+}
+
+class _EditAddressSheetState extends State<_EditAddressSheet> {
+  late final label =
+      TextEditingController(text: widget.existing?['label'] ?? '');
+  late final value =
+      TextEditingController(text: widget.existing?['value'] ?? '');
+
+  @override
+  void dispose() {
+    label.dispose();
+    value.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return _SheetShell(
+      title: widget.existing == null
+          ? 'Ajouter une adresse'
+          : 'Modifier l\'adresse',
+      onSave: () {
+        if (label.text.trim().isEmpty || value.text.trim().isEmpty) return;
+        Navigator.pop(
+            context, {'label': label.text.trim(), 'value': value.text.trim()});
+      },
+      children: [
+        PremiumTextField(
+            controller: label,
+            label: 'Libellé (ex: Siège social)',
+            icon: Icons.label_outline),
+        const SizedBox(height: 12),
+        PremiumTextField(
+            controller: value,
+            label: 'Adresse complète',
+            icon: Icons.location_on_outlined),
+      ],
+    );
+  }
+}
+
+/// Shared bottom-sheet shell (drag handle, title, field list, save button)
+/// reused by all three edit sheets above.
+class _SheetShell extends StatelessWidget {
+  const _SheetShell(
+      {required this.title, required this.children, required this.onSave});
+
+  final String title;
+  final List<Widget> children;
+  final VoidCallback onSave;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding:
+          EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
+      child: Container(
+        decoration: const BoxDecoration(
+          color: AppColors.surface,
+          borderRadius:
+              BorderRadius.vertical(top: Radius.circular(AppSpacing.radiusLg)),
+        ),
+        padding: const EdgeInsets.fromLTRB(20, 16, 20, 24),
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Center(
+                child: Container(
+                    width: 36,
+                    height: 4,
+                    decoration: BoxDecoration(
+                        color: AppColors.border,
+                        borderRadius: BorderRadius.circular(2))),
+              ),
+              const SizedBox(height: 16),
+              Text(title,
+                  style: const TextStyle(
+                      fontWeight: FontWeight.w900, fontSize: 16)),
+              const SizedBox(height: 16),
+              ...children,
+              const SizedBox(height: 18),
+              PremiumButton(label: 'Enregistrer', onPressed: onSave),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
 }

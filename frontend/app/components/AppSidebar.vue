@@ -23,23 +23,19 @@
       <!-- Logo mark — short code from runtime config, never a hardcoded
            brand string. Subtle inner highlight + soft shadow give it
            depth instead of reading as a flat placeholder tile. -->
-      <div
-        class="w-8 h-8 rounded-[9px] flex items-center justify-center shrink-0 text-[11px] font-black select-none"
-        style="
-          background: linear-gradient(155deg, #d8bd85 0%, #c8a96e 55%, #b8985c 100%);
-          color: #171310;
-          font-family: serif;
-          letter-spacing: -0.5px;
-          box-shadow: 0 1px 2px rgba(0,0,0,0.25), inset 0 1px 0 rgba(255,255,255,0.25);
-        "
-      >{{ appShortCode }}</div>
+      <img
+        :src="showLabels ? logoSrc : logoIconSrc"
+        :alt="appName"
+        class="shrink-0 select-none"
+        :class="showLabels ? 'h-8 w-auto max-w-[132px]' : 'h-8 w-8'"
+      >
 
       <!-- Brand — only when expanded (desktop) or always on mobile -->
       <div
         class="flex-1 min-w-0 overflow-hidden transition-all duration-200"
         :style="showLabels ? 'opacity:1;max-width:200px' : 'opacity:0;max-width:0;pointer-events:none'"
       >
-        <div class="font-serif text-sm leading-tight truncate" style="color: var(--app-text)">{{ appName }}</div>
+        <span class="sr-only">{{ appName }}</span>
       </div>
 
       <!-- Collapse toggle — custom tooltip instead of native title,
@@ -260,9 +256,9 @@ const { isOpen, isMobileOpen, toggle, toggleMobile, closeMobile } = useSidebar()
 // no brand string is ever hardcoded in this component.
 const config       = useRuntimeConfig()
 const appName      = computed(() => config.public.appName as string)
-const appShortCode = computed(() =>
-  (config.public.appShortCode as string) || appName.value.slice(0, 2).toUpperCase()
-)
+const { isDark } = useTheme()
+const logoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
+const logoIconSrc = '/brand/logo-icon.svg'
 
 // Where the user card links to — same convention already used by
 // AppTopbar.vue's avatar link, kept consistent across both.

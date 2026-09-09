@@ -14,11 +14,11 @@ const defaultApiBase = String.fromEnvironment(
 );
 
 void main() {
-  runApp(const DomiciliationApp());
+  runApp(const DomProApp());
 }
 
-class DomiciliationApp extends StatelessWidget {
-  const DomiciliationApp({super.key});
+class DomProApp extends StatelessWidget {
+  const DomProApp({super.key});
 
   @override
   Widget build(BuildContext context) {

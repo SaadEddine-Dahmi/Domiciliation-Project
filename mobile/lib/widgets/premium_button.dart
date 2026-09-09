@@ -1,4 +1,14 @@
+// lib/widgets/premium_button.dart
+//
+// Full-width action button used on auth screens and confirmation flows.
+// Two visual variants:
+//   filled   (default) — solid gold background, primary action
+//   outlined            — bordered, secondary action
+// Shows a small spinner in place of the icon while `loading` is true and
+// disables the tap target so the action can't be double-submitted.
+
 import 'package:flutter/material.dart';
+import '../theme/app_design.dart';
 
 class PremiumButton extends StatelessWidget {
   const PremiumButton({
@@ -18,23 +28,41 @@ class PremiumButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final child = loading
-        ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-        : Row(
-            mainAxisSize: MainAxisSize.min,
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              if (icon != null) ...[
-                Icon(icon),
-                const SizedBox(width: 10),
-              ],
-              Text(label),
-            ],
-          );
+    final child = Row(
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        if (loading)
+          SizedBox(
+            width: 18,
+            height: 18,
+            child: CircularProgressIndicator(
+              strokeWidth: 2.2,
+              color: outlined ? AppColors.primaryGold : AppColors.background,
+            ),
+          )
+        else if (icon != null)
+          Icon(icon, size: 19),
+        if (loading || icon != null) const SizedBox(width: 10),
+        Text(label),
+      ],
+    );
 
     if (outlined) {
-      return OutlinedButton(onPressed: loading ? null : onPressed, child: child);
+      return SizedBox(
+        width: double.infinity,
+        child: OutlinedButton(
+          onPressed: loading ? null : onPressed,
+          child: child,
+        ),
+      );
     }
-    return FilledButton(onPressed: loading ? null : onPressed, child: child);
+
+    return SizedBox(
+      width: double.infinity,
+      child: FilledButton(
+        onPressed: loading ? null : onPressed,
+        child: child,
+      ),
+    );
   }
 }

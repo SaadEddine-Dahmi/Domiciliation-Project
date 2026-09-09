@@ -28,19 +28,23 @@ export default defineNuxtConfig({
 
       // Product name — set NUXT_PUBLIC_APP_NAME in .env once the name
       // is chosen. Placeholder below is intentionally generic.
-      appName: process.env.NUXT_PUBLIC_APP_NAME ?? 'Domiciliation Manager',
+      appName: process.env.NUXT_PUBLIC_APP_NAME ?? 'DomPro',
 
       // Short 2-3 letter mark shown in the sidebar logo badge. Set
       // NUXT_PUBLIC_APP_SHORT_CODE alongside appName once the final
       // name/branding is chosen — falls back to the first two letters
       // of appName if not set.
-      appShortCode: process.env.NUXT_PUBLIC_APP_SHORT_CODE ?? 'DM',
+      appShortCode: process.env.NUXT_PUBLIC_APP_SHORT_CODE ?? 'DP',
     },
   },
 
   app: {
     head: {
+      title: 'DomPro',
       link: [
+        { rel: 'icon', type: 'image/svg+xml', href: '/favicon.svg' },
+        { rel: 'shortcut icon', href: '/favicon.svg' },
+        { rel: 'apple-touch-icon', href: '/brand/logo-icon.svg' },
         { rel: 'preconnect', href: 'https://fonts.googleapis.com' },
         { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' },
         {

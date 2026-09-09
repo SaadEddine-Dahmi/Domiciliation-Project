@@ -1,9 +1,9 @@
-import 'package:domiciliation_mobile/core/api_client.dart';
-import 'package:domiciliation_mobile/core/api_exception.dart';
-import 'package:domiciliation_mobile/core/auth_store.dart';
-import 'package:domiciliation_mobile/core/theme_controller.dart';
-import 'package:domiciliation_mobile/models/app_user.dart';
-import 'package:domiciliation_mobile/widgets/api_future.dart';
+import 'package:dompro/core/api_client.dart';
+import 'package:dompro/core/api_exception.dart';
+import 'package:dompro/core/auth_store.dart';
+import 'package:dompro/core/theme_controller.dart';
+import 'package:dompro/models/app_user.dart';
+import 'package:dompro/widgets/api_future.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;

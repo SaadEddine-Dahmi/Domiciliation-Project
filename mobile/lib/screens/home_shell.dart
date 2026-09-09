@@ -66,7 +66,7 @@ class _HomeShellState extends State<HomeShell> {
       if (widget.user.isDomiciliataire) ClientsScreen(api: widget.api),
       if (!widget.user.isAdmin) ContractsScreen(api: widget.api),
       if (widget.user.isDomiciliataire) FacturesScreen(api: widget.api),
-      ProfileScreen(api: widget.api, user: widget.user),
+      ProfileScreen(api: widget.api),
     ];
 
     if (index >= pages.length) index = 0;
@@ -234,7 +234,7 @@ class PremiumSidebar extends StatelessWidget {
                 const SizedBox(width: 12),
                 const Expanded(
                   child: Text(
-                    'Domiciliation App',
+                    'DomPro',
                     style: TextStyle(fontFamily: 'Fraunces', fontSize: 19, fontWeight: FontWeight.w800),
                   ),
                 ),

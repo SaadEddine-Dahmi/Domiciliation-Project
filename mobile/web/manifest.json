@@ -1,14 +1,20 @@
 {
-    "name": "domiciliation_mobile",
-    "short_name": "domiciliation_mobile",
+    "name": "DomPro",
+    "short_name": "DomPro",
     "start_url": ".",
     "display": "standalone",
     "background_color": "#0175C2",
     "theme_color": "#0175C2",
-    "description": "A new Flutter project.",
+    "description": "DomPro mobile client.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [
+        {
+            "src": "brand/logo-icon.svg",
+            "sizes": "any",
+            "type": "image/svg+xml",
+            "purpose": "any maskable"
+        },
         {
             "src": "icons/Icon-192.png",
             "sizes": "192x192",

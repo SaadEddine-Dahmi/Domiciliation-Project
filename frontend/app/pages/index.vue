@@ -33,10 +33,12 @@ auth.restoreSession()
 
 function getAppName(): string {
   const config = useRuntimeConfig()
-  return (config.public.appName as string) ?? 'Domiciliation Manager'
+  return (config.public.appName as string) ?? 'DomPro'
 }
 
 const appName = getAppName()
+const { isDark } = useTheme()
+const brandLogoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
 
 /** Where "Mon espace" / post-logout redirects should point, based on role */
 const dashboardPath = computed(() =>
@@ -147,7 +149,7 @@ onBeforeUnmount(() => {
     <!-- ── Nav ─────────────────────────────────────────────────────────── -->
     <header class="landing-nav">
       <div class="landing-nav__inner">
-        <span class="landing-nav__logo font-serif">{{ appName }}</span>
+        <img class="landing-nav__logo" :src="brandLogoSrc" :alt="appName">
 
         <!-- Guest nav: Login / Register -->
         <nav v-if="!auth.isAuthenticated" class="landing-nav__links">
@@ -322,8 +324,10 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 .landing-nav__logo {
-  font-size: 1.15rem;
-  font-weight: 600;
+  display: block;
+  height: 2.5rem;
+  width: auto;
+  max-width: 180px;
 }
 .landing-nav__links {
   display: flex;

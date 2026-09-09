@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/app_user.dart';
 import '../models/login_result.dart';
+import '../models/register_result.dart';
 import 'api_exception.dart';
 
 class ApiClient {
@@ -99,6 +100,32 @@ class ApiClient {
     return LoginResult(
       user: AppUser.fromJson(payload['user'] as Map<String, dynamic>),
       token: payload['token'] as String,
+    );
+  }
+
+  Future<RegisterResult> register({
+    required String nom,
+    String? prenom,
+    required String email,
+    required String password,
+    String? telephone,
+  }) async {
+    final data = await postJson('/api/auth/register', {
+      'nom': nom,
+      if (prenom != null) 'prenom': prenom,
+      'email': email,
+      'password': password,
+      if (telephone != null) 'telephone': telephone,
+      'role': 'domiciliataire',
+    });
+    final payload = Map<String, dynamic>.from(data['data'] as Map? ?? const {});
+    final token = payload['token']?.toString();
+    final userJson = payload['user'];
+
+    return RegisterResult(
+      pending: token == null || token.isEmpty,
+      user: userJson is Map ? AppUser.fromJson(Map<String, dynamic>.from(userJson)) : null,
+      token: token,
     );
   }
 
@@ -377,6 +404,8 @@ class ApiClient {
   String contractPdfUrl(Object id) {
     return uri('/api/contrats/$id/pdf/stream', {'token': token ?? '', 'mode': 'preview'}).toString();
   }
+
+  String contractPdfStreamUrl(Object contractId) => contractPdfUrl(contractId);
 
   String documentPreviewUrl(Object id) => uri('/api/documents/$id/preview', {'token': token ?? ''}).toString();
   String documentDownloadUrl(Object id) => uri('/api/documents/$id/download', {'token': token ?? ''}).toString();

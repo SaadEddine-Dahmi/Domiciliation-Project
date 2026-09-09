@@ -21,10 +21,12 @@ definePageMeta({ layout: 'default' })
 
 function getAppName(): string {
   const config = useRuntimeConfig()
-  return (config.public.appName as string) ?? 'Votre plateforme de domiciliation'
+  return (config.public.appName as string) ?? 'DomPro'
 }
 
 const appName = getAppName()
+const { isDark } = useTheme()
+const brandLogoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
 
 const services = [
   {
@@ -78,7 +80,7 @@ const steps = [
     <!-- ── Nav ─────────────────────────────────────────────────────────── -->
     <header class="landing-nav">
       <div class="landing-nav__inner">
-        <span class="landing-nav__logo font-serif">{{ appName }}</span>
+        <img class="landing-nav__logo" :src="brandLogoSrc" :alt="appName">
         <nav class="landing-nav__links">
           <NuxtLink to="/login" class="landing-nav__link nav-inactive">Connexion</NuxtLink>
           <NuxtLink to="/register" class="btn btn-gold btn-sm">Créer un compte</NuxtLink>
@@ -179,8 +181,10 @@ const steps = [
   justify-content: space-between;
 }
 .landing-nav__logo {
-  font-size: 1.15rem;
-  font-weight: 600;
+  display: block;
+  height: 2.5rem;
+  width: auto;
+  max-width: 180px;
 }
 .landing-nav__links {
   display: flex;

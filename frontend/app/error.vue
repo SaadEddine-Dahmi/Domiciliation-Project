@@ -18,7 +18,7 @@ const auth = useAuthStore()
 
 function getAppName(): string {
   const config = useRuntimeConfig()
-  return (config.public.appName as string) ?? 'Domiciliation Manager'
+  return (config.public.appName as string) ?? 'DomPro'
 }
 const appName = getAppName()
 

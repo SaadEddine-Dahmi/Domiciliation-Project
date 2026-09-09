@@ -1,6 +1,12 @@
-import 'package:flutter/material.dart';
+// lib/widgets/stat_card.dart
+//
+// Single tile in the dashboard's horizontal stat strip (Clients, Contrats
+// actifs, Brouillons, CA du mois...). The value is rendered in the serif
+// display font to match the mockup's treatment of headline numbers.
 
+import 'package:flutter/material.dart';
 import '../models/stat_item.dart';
+import '../theme/app_design.dart';
 
 class StatCard extends StatelessWidget {
   const StatCard({super.key, required this.item});
@@ -9,46 +15,51 @@ class StatCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Card(
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
       child: InkWell(
-        borderRadius: BorderRadius.circular(18),
         onTap: item.onTap,
-        child: Padding(
-          padding: const EdgeInsets.all(14),
+        borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+        child: Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
+            border: Border.all(color: AppColors.border),
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                width: 36,
-                height: 36,
+                width: 34,
+                height: 34,
                 decoration: BoxDecoration(
-                  color: const Color(0x1fc8a96e),
-                  borderRadius: BorderRadius.circular(14),
+                  color: AppColors.primaryGold.withOpacity(0.14),
+                  borderRadius: BorderRadius.circular(10),
                 ),
-                child: Icon(item.icon, color: const Color(0xffc8a96e), size: 20),
+                child: Icon(item.icon, size: 18, color: AppColors.primaryGold),
               ),
+              const Spacer(),
               FittedBox(
                 fit: BoxFit.scaleDown,
                 alignment: Alignment.centerLeft,
                 child: Text(
                   '${item.value}',
-                  maxLines: 1,
                   style: const TextStyle(
-                    fontSize: 24,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xffc8a96e),
                     fontFamily: 'Fraunces',
+                    fontWeight: FontWeight.w700,
+                    fontSize: 22,
+                    color: AppColors.text,
                   ),
                 ),
               ),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(item.label, style: const TextStyle(color: Color(0xaaf8f4ea), fontWeight: FontWeight.w700)),
-                  ),
-                  if (item.onTap != null) const Icon(Icons.chevron_right, size: 18, color: Color(0x88f8f4ea)),
-                ],
+              const SizedBox(height: 4),
+              Text(
+                item.label,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(color: AppColors.muted, fontSize: 12, fontWeight: FontWeight.w700),
               ),
             ],
           ),

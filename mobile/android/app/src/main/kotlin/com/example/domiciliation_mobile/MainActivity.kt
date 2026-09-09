@@ -1,4 +1,4 @@
-package com.example.domiciliation_mobile
+package com.dompro.app
 
 import io.flutter.embedding.android.FlutterActivity
 

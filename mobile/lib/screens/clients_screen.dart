@@ -1,20 +1,30 @@
-import 'package:file_picker/file_picker.dart';
+// lib/screens/clients_screen.dart
+//
+// Clients list + client detail, redesigned to match the mockup:
+//   - List: search bar, live count ("32 clients"), rows with initials
+//     avatar, name, city, status pill. Gold "+" FAB to create a client.
+//   - Detail: large avatar header with status + "client since" date,
+//     email/phone quick-contact row, an "Informations clés" 2x2 grid
+//     (adresse, forme juridique, capital social, RC), then a documents
+//     list with eye (preview) / download / delete actions per row.
+//
+// Data shape expected (ClientController::index / show):
+//   { id, raison_sociale, forme_juridique, adresse, ville, pays, capital,
+//     statut, created_at, representant: {...}, clientUser: {email, telephone},
+//     documents: [{ id, name, extension, created_at, download_url, preview_url }] }
+//
 import 'package:flutter/material.dart';
 
 import '../core/api_client.dart';
 import '../core/api_exception.dart';
 import '../core/link_launcher.dart';
 import '../theme/app_design.dart';
-import '../widgets/api_future.dart';
 import '../widgets/compact_tile.dart';
 import '../widgets/error_banner.dart';
 import '../widgets/gold_avatar.dart';
 import '../widgets/premium_card.dart';
 import '../widgets/status_pill.dart';
 import 'client_form_screen.dart';
-import 'contract_form_screen.dart';
-import 'contracts_screen.dart';
-import 'send_message_screen.dart';
 
 class ClientsScreen extends StatefulWidget {
   const ClientsScreen({super.key, required this.api});
@@ -26,490 +36,590 @@ class ClientsScreen extends StatefulWidget {
 }
 
 class _ClientsScreenState extends State<ClientsScreen> {
-  String search = '';
+  List<dynamic> clients = [];
+  bool loading = true;
+  String? error;
+  final search = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    load();
+    search.addListener(() => setState(() {}));
+  }
+
+  @override
+  void dispose() {
+    search.dispose();
+    super.dispose();
+  }
+
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
+    try {
+      final rows = await widget.api.list('/api/clients');
+      if (!mounted) return;
+      setState(() {
+        clients = rows;
+        loading = false;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        error = e is ApiException ? e.message : e.toString();
+        loading = false;
+      });
+    }
+  }
+
+  List<dynamic> get filtered {
+    final query = search.text.trim().toLowerCase();
+    if (query.isEmpty) return clients;
+    return clients.where((client) {
+      final name = '${client['raison_sociale'] ?? ''}'.toLowerCase();
+      final city = '${client['ville'] ?? ''}'.toLowerCase();
+      final email =
+          '${client['clientUser']?['email'] ?? client['client_user']?['email'] ?? ''}'
+              .toLowerCase();
+      return name.contains(query) ||
+          city.contains(query) ||
+          email.contains(query);
+    }).toList();
+  }
+
+  Future<void> openCreate() async {
+    final created = await Navigator.push<dynamic>(
+      context,
+      MaterialPageRoute(builder: (_) => ClientFormScreen(api: widget.api)),
+    );
+    if (created != null) await load();
+  }
+
+  Future<void> openDetail(dynamic client) async {
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+          builder: (_) =>
+              ClientDetailScreen(api: widget.api, clientId: client['id'])),
+    );
+    await load();
+  }
 
   @override
   Widget build(BuildContext context) {
+    final rows = filtered;
     return Scaffold(
-      body: ApiFuture<List<dynamic>>(
-        load: () => widget.api.list('/api/clients'),
-        builder: (context, items, refresh) {
-          final q = search.trim().toLowerCase();
-          final filtered = q.isEmpty
-              ? items
-              : items.where((item) {
-                  final haystack = [
-                    item['raison_sociale'],
-                    item['representant']?['nom'],
-                    item['representant']?['prenom'],
-                    item['representant']?['cin'],
-                  ].join(' ').toLowerCase();
-                  return haystack.contains(q);
-                }).toList();
-          return RefreshIndicator(
-            onRefresh: refresh,
-            child: ListView(
-              padding: const EdgeInsets.all(20),
-              children: [
-                TextField(
-                  onChanged: (value) => setState(() => search = value),
-                  decoration: const InputDecoration(
-                    prefixIcon: Icon(Icons.search),
-                    labelText: 'Rechercher un client...',
+      appBar: AppBar(title: const Text('Clients')),
+      body: RefreshIndicator(
+        onRefresh: load,
+        child: ListView(
+          padding: const EdgeInsets.all(AppSpacing.page),
+          children: [
+            TextField(
+              controller: search,
+              decoration: const InputDecoration(
+                hintText: 'Rechercher un client...',
+                prefixIcon:
+                    Icon(Icons.search, color: AppColors.muted, size: 20),
+              ),
+            ),
+            const SizedBox(height: 14),
+            Text('${rows.length} client${rows.length > 1 ? 's' : ''}',
+                style: const TextStyle(
+                    color: AppColors.primaryGold, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 12),
+            if (error != null) ...[
+              ErrorBanner(message: error!),
+              const SizedBox(height: 12),
+            ],
+            if (loading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 60),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (rows.isEmpty)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 60),
+                child: Column(
+                  children: [
+                    const Icon(Icons.business_outlined,
+                        size: 44, color: AppColors.faint),
+                    const SizedBox(height: 10),
+                    Text(
+                      search.text.trim().isEmpty
+                          ? 'Aucun client'
+                          : 'Aucun résultat pour "${search.text.trim()}"',
+                      style: const TextStyle(color: AppColors.muted),
+                    ),
+                  ],
+                ),
+              )
+            else
+              for (final client in rows)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 10),
+                  child: CompactTile(
+                    avatarLabel: '${client['raison_sociale'] ?? '?'}',
+                    title: '${client['raison_sociale'] ?? 'Client'}',
+                    subtitle: '${client['ville'] ?? ''}',
+                    trailing: '${client['statut'] ?? 'actif'}',
+                    onTap: () => openDetail(client),
                   ),
                 ),
-                const SizedBox(height: 12),
-                Text('${filtered.length} clients', style: const TextStyle(color: AppColors.primaryGold, fontWeight: FontWeight.w800)),
-                const SizedBox(height: 16),
-                if (filtered.isEmpty)
-                  const PremiumCard(child: Text('Aucun client'))
-                else
-                  ...filtered.map(
-                    (item) => ClientListTile(
-                      item: item,
-                      onTap: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => ClientDetailScreen(api: widget.api, client: item)),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-          );
-        },
+            const SizedBox(height: 80),
+          ],
+        ),
       ),
       floatingActionButton: FloatingActionButton(
-        backgroundColor: const Color(0xffc8a96e),
-        foregroundColor: const Color(0xff13161f),
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => ClientFormScreen(api: widget.api)),
-        ),
+        onPressed: openCreate,
+        backgroundColor: AppColors.primaryGold,
+        foregroundColor: AppColors.background,
         child: const Icon(Icons.add),
       ),
     );
   }
 }
 
-class ClientListTile extends StatelessWidget {
-  const ClientListTile({super.key, required this.item, required this.onTap});
-
-  final dynamic item;
-  final VoidCallback onTap;
-
-  @override
-  Widget build(BuildContext context) {
-    final title = '${item['raison_sociale'] ?? 'Client'}';
-    return PremiumCard(
-      margin: const EdgeInsets.only(bottom: 10),
-      onTap: onTap,
-      child: Row(
-        children: [
-          GoldAvatar(label: title),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
-                Text(
-                  '${item['ville'] ?? item['representant']?['adresse'] ?? ''}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(color: AppColors.muted, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          StatusPill(status: item['statut'] ?? 'actif', compact: true),
-          const Icon(Icons.chevron_right, color: AppColors.muted),
-        ],
-      ),
-    );
-  }
-}
-
-class CompactStatus extends StatelessWidget {
-  const CompactStatus({super.key, required this.label});
-
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return StatusPill(status: label, compact: true);
-  }
-}
-
 class ClientDetailScreen extends StatefulWidget {
-  const ClientDetailScreen({super.key, required this.api, required this.client});
+  const ClientDetailScreen(
+      {super.key, required this.api, required this.clientId});
 
   final ApiClient api;
-  final dynamic client;
+  final Object clientId;
 
   @override
   State<ClientDetailScreen> createState() => _ClientDetailScreenState();
 }
 
 class _ClientDetailScreenState extends State<ClientDetailScreen> {
-  late dynamic client = widget.client;
-  List<dynamic> contracts = [];
-  List<dynamic> documents = [];
-  List<dynamic> documentTypes = [];
+  Map<String, dynamic>? client;
+  bool loading = true;
   String? error;
-  bool busy = false;
-  bool loadingRelations = true;
 
   @override
   void initState() {
     super.initState();
-    refresh();
+    load();
   }
 
-  Future<void> refresh() async {
+  Future<void> load() async {
+    setState(() {
+      loading = true;
+      error = null;
+    });
     try {
-      final fresh = await widget.api.getClient(client['id']);
-      final loadedContracts = await widget.api.listQuery('/api/contrats', {'entreprise_id': '${client['id']}'});
-      final loadedDocuments = await widget.api.listQuery('/api/documents', {'entreprise_id': '${client['id']}'});
-      final loadedTypes = await widget.api.list('/api/document-types');
+      final data = await widget.api.getClient(widget.clientId);
       if (!mounted) return;
       setState(() {
-        client = fresh;
-        contracts = loadedContracts;
-        documents = loadedDocuments;
-        documentTypes = loadedTypes;
-        loadingRelations = false;
+        client = Map<String, dynamic>.from(data as Map);
+        loading = false;
       });
     } catch (e) {
       if (!mounted) return;
       setState(() {
         error = e is ApiException ? e.message : e.toString();
-        loadingRelations = false;
+        loading = false;
       });
     }
   }
 
-  Future<void> run(Future<void> Function() action) async {
-    setState(() {
-      busy = true;
-      error = null;
-    });
+  Future<void> openEdit() async {
+    final updated = await Navigator.push<dynamic>(
+      context,
+      MaterialPageRoute(
+          builder: (_) => ClientFormScreen(api: widget.api, client: client)),
+    );
+    if (updated != null) await load();
+  }
+
+  Future<void> deleteDocument(dynamic doc) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (_) => AlertDialog(
+        title: const Text('Supprimer ce document ?'),
+        content: Text(
+            '${doc['name'] ?? 'Ce document'} sera définitivement supprimé.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Annuler')),
+          FilledButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Supprimer')),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+
     try {
-      await action();
-      await refresh();
+      await widget.api.deleteDocument(doc['id']);
+      await load();
     } catch (e) {
-      setState(() => error = e is ApiException ? e.message : e.toString());
-    } finally {
-      if (mounted) setState(() => busy = false);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e is ApiException ? e.message : e.toString())),
+      );
     }
   }
 
-  Object? get clientUserId => client['client_user_id'] ?? client['clientUser']?['id'] ?? client['client_user']?['id'];
+  String _fmtDate(dynamic raw) {
+    if (raw == null) return '-';
+    final parsed = DateTime.tryParse('$raw');
+    if (parsed == null) return '$raw';
+    return '${parsed.day.toString().padLeft(2, '0')}/${parsed.month.toString().padLeft(2, '0')}/${parsed.year}';
+  }
 
-  Future<void> uploadDocument() async {
-    if (documentTypes.isEmpty) {
-      setState(() => error = 'Aucun type de document disponible.');
-      return;
+  IconData _iconForExtension(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'pdf':
+        return Icons.picture_as_pdf_outlined;
+      case 'doc':
+      case 'docx':
+        return Icons.description_outlined;
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+        return Icons.image_outlined;
+      case 'xls':
+      case 'xlsx':
+        return Icons.table_chart_outlined;
+      default:
+        return Icons.insert_drive_file_outlined;
     }
+  }
 
-    Object? selectedType = documentTypes.first['id'];
-    final expiration = TextEditingController();
-    final confirmed = await showModalBottomSheet<bool>(
-      context: context,
-      showDragHandle: true,
-      isScrollControlled: true,
-      builder: (context) => StatefulBuilder(
-        builder: (context, setModalState) => Padding(
-          padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Text('Ajouter un document', style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800)),
-              const SizedBox(height: 16),
-              DropdownButtonFormField<Object>(
-                value: selectedType,
-                decoration: const InputDecoration(labelText: 'Type de document'),
-                items: documentTypes
-                    .map((type) => DropdownMenuItem<Object>(
-                          value: type['id'],
-                          child: Text('${type['name'] ?? 'Document'}'),
-                        ))
-                    .toList(),
-                onChanged: (value) => setModalState(() => selectedType = value),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: expiration,
-                decoration: const InputDecoration(labelText: 'Date expiration YYYY-MM-DD'),
-              ),
-              const SizedBox(height: 16),
-              FilledButton.icon(
-                onPressed: () => Navigator.pop(context, true),
-                icon: const Icon(Icons.upload_file_outlined),
-                label: const Text('Choisir le fichier'),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-    if (confirmed != true || selectedType == null) return;
-    final expirationText = expiration.text;
-    expiration.dispose();
-
-    final result = await FilePicker.platform.pickFiles(
-      type: FileType.custom,
-      allowedExtensions: ['pdf', 'jpg', 'jpeg', 'png', 'doc', 'docx'],
-      withData: true,
-    );
-    final file = result?.files.single;
-    if (file == null) return;
-
-    await run(() async {
-      await widget.api.uploadDocument(
-        entrepriseId: client['id'],
-        documentTypeId: selectedType!,
-        file: file,
-        dateExpiration: expirationText,
-      );
-    });
+  Color _colorForExtension(String ext) {
+    switch (ext.toLowerCase()) {
+      case 'pdf':
+        return AppColors.red;
+      case 'doc':
+      case 'docx':
+        return AppColors.blue;
+      case 'xls':
+      case 'xlsx':
+        return AppColors.green;
+      default:
+        return AppColors.primaryGold;
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    final isActive = client['statut'] == 'actif';
-    final contact = client['clientUser'] ?? client['client_user'];
-    final representant = client['representant'];
-
     return Scaffold(
-      appBar: AppBar(title: const Text('Detail client')),
-      body: RefreshIndicator(
-        onRefresh: refresh,
-        child: ListView(
-          padding: const EdgeInsets.all(16),
-          children: [
-            Card(
-              child: Padding(
-                padding: const EdgeInsets.all(18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      '${client['raison_sociale'] ?? 'Client'}',
-                      style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-                    ),
-                    const SizedBox(height: 8),
-                    Text('${client['forme_juridique'] ?? ''} - ${client['ville'] ?? ''}'),
-                    const SizedBox(height: 12),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
+      appBar: AppBar(
+        title: const Text('Détail client'),
+        actions: [
+          IconButton(
+              onPressed: loading ? null : openEdit,
+              icon: const Icon(Icons.edit_outlined)),
+        ],
+      ),
+      body: loading
+          ? const Center(child: CircularProgressIndicator())
+          : error != null
+              ? Padding(
+                  padding: const EdgeInsets.all(AppSpacing.page),
+                  child: ErrorBanner(message: error!))
+              : RefreshIndicator(
+                  onRefresh: load,
+                  child: _buildBody(context, client!),
+                ),
+    );
+  }
+
+  Widget _buildBody(BuildContext context, Map<String, dynamic> client) {
+    final name = '${client['raison_sociale'] ?? 'Client'}';
+    final contact = client['clientUser'] ?? client['client_user'];
+    final email = contact is Map ? '${contact['email'] ?? '-'}' : '-';
+    final phone = contact is Map ? '${contact['telephone'] ?? '-'}' : '-';
+    final documents =
+        List<dynamic>.from(client['documents'] as List? ?? const []);
+
+    return ListView(
+      padding: const EdgeInsets.all(AppSpacing.page),
+      children: [
+        PremiumCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  GoldAvatar(label: name, radius: 34),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Chip(label: Text(isActive ? 'Actif' : 'Inactif')),
-                        if (contact?['email'] != null) Chip(label: Text('${contact['email']}')),
-                        if (representant?['telephone'] != null) Chip(label: Text('${representant['telephone']}')),
-                        if (representant?['cin'] != null) Chip(label: Text('CIN ${representant['cin']}')),
-                      ],
-                    ),
-                    if (representant != null) ...[
-                      const SizedBox(height: 12),
-                      Text('Representant: ${representant['prenom'] ?? ''} ${representant['nom'] ?? ''}'.trim()),
-                      if (representant['adresse'] != null) Text('Residence: ${representant['adresse']}'),
-                    ],
-                  ],
-                ),
-              ),
-            ),
-            if (error != null) ...[
-              const SizedBox(height: 12),
-              ErrorBanner(message: error!),
-            ],
-            const SizedBox(height: 16),
-            Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                FilledButton.icon(
-                  onPressed: busy
-                      ? null
-                      : () async {
-                          final updated = await Navigator.push<dynamic>(
-                            context,
-                            MaterialPageRoute(builder: (_) => ClientFormScreen(api: widget.api, client: client)),
-                          );
-                          if (updated != null) setState(() => client = updated);
-                        },
-                  icon: const Icon(Icons.edit_outlined),
-                  label: const Text('Modifier'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: busy
-                      ? null
-                      : () => run(() async {
-                            final next = isActive ? 'inactif' : 'actif';
-                            await widget.api.setClientStatus(client['id'], next);
-                          }),
-                  icon: Icon(isActive ? Icons.block : Icons.check_circle_outline),
-                  label: Text(isActive ? 'Suspendre' : 'Reactiver'),
-                ),
-                OutlinedButton.icon(
-                  onPressed: busy
-                      ? null
-                      : () => run(() async {
-                            final password = await widget.api.resetClientPassword(client['id']);
-                            if (mounted && password != null) {
-                              await showDialog<void>(
-                                context: context,
-                                builder: (_) => AlertDialog(
-                                  title: const Text('Nouveau mot de passe'),
-                                  content: SelectableText(password),
-                                  actions: [
-                                    TextButton(onPressed: () => Navigator.pop(context), child: const Text('Fermer')),
-                                  ],
-                                ),
-                              );
-                            }
-                          }),
-                  icon: const Icon(Icons.key_outlined),
-                  label: const Text('Mot de passe'),
-                ),
-                FilledButton.tonalIcon(
-                  onPressed: clientUserId == null
-                      ? null
-                      : () => Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (_) => SendMessageScreen(
-                                api: widget.api,
-                                clientUserId: clientUserId!,
-                                clientName: '${client['raison_sociale'] ?? 'Client'}',
-                              ),
-                            ),
-                          ),
-                  icon: const Icon(Icons.mail_outline),
-                  label: const Text('Message'),
-                ),
-              ],
-            ),
-            const SizedBox(height: 18),
-            SectionHeader(
-              icon: Icons.description_outlined,
-              title: 'Contrats',
-              actionLabel: 'Ajouter',
-              onAction: busy
-                  ? null
-                  : () async {
-                      final created = await Navigator.push<dynamic>(
-                        context,
-                        MaterialPageRoute(builder: (_) => ContractFormScreen(api: widget.api, initialClient: client)),
-                      );
-                      if (created != null) refresh();
-                    },
-            ),
-            if (loadingRelations)
-              const Padding(padding: EdgeInsets.all(16), child: Center(child: CircularProgressIndicator()))
-            else if (contracts.isEmpty)
-              const EmptyPanel(label: 'Aucun contrat pour ce client.')
-            else
-              ...contracts.map(
-                (contract) => CompactTile(
-                  icon: Icons.description_outlined,
-                  title: '${contract['titre_contrat'] ?? 'Contrat'}',
-                  subtitle: '${contract['date_debut'] ?? '-'} - ${contract['date_fin'] ?? '-'}',
-                  trailing: '${contract['statut'] ?? ''}',
-                  onTap: () => Navigator.push(
-                    context,
-                    MaterialPageRoute(builder: (_) => ContractDetailScreen(api: widget.api, contract: contract)),
-                  ).then((_) => refresh()),
-                ),
-              ),
-            const SizedBox(height: 18),
-            SectionHeader(
-              icon: Icons.folder_outlined,
-              title: 'Documents',
-              actionLabel: 'Ajouter',
-              onAction: busy ? null : uploadDocument,
-            ),
-            if (!loadingRelations && documents.isEmpty)
-              const EmptyPanel(label: 'Aucun document importe.')
-            else
-              ...documents.map(
-                (document) => Card(
-                  margin: const EdgeInsets.only(bottom: 10),
-                  child: ListTile(
-                    leading: const Icon(Icons.insert_drive_file_outlined),
-                    title: Text('${document['name'] ?? 'Document'}'),
-                    subtitle: Text('Expiration: ${document['date_expiration'] ?? '-'}'),
-                    onTap: () => openExternal(widget.api.documentPreviewUrl(document['id'])),
-                    trailing: PopupMenuButton<String>(
-                      onSelected: (value) {
-                        if (value == 'preview') openExternal(widget.api.documentPreviewUrl(document['id']));
-                        if (value == 'download') openExternal(widget.api.documentDownloadUrl(document['id']));
-                        if (value == 'delete') run(() => widget.api.deleteDocument(document['id']));
-                      },
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(value: 'preview', child: Text('Apercu')),
-                        PopupMenuItem(value: 'download', child: Text('Telecharger')),
-                        PopupMenuItem(value: 'delete', child: Text('Supprimer')),
+                        Text(name,
+                            style: Theme.of(context)
+                                .textTheme
+                                .titleLarge
+                                ?.copyWith(fontSize: 20)),
+                        const SizedBox(height: 6),
+                        StatusPill(status: client['statut'] ?? 'actif'),
                       ],
                     ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'Client depuis le ${_fmtDate(client['created_at'] ?? client['date_creation'])}',
+                style: const TextStyle(color: AppColors.muted, fontSize: 12.5),
+              ),
+              const SizedBox(height: 18),
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceRaised,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                        child: _ContactItem(
+                            icon: Icons.mail_outline,
+                            label: 'Email',
+                            value: email)),
+                    Container(width: 1, height: 34, color: AppColors.border),
+                    const SizedBox(width: 12),
+                    Expanded(
+                        child: _ContactItem(
+                            icon: Icons.call_outlined,
+                            label: 'Téléphone',
+                            value: phone)),
+                  ],
                 ),
               ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 18),
+        const Text('INFORMATIONS CLÉS',
+            style: TextStyle(
+                color: AppColors.primaryGold,
+                fontWeight: FontWeight.w900,
+                fontSize: 12,
+                letterSpacing: 1)),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _InfoTile(
+                icon: Icons.location_on_outlined,
+                label: 'Adresse',
+                value:
+                    '${client['adresse'] ?? '-'}${client['ville'] != null ? '\n${client['ville']}' : ''}',
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _InfoTile(
+                icon: Icons.balance_outlined,
+                label: 'Forme juridique',
+                value: '${client['forme_juridique'] ?? '-'}',
+              ),
+            ),
           ],
         ),
-      ),
+        const SizedBox(height: 10),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: _InfoTile(
+                icon: Icons.payments_outlined,
+                label: 'Capital social',
+                value:
+                    client['capital'] != null ? '${client['capital']} DH' : '-',
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: _InfoTile(
+                icon: Icons.badge_outlined,
+                label: 'N° RC',
+                value:
+                    '${client['rc'] ?? client['representant']?['cin'] ?? '-'}',
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 22),
+        Row(
+          children: [
+            const Expanded(
+              child: Text('DOCUMENTS',
+                  style: TextStyle(
+                      color: AppColors.primaryGold,
+                      fontWeight: FontWeight.w900,
+                      fontSize: 12,
+                      letterSpacing: 1)),
+            ),
+            TextButton(onPressed: () {}, child: const Text('Voir tout')),
+          ],
+        ),
+        const SizedBox(height: 8),
+        if (documents.isEmpty)
+          const PremiumCard(
+              child: Text('Aucun document',
+                  style: TextStyle(color: AppColors.muted)))
+        else
+          for (final doc in documents)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _DocumentRow(
+                doc: doc,
+                icon: _iconForExtension('${doc['extension'] ?? ''}'),
+                color: _colorForExtension('${doc['extension'] ?? ''}'),
+                dateLabel: _fmtDate(doc['created_at']),
+                onPreview: () =>
+                    openExternal(widget.api.documentPreviewUrl(doc['id'])),
+                onDownload: () =>
+                    openExternal(widget.api.documentDownloadUrl(doc['id'])),
+                onDelete: () => deleteDocument(doc),
+              ),
+            ),
+        const SizedBox(height: 40),
+      ],
     );
   }
 }
 
-class SectionHeader extends StatelessWidget {
-  const SectionHeader({
-    super.key,
-    required this.icon,
-    required this.title,
-    required this.actionLabel,
-    this.onAction,
-  });
+class _ContactItem extends StatelessWidget {
+  const _ContactItem(
+      {required this.icon, required this.label, required this.value});
 
   final IconData icon;
-  final String title;
-  final String actionLabel;
-  final VoidCallback? onAction;
+  final String label;
+  final String value;
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 10),
-      child: Row(
-        children: [
-          Icon(icon, size: 20, color: Theme.of(context).colorScheme.primary),
-          const SizedBox(width: 8),
-          Expanded(child: Text(title, style: Theme.of(context).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800))),
-          TextButton.icon(
-            onPressed: onAction,
-            icon: const Icon(Icons.add),
-            label: Text(actionLabel),
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: AppColors.primaryGold),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(label,
+                  style:
+                      const TextStyle(color: AppColors.muted, fontSize: 10.5)),
+              Text(value,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                      color: AppColors.text,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 12.5)),
+            ],
           ),
+        ),
+      ],
+    );
+  }
+}
+
+class _InfoTile extends StatelessWidget {
+  const _InfoTile(
+      {required this.icon, required this.label, required this.value});
+
+  final IconData icon;
+  final String label;
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return PremiumCard(
+      padding: const EdgeInsets.all(14),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 17, color: AppColors.primaryGold),
+          const SizedBox(height: 8),
+          Text(label,
+              style: const TextStyle(color: AppColors.muted, fontSize: 11)),
+          const SizedBox(height: 3),
+          Text(value,
+              style: const TextStyle(
+                  color: AppColors.text,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13.5)),
         ],
       ),
     );
   }
 }
 
-class EmptyPanel extends StatelessWidget {
-  const EmptyPanel({super.key, required this.label});
+class _DocumentRow extends StatelessWidget {
+  const _DocumentRow({
+    required this.doc,
+    required this.icon,
+    required this.color,
+    required this.dateLabel,
+    required this.onPreview,
+    required this.onDownload,
+    required this.onDelete,
+  });
 
-  final String label;
+  final dynamic doc;
+  final IconData icon;
+  final Color color;
+  final String dateLabel;
+  final VoidCallback onPreview;
+  final VoidCallback onDownload;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
-    return Card(
-      margin: const EdgeInsets.only(bottom: 10),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Text(label),
+    return PremiumCard(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      child: Row(
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+                color: color.withOpacity(0.14),
+                borderRadius: BorderRadius.circular(10)),
+            child: Icon(icon, size: 18, color: color),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('${doc['name'] ?? 'Document'}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w800, fontSize: 13.5)),
+                const SizedBox(height: 2),
+                Text(dateLabel,
+                    style: const TextStyle(
+                        color: AppColors.muted, fontSize: 11.5)),
+              ],
+            ),
+          ),
+          IconButton(
+              onPressed: onPreview,
+              icon: const Icon(Icons.visibility_outlined,
+                  size: 19, color: AppColors.muted)),
+          IconButton(
+              onPressed: onDownload,
+              icon: const Icon(Icons.download_outlined,
+                  size: 19, color: AppColors.primaryGold)),
+          IconButton(
+              onPressed: onDelete,
+              icon: const Icon(Icons.delete_outline,
+                  size: 19, color: AppColors.red)),
+        ],
       ),
     );
   }
