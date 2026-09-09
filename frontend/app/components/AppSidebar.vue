@@ -17,59 +17,56 @@
 
     <!-- ── HEADER / LOGO ── -->
     <div
-      class="shrink-0 flex items-center h-14 px-3 gap-2"
-      style="border-bottom: 1px solid var(--app-border-2);"
-    >
-      <!-- Logo mark — short code from runtime config, never a hardcoded
-           brand string. Subtle inner highlight + soft shadow give it
-           depth instead of reading as a flat placeholder tile. -->
-      <img
-        :src="showLabels ? logoSrc : logoIconSrc"
-        :alt="appName"
-        class="shrink-0 select-none"
-        :class="showLabels ? 'h-8 w-auto max-w-[132px]' : 'h-8 w-8'"
-      >
+  class="shrink-0 flex items-center h-16 px-3 gap-2"
+  style="border-bottom: 1px solid var(--app-border-2);"
+>
+  <img
+    :src="showLabels ? logoSrc : logoIconSrc"
+    :alt="appName"
+    class="shrink-0 select-none"
+    :class="showLabels ? 'h-11 w-auto max-w-60' : 'h-11 w-11'"
+  >
 
-      <!-- Brand — only when expanded (desktop) or always on mobile -->
-      <div
-        class="flex-1 min-w-0 overflow-hidden transition-all duration-200"
-        :style="showLabels ? 'opacity:1;max-width:200px' : 'opacity:0;max-width:0;pointer-events:none'"
-      >
-        <span class="sr-only">{{ appName }}</span>
-      </div>
+  <!-- Brand — only when expanded (desktop) or always on mobile -->
+  <div
+    class="flex-1 min-w-0 overflow-hidden transition-all duration-200"
+    :style="showLabels ? 'opacity:1;max-width:200px' : 'opacity:0;max-width:0;pointer-events:none'"
+  >
+    <span class="sr-only">{{ appName }}</span>
+  </div>
 
-      <!-- Collapse toggle — custom tooltip instead of native title,
-           for visual consistency with the rest of the sidebar. -->
-      <button
-        class="group relative hidden lg:flex w-8 h-8 rounded-lg items-center justify-center shrink-0 transition-colors nav-inactive focus-ring"
-        :aria-label="isOpen ? 'Réduire la barre latérale' : 'Agrandir la barre latérale'"
-        @click="toggle"
-      >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="3" width="18" height="18" rx="2"/>
-          <path d="M9 3v18"/>
-          <path v-if="isOpen"  d="M5 9l-2 3 2 3"/>
-          <path v-if="!isOpen" d="M5 9l2 3-2 3"/>
-        </svg>
-        <span
-          class="nav-tooltip pointer-events-none absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
-          style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
-        >{{ isOpen ? 'Réduire' : 'Agrandir' }}</span>
-      </button>
+  <!-- Collapse toggle — custom tooltip instead of native title,
+       for visual consistency with the rest of the sidebar. -->
+  <button
+    class="group relative hidden lg:flex w-8 h-8 rounded-lg items-center justify-center shrink-0 transition-colors nav-inactive focus-ring"
+    :aria-label="isOpen ? 'Réduire la barre latérale' : 'Agrandir la barre latérale'"
+    @click="toggle"
+  >
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <path d="M9 3v18"/>
+      <path v-if="isOpen"  d="M5 9l-2 3 2 3"/>
+      <path v-if="!isOpen" d="M5 9l2 3-2 3"/>
+    </svg>
+    <span
+      class="nav-tooltip pointer-events-none absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
+      style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
+    >{{ isOpen ? 'Réduire' : 'Agrandir' }}</span>
+  </button>
 
-      <!-- Mobile close button -->
-      <button
-        class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center shrink-0 nav-inactive focus-ring"
-        aria-label="Fermer le menu"
-        @click="closeMobile"
-      >
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
-             stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
-          <path d="M18 6L6 18M6 6l12 12"/>
-        </svg>
-      </button>
-    </div>
+  <!-- Mobile close button -->
+  <button
+    class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center shrink-0 nav-inactive focus-ring"
+    aria-label="Fermer le menu"
+    @click="closeMobile"
+  >
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none"
+         stroke="currentColor" stroke-width="2.2" stroke-linecap="round">
+      <path d="M18 6L6 18M6 6l12 12"/>
+    </svg>
+  </button>
+</div>
 
     <!-- ── USER CARD ── -->
     <!-- Links to `settingsPath`, which is now resolved per-role below —

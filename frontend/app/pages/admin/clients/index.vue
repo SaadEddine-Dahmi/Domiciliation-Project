@@ -12,11 +12,16 @@
 //     already has it in the form they just typed.
 //   - Not shown at all in edit mode — changing an existing client's
 //     password is a separate action (reset), not part of profile edits.
+//
+// Phone field:
+//   Delegated to <PhoneNumberField> (components/PhoneNumberField.vue).
+//   sortedDialCodeValues is still needed here for splitPhone() when
+//   loading an existing client's phone number into the edit form.
 
 import { storeToRefs } from 'pinia'
 import { useClientsStore } from '~/stores/clients'
 import PasswordRevealModal from '~/components/PasswordRevealModal.vue'
-import { countryDialCodes, sortedDialCodeValues } from '~/utils/countryDialCodes'
+import { sortedDialCodeValues } from '~/utils/countryDialCodes'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
@@ -30,7 +35,6 @@ const editId      = ref<number | null>(null)
 const saving      = ref(false)
 const search      = ref('')
 const serverError = ref('')
-const dialCodes = countryDialCodes
 
 function joinPhone(dialCode: string, number: string): string {
   const local = number.trim().replace(/^0+/, '')
@@ -253,7 +257,7 @@ onMounted(() => clientsStore.fetchAll())
 
     <!-- ── Search ────────────────────────────────────────── -->
     <div class="relative w-full max-w-xl">
-    <svg
+      <svg
         class="pointer-events-none absolute left-3.5 top-1/2 h-4 w-4 -translate-y-1/2 text-[var(--app-text-faint)]"
         viewBox="0 0 24 24"
         fill="none"
@@ -261,12 +265,12 @@ onMounted(() => clientsStore.fetchAll())
         stroke-width="2"
         stroke-linecap="round"
         aria-hidden="true"
-    >
+      >
         <circle cx="11" cy="11" r="7.5" />
         <path d="m20 20-3.8-3.8" />
-    </svg>
+      </svg>
 
-    <input
+      <input
         v-model.trim="search"
         type="search"
         autocomplete="off"
@@ -277,29 +281,29 @@ onMounted(() => clientsStore.fetchAll())
         placeholder="Rechercher une société, un représentant, une CIN ou un email..."
         aria-label="Rechercher une société, un représentant, une CIN ou un email"
         @keyup.esc="search = ''"
-    />
+      />
 
-    <button
+      <button
         v-if="search"
         type="button"
         class="absolute right-2.5 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-[var(--app-text-faint)] transition-colors hover:bg-black/5 hover:text-black focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--app-primary)] dark:hover:bg-white/10 dark:hover:text-white"
         aria-label="Effacer la recherche"
         @click="search = ''"
-    >
+      >
         <svg
-            class="h-3.5 w-3.5"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            stroke-width="2"
-            stroke-linecap="round"
-            aria-hidden="true"
+          class="h-3.5 w-3.5"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          aria-hidden="true"
         >
-            <path d="M18 6 6 18" />
-            <path d="m6 6 12 12" />
+          <path d="M18 6 6 18" />
+          <path d="m6 6 12 12" />
         </svg>
-    </button>
-</div>
+      </button>
+    </div>
 
     <!-- ── Loading state ─────────────────────────────────── -->
     <div v-if="loading" class="text-center py-12" style="color:var(--app-text-faint)">
@@ -441,22 +445,14 @@ onMounted(() => clientsStore.fetchAll())
                   <label class="f-label">Email (contact représentant)</label>
                   <input v-model="form.gerant_email" class="f-input" type="email" placeholder="laetitia@exemple.com" />
                 </div>
-                <div>
-                  <label class="f-label">Téléphone</label>
-                  <div class="grid grid-cols-[minmax(130px,0.42fr)_1fr] gap-2">
-                    <select v-model="form.gerant_dial_code" class="f-input min-w-0">
-                      <option v-for="code in dialCodes" :key="code.iso" :value="code.dialCode">
-                        {{ code.flag }} {{ code.dialCode }} {{ code.country }}
-                      </option>
-                    </select>
-                    <input
-                      v-model="form.gerant_phone_number"
-                      class="f-input min-w-0"
-                      type="tel"
-                      placeholder="6 26 01 11 49" />
-                  </div>
-                </div>
-                <div>
+                <PhoneNumberField
+  v-model:dial-code="form.gerant_dial_code"
+  v-model:number="form.gerant_phone_number"
+  label="Téléphone"
+  placeholder="6 26 01 11 49"
+  class="sm:col-span-2"
+/>
+<div>
                   <label class="f-label">Date de naissance</label>
                   <input v-model="form.gerant_date_naissance" class="f-input" type="date" />
                 </div>

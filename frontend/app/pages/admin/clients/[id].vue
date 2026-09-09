@@ -15,12 +15,16 @@
 //      when the contract was created — it is never hard-coded to a
 //      fixed contract type, so any contract name is supported.
 //   4. Documents — list, upload, preview, download, delete, scoped to
-//      this client (unchanged from the previous version, restyled to
-//      match the rest of the page).
+//      this client.
+//
+// Phone field:
+//   Delegated to <PhoneNumberField> (components/PhoneNumberField.vue).
+//   sortedDialCodeValues is still needed here for splitPhone() when
+//   loading the client's phone number into the edit form.
 
 import { useClientsStore } from '~/stores/clients'
 import ContratPreviewModal from '~/components/ContratPreviewModal.vue'
-import { countryDialCodes, sortedDialCodeValues } from '~/utils/countryDialCodes'
+import { sortedDialCodeValues } from '~/utils/countryDialCodes'
 
 definePageMeta({
   layout: 'dashboard',
@@ -81,7 +85,6 @@ const isPdf = ref(false)
 
 // Shared contract preview component reference.
 const pdfPreview = ref()
-const dialCodes = countryDialCodes
 
 function joinPhone(dialCode: string, number: string): string {
   const local = number.trim().replace(/^0+/, '')
@@ -268,6 +271,7 @@ async function submitEdit(): Promise<void> {
     savingEdit.value = false
   }
 }
+
 // ── Client status toggle ───────────────────────────────────
 const togglingStatus = ref(false)
 const resettingPassword = ref(false)
@@ -306,9 +310,9 @@ async function regenerateClientPassword(): Promise<void> {
   try {
     regeneratedPassword.value = await clientsStore.resetPassword(client.value.id)
     showRegeneratedPassword.value = true
-    success('Mot de passe regenere')
+    success('Mot de passe régénéré')
   } catch (e: any) {
-    toastError?.(e?.data?.message ?? 'Erreur lors de la regeneration du mot de passe')
+    toastError?.(e?.data?.message ?? 'Erreur lors de la régénération du mot de passe')
   } finally {
     resettingPassword.value = false
   }
@@ -318,7 +322,7 @@ async function copyRegeneratedPassword(): Promise<void> {
   if (!regeneratedPassword.value) return
   try {
     await navigator.clipboard.writeText(regeneratedPassword.value)
-    success('Mot de passe copie')
+    success('Mot de passe copié')
   } catch {
     toastError?.('Copie impossible depuis ce navigateur')
   }
@@ -590,7 +594,7 @@ function openContratPreview(c: any): void {
             </p>
           </div>
 
-                   <!-- Quick actions -->
+          <!-- Quick actions -->
           <div class="flex items-center gap-2">
             <NuxtLink :to="`/admin/contrat?new=1&entreprise_id=${client.id}`" class="btn btn-gold btn-sm">
               + Nouveau contrat
@@ -603,7 +607,7 @@ function openContratPreview(c: any): void {
               :disabled="resettingPassword"
               @click="regenerateClientPassword"
             >
-              {{ resettingPassword ? '...' : 'Regenerer le mot de passe' }}
+              {{ resettingPassword ? '...' : 'Régénérer le mot de passe' }}
             </button>
             <button
               class="btn btn-outline btn-sm"
@@ -621,7 +625,6 @@ function openContratPreview(c: any): void {
           </div>
         </div>
       </div>
-         
 
       <!-- ══════════ 2. Client information grid ═════════════ -->
       <div class="card p-6">
@@ -637,17 +640,14 @@ function openContratPreview(c: any): void {
               Détails société
             </p>
             <dl class="space-y-2 text-sm">
-              <div v-if="client.raison_sociale " class="flex justify-between gap-3">
-                <dt style="color: var(--app-text-faint)">Raison sociale </dt>
+              <div v-if="client.raison_sociale" class="flex justify-between gap-3">
+                <dt style="color: var(--app-text-faint)">Raison sociale</dt>
                 <dd style="color: var(--app-text)">{{ client.raison_sociale }}</dd>
               </div>
               <div v-if="client.capital" class="flex justify-between gap-3">
                 <dt style="color: var(--app-text-faint)">Capital</dt>
                 <dd style="color: var(--app-text)">{{ fmtAmount(client.capital) }}</dd>
               </div>
-              <!-- <p v-if="!client.forme_juridique && !client.capital" style="color: var(--app-text-faint)">
-                Aucune information renseignée.
-              </p> -->
             </dl>
           </div>
 
@@ -911,21 +911,14 @@ function openContratPreview(c: any): void {
                   <label class="f-label">Email</label>
                   <input v-model="editForm.gerant_email" class="f-input" type="email" />
                 </div>
-                <div>
-                  <label class="f-label">Téléphone</label>
-                  <div class="grid grid-cols-[minmax(130px,0.42fr)_1fr] gap-2">
-                    <select v-model="editForm.gerant_dial_code" class="f-input min-w-0">
-                      <option v-for="code in dialCodes" :key="code.iso" :value="code.dialCode">
-                        {{ code.flag }} {{ code.dialCode }} {{ code.country }}
-                      </option>
-                    </select>
-                    <input
-                      v-model="editForm.gerant_phone_number"
-                      class="f-input min-w-0"
-                      type="tel"
-                      placeholder="6XX XXX XXX" />
-                  </div>
-                </div>
+<PhoneNumberField
+  v-model:dial-code="editForm.gerant_dial_code"
+  v-model:number="editForm.gerant_phone_number"
+  label="Téléphone"
+  placeholder="6XX XXX XXX"
+  class="sm:col-span-2"
+/>
+
                 <div>
                   <label class="f-label">Date de naissance</label>
                   <input v-model="editForm.gerant_date_naissance" class="f-input" type="date" />
@@ -970,7 +963,7 @@ function openContratPreview(c: any): void {
         <div class="card w-full max-w-md p-6 space-y-4" @click.stop>
           <div>
             <p class="text-xs uppercase tracking-widest font-bold text-gold">Mot de passe temporaire</p>
-            <h2 class="font-serif text-xl mt-1">Acces client regenere</h2>
+            <h2 class="font-serif text-xl mt-1">Accès client régénéré</h2>
           </div>
           <input
             :value="regeneratedPassword"

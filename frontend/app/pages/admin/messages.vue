@@ -14,6 +14,10 @@ function getApiBase() {
   return (config.public.apiBase as string) ?? ''
 }
 
+/**
+ * Build the Authorization header from localStorage.
+ * Key: 'app_auth' — written by the auth store on successful login.
+ */
 function authHeaders(): Record<string, string> {
   if (!import.meta.client) return {}
   try {
@@ -36,8 +40,9 @@ const form = reactive({
   message:        '',
 })
 
+/** GET /api/messages — loads all messages sent by this domiciliataire */
 async function load(): Promise<void> {
-  loading.value = true
+  loading.value   = true
   loadError.value = ''
   try {
     const res = await $fetch<{ success: boolean; data: any[] }>(
@@ -53,6 +58,7 @@ async function load(): Promise<void> {
   }
 }
 
+/** POST /api/messages — sends a new message to the selected client */
 async function send(): Promise<void> {
   if (!form.client_user_id) return toastError?.('Sélectionnez un client')
   if (!form.message.trim()) return toastError?.('Rédigez un message')
@@ -80,6 +86,7 @@ async function send(): Promise<void> {
   }
 }
 
+/** Re-check whether the client has read the message ("pull to refresh" receipt) */
 async function refreshReceipt(msg: any): Promise<void> {
   try {
     const res = await $fetch<{ success: boolean; data: { is_read: boolean; read_at: string | null } }>(
@@ -91,11 +98,17 @@ async function refreshReceipt(msg: any): Promise<void> {
   } catch {}
 }
 
+/**
+ * Resolve a display name for the recipient of a sent message.
+ * Supports both 'receiver' (preferred backend key) and legacy 'toUser',
+ * falling back to a lookup in the clients store if neither is eager-loaded.
+ */
 function clientName(msg: any): string {
   const receiver = msg.receiver ?? msg.toUser
   return receiver
     ? `${receiver.nom ?? ''} ${receiver.prenom ?? ''}`.trim() || receiver.email
-    : clientItems.value.find(c => c.client_user?.id === (msg.receiver_id ?? msg.user_id))?.raison_sociale ?? `Client #${msg.receiver_id ?? msg.user_id}`
+    : clientItems.value.find(c => c.client_user?.id === (msg.receiver_id ?? msg.user_id))?.raison_sociale
+      ?? `Client #${msg.receiver_id ?? msg.user_id}`
 }
 
 function formatDate(d: string | null): string {
@@ -122,6 +135,7 @@ onMounted(async () => {
       <button class="btn btn-gold btn-md" @click="showCompose = true">✉ Composer un message</button>
     </div>
 
+    <!-- Loading skeleton -->
     <div v-if="loading" class="space-y-2">
       <div v-for="i in 3" :key="i" class="card p-4 animate-pulse">
         <div class="h-3 w-48 bg-white/10 rounded mb-2" />
@@ -129,10 +143,12 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Load error -->
     <div v-else-if="loadError" class="card p-4 text-red-400 text-sm">
       {{ loadError }}
     </div>
 
+    <!-- Message list -->
     <div v-else-if="messages.length" class="space-y-3">
       <div v-for="msg in messages" :key="msg.id" class="card p-4 space-y-2 max-w-full overflow-hidden">
         <div class="flex items-start justify-between gap-3 flex-wrap">
@@ -154,49 +170,71 @@ onMounted(async () => {
       </div>
     </div>
 
+    <!-- Empty state -->
     <div v-else class="card p-10 text-center text-app-text/40">
       <p class="text-4xl mb-3">✉</p>
       <p>Aucun message envoyé.</p>
       <button class="btn btn-gold btn-md mt-4" @click="showCompose = true">Envoyer un premier message</button>
     </div>
 
-    <!-- Compose modal -->
-    <div v-if="showCompose" class="fixed inset-0 z-[100] bg-black/70 flex items-center justify-center p-4"
-         @click.self="showCompose = false">
-      <div class="card w-full max-w-lg p-6 space-y-4">
-        <div class="flex items-center justify-between">
-          <h2 class="font-serif text-xl">Nouveau message</h2>
-          <button class="text-app-text/40 hover:text-white text-xl" @click="showCompose = false">✕</button>
-        </div>
-        <div>
-          <label class="f-label">Destinataire *</label>
-          <select v-model="form.client_user_id" class="f-input" :disabled="clientsStore.loading || sending">
-            <option :value="null" disabled>-- Sélectionner un client --</option>
-            <option v-for="c in clientItems.filter(x => x.client_user)" :key="c.client_user.id" :value="c.client_user.id">
-              {{ c.raison_sociale }} — {{ c.client_user.nom }} {{ c.client_user.prenom }}
-            </option>
-          </select>
-          <p v-if="clientsStore.loading" class="text-xs text-app-text/40 mt-1">Chargement des clients...</p>
-        </div>
-        <div>
-          <label class="f-label">Sujet (optionnel)</label>
-          <input v-model="form.subject" class="f-input" :disabled="sending" placeholder="Ex: Renouvellement de votre contrat..." />
-        </div>
-        <div>
-          <label class="f-label">Message *</label>
-          <textarea v-model="form.message" class="f-input min-h-[120px] resize-y"
-                    placeholder="Rédigez votre message ici..." />
-          <p class="text-xs text-app-text/40 mt-1 text-right">{{ form.message.length }}/2000</p>
-        </div>
-        <div class="flex gap-3 justify-end">
-          <button class="btn btn-outline btn-md" :disabled="sending" @click="showCompose = false">Annuler</button>
-          <button class="btn btn-gold btn-md"
-                  :disabled="sending || !form.client_user_id || !form.message.trim()" @click="send">
-            {{ sending ? 'Envoi...' : '✉ Envoyer' }}
-          </button>
+    <!--
+      ── Compose modal ──────────────────────────────────────────────────────
+      FIX: wrapped in <Teleport to="body">.
+
+      WHY THIS WAS NEEDED:
+        The dashboard layout wraps every page in an animated container
+        (the `animate-fade-up` transition). Any CSS transform/animation on
+        an ancestor element changes the containing block for `position: fixed`
+        descendants — the browser then positions the modal relative to that
+        transformed ancestor instead of the real viewport. That is exactly
+        why the compose panel rendered pinned near the top of the content
+        column instead of centered on the whole screen.
+
+        Teleporting the modal to <body> moves it completely outside the
+        page's DOM subtree, so it is no longer inside any transformed
+        ancestor and `fixed inset-0 flex items-center justify-center`
+        centers it in the real browser viewport — consistent with every
+        other modal in the app (documents.vue, contrat.vue, factures.vue,
+        paiements.vue all already do this).
+    -->
+    <Teleport to="body">
+      <div v-if="showCompose" class="fixed inset-0 z-100 bg-black/70 flex items-center justify-center p-4"
+           @click.self="showCompose = false">
+        <div class="card w-full max-w-lg p-6 space-y-4" @click.stop>
+          <div class="flex items-center justify-between">
+            <h2 class="font-serif text-xl">Nouveau message</h2>
+            <button class="text-app-text/40 hover:text-white text-xl" @click="showCompose = false">✕</button>
+          </div>
+          <div>
+            <label class="f-label">Destinataire *</label>
+            <select v-model="form.client_user_id" class="f-input" :disabled="clientsStore.loading || sending">
+              <option :value="null" disabled>-- Sélectionner un client --</option>
+              <option v-for="c in clientItems.filter(x => x.client_user)" :key="c.client_user.id" :value="c.client_user.id">
+                {{ c.raison_sociale }} — {{ c.client_user.nom }} {{ c.client_user.prenom }}
+              </option>
+            </select>
+            <p v-if="clientsStore.loading" class="text-xs text-app-text/40 mt-1">Chargement des clients...</p>
+          </div>
+          <div>
+            <label class="f-label">Sujet (optionnel)</label>
+            <input v-model="form.subject" class="f-input" :disabled="sending" placeholder="Ex: Renouvellement de votre contrat..." />
+          </div>
+          <div>
+            <label class="f-label">Message *</label>
+            <textarea v-model="form.message" class="f-input min-h-[120px] resize-y" :disabled="sending"
+                      placeholder="Rédigez votre message ici..." maxlength="2000" />
+            <p class="text-xs text-app-text/40 mt-1 text-right">{{ form.message.length }}/2000</p>
+          </div>
+          <div class="flex gap-3 justify-end">
+            <button class="btn btn-outline btn-md" :disabled="sending" @click="showCompose = false">Annuler</button>
+            <button class="btn btn-gold btn-md"
+                    :disabled="sending || !form.client_user_id || !form.message.trim()" @click="send">
+              {{ sending ? 'Envoi...' : '✉ Envoyer' }}
+            </button>
+          </div>
         </div>
       </div>
-    </div>
+    </Teleport>
 
   </div>
 </template>
