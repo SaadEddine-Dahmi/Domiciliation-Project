@@ -84,7 +84,9 @@ class DocumentController extends Controller
             return $document;
         }
 
-        abort_unless($this->storage->exists($document), 404);
+        if (!$this->storage->exists($document)) {
+            return response()->json(['message' => 'Document introuvable.'], 404);
+        }
 
         return $this->storage->streamDownload($document, $this->documents->downloadName($document));
     }
@@ -96,7 +98,9 @@ class DocumentController extends Controller
             return $document;
         }
 
-        abort_unless($this->storage->exists($document), 404);
+        if (!$this->storage->exists($document)) {
+            return response()->json(['message' => 'Document introuvable.'], 404);
+        }
 
         return $this->storage->streamInline($document);
     }

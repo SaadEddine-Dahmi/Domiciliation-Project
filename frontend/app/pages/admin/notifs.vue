@@ -28,6 +28,7 @@ const auth = useAuthStore()
 const isAdmin = computed(() => auth.isAdmin)
 const notifsStore = useNotificationsStore()
 const router = useRouter()
+const documentViewer = useDocumentViewer()
 
 const { success, error: toastError } = useToast()
 
@@ -149,10 +150,7 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
   const contratId = data.contrat_id ?? n.contrat_id
 
   if (type === 'document_uploaded' && data.document_id) {
-    return {
-      label: 'Voir le document',
-      external: withToken(`${getApiBase()}/api/documents/${data.document_id}/preview`),
-    }
+    return { label: 'Voir le document' }
   }
 
   if (data.facture_id || type === 'payment_received' || message.includes('paiement') || message.includes('facture')) {
@@ -180,6 +178,14 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
 
 async function openNotificationTarget(n: any): Promise<void> {
   if (!n.is_read) await markRead(n.id)
+  if (n.type === 'document_uploaded' && n.data?.document_id) {
+    await documentViewer.openPreview({
+      id: Number(n.data.document_id),
+      name: n.data?.document,
+      redirectTo: '/admin/documents',
+    })
+    return
+  }
   const target = notificationTarget(n)
   if (!target) return
   if (target.external) {

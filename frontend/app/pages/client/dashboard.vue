@@ -205,10 +205,18 @@ onMounted(load)
       <!-- Mon domiciliataire -->
       <div class="card p-5 space-y-3">
         <p class="text-xs uppercase text-gold tracking-widest font-bold">Mon domiciliataire</p>
-        <div v-if="data.domiciliataire" class="space-y-1 text-sm">
-          <p class="font-semibold">{{ data.domiciliataire.nom }} {{ data.domiciliataire.prenom }}</p>
-          <p class="text-app-text/50">{{ data.domiciliataire.email }}</p>
-          <p v-if="data.domiciliataire.telephone" class="text-app-text/50">{{ data.domiciliataire.telephone }}</p>
+        <div v-if="data.domiciliataire" class="flex items-center gap-3 text-sm">
+          <ProfileImageLightbox
+            :src="data.domiciliataire.photo_url"
+            :initials="data.domiciliataire.initials"
+            :label="`Photo de ${data.domiciliataire.nom}`"
+            :size="48"
+          />
+          <div class="min-w-0 space-y-1">
+            <p class="font-semibold truncate">{{ data.domiciliataire.nom }} {{ data.domiciliataire.prenom }}</p>
+            <p class="text-app-text/50 truncate">{{ data.domiciliataire.email }}</p>
+            <p v-if="data.domiciliataire.telephone" class="text-app-text/50 truncate">{{ data.domiciliataire.telephone }}</p>
+          </div>
         </div>
         <p v-else class="text-app-text/40 text-sm">Aucun domiciliataire lié</p>
       </div>

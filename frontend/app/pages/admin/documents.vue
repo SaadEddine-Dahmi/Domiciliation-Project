@@ -7,6 +7,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const auth = useAuthStore()
 const { success, error: toastError } = useToast()
 const { confirm: confirmAction } = useConfirm()
+const documentViewer = useDocumentViewer()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -163,52 +164,24 @@ async function submitUpload() {
 async function downloadDoc(doc: any) {
   downloadingId.value = doc.id
   try {
-    const baseUrl = doc?.download_url || `${getApiBase()}/api/documents/${doc.id}/download`
-    const res = await fetch(withToken(baseUrl), { method: 'GET' })
-    if (!res.ok) {
-      const txt = await res.text()
-      try { toastError?.(JSON.parse(txt)?.message || 'Erreur téléchargement') }
-      catch { toastError?.('Erreur téléchargement') }
-      return
-    }
-    const contentType = (res.headers.get('content-type') || '').toLowerCase()
-    if (contentType.includes('application/json') || contentType.includes('text/')) {
-      toastError?.('Réponse non fichier'); return
-    }
-    const blob = await res.blob()
-    let filename = filenameFromContentDisposition(res.headers.get('content-disposition'))
-    if (!filename) {
-      const ext  = String(doc?.extension || '').toLowerCase() || guessExtFromMime(contentType)
-      const base = String(doc?.name || `document-${doc.id}`).replace(/[\\/:*?"<>|]/g, '-')
-      filename   = base.includes('.') ? base : `${base}.${ext}`
-    }
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl; a.download = filename
-    document.body.appendChild(a); a.click(); a.remove()
-    URL.revokeObjectURL(blobUrl)
-  } catch {
-    toastError?.('Erreur téléchargement')
+    await documentViewer.downloadDocument({
+      id: Number(doc.id),
+      name: doc.name,
+      extension: doc.extension,
+      redirectTo: '/admin/documents',
+    })
   } finally {
     downloadingId.value = null
   }
 }
 
 async function openPreview(doc: any) {
-  try {
-    const baseUrl = doc?.preview_url || `${getApiBase()}/api/documents/${doc.id}/preview`
-    const res = await fetch(withToken(baseUrl), { method: 'GET' })
-    if (!res.ok) throw new Error('preview failed')
-    const contentType = (res.headers.get('content-type') || '').toLowerCase()
-    if (contentType.includes('application/json') || contentType.includes('text/')) {
-      toastError?.('Aperçu indisponible'); return
-    }
-    const blob = await res.blob()
-    if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
-    previewUrl.value   = URL.createObjectURL(blob)
-    previewIsPdf.value = isPdfDoc(doc) || contentType.includes('application/pdf')
-    showPreview.value  = true
-  } catch { toastError?.('Erreur aperçu') }
+  await documentViewer.openPreview({
+    id: Number(doc.id),
+    name: doc.name,
+    extension: doc.extension,
+    redirectTo: '/admin/documents',
+  })
 }
 
 function closePreview() {

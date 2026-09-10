@@ -18,7 +18,7 @@ class ClientController extends Controller
 {
     use UsesApiPagination;
 
-    private const CLIENT_USER_COLUMNS = 'id,nom,prenom,email,telephone,role,must_change_password';
+    private const CLIENT_USER_COLUMNS = 'id,nom,prenom,email,telephone,role,photo_path,must_change_password';
 
     private function tenantClients(): Builder
     {

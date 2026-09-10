@@ -30,6 +30,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const { success, error: toastError } = useToast()
 const notifsStore = useNotificationsStore()
 const router = useRouter()
+const documentViewer = useDocumentViewer()
 
 /** Base URL for API calls, from runtime config. */
 function getApiBase(): string {
@@ -207,17 +208,6 @@ function iconFor(n: any): { bg: string; kind: 'document' | 'calendar' | 'invoice
 
 /** Opens the exact uploaded document via the existing public preview route.
  *  Only rendered when `data.document_id` is present on the notification. */
-function viewDocument(n: any): void {
-  const documentId = n.data?.document_id
-  if (!documentId) return
-  try {
-    const url = withToken(`${getApiBase()}/api/documents/${documentId}/preview`)
-    window.open(url, '_blank', 'noopener')
-  } catch {
-    toastError?.('Impossible d\'ouvrir le document')
-  }
-}
-
 function notificationTarget(n: any): { label: string; to?: string; external?: string } | null {
   const type = n.type ?? ''
   const data = n.data ?? {}
@@ -225,14 +215,7 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
   const contratId = data.contrat_id ?? n.contrat_id
 
   if (type === 'document_uploaded' && data.document_id) {
-    try {
-      return {
-        label: 'Voir le document',
-        external: withToken(`${getApiBase()}/api/documents/${data.document_id}/preview`),
-      }
-    } catch {
-      return null
-    }
+    return { label: 'Voir le document' }
   }
 
   if (
@@ -250,6 +233,14 @@ function notificationTarget(n: any): { label: string; to?: string; external?: st
 
 async function openNotificationTarget(n: any): Promise<void> {
   if (!n.is_read) await markRead(n.id)
+  if (n.type === 'document_uploaded' && n.data?.document_id) {
+    await documentViewer.openPreview({
+      id: Number(n.data.document_id),
+      name: n.data?.document,
+      redirectTo: '/client/documents',
+    })
+    return
+  }
   const target = notificationTarget(n)
   if (!target) return
   if (target.external) {

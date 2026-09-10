@@ -317,18 +317,18 @@ onMounted(() => clientsStore.fetchAll())
         :key="client.id"
         class="card p-4 flex items-center justify-between gap-4 flex-wrap"
       >
+        <ProfileImageLightbox
+          :src="client.client_user?.photo_url"
+          :initials="client.client_user?.initials ?? initials(client.raison_sociale)"
+          :label="`Photo de ${client.raison_sociale}`"
+          :size="44"
+          rounded="xl"
+        />
+
         <NuxtLink
           :to="`/admin/clients/${client.id}`"
-          class="flex items-center gap-4 min-w-0 flex-1 group"
+          class="min-w-0 flex-1 group"
         >
-          <div
-            class="w-11 h-11 rounded-xl flex items-center justify-center
-                   font-bold text-sm shrink-0"
-            style="background:rgba(200,169,110,0.15);color:#c8a96e"
-          >
-            {{ initials(client.raison_sociale) }}
-          </div>
-
           <div class="min-w-0">
             <div class="flex items-center gap-2 flex-wrap">
               <p class="font-semibold truncate group-hover:underline"

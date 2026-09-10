@@ -25,6 +25,7 @@
 
     <AppToast />
     <AppConfirmDialog />
+    <AppDocumentViewer />
   </div>
 </template>
 

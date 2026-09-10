@@ -36,6 +36,7 @@ const router = useRouter()
 const clientsStore = useClientsStore()
 const { success, error: toastError } = useToast()
 const { confirm: confirmAction } = useConfirm()
+const documentViewer = useDocumentViewer()
 
 const clientId = computed(() => Number(route.params.id))
 
@@ -338,6 +339,11 @@ function selectInputText(event: FocusEvent): void {
 const showUpload = ref(false)
 const uploading = ref(false)
 const uploadError = ref('')
+const isDraggingFile = ref(false)
+const showNewType = ref(false)
+const newTypeName = ref('')
+const newTypeExpires = ref(false)
+const creatingType = ref(false)
 
 const uploadForm = reactive({
   document_type_id: '',
@@ -348,11 +354,57 @@ const uploadForm = reactive({
 function openUploadModal(): void {
   Object.assign(uploadForm, { document_type_id: '', date_expiration: '', file: null })
   uploadError.value = ''
+  showNewType.value = false
+  newTypeName.value = ''
+  newTypeExpires.value = false
   showUpload.value = true
 }
 
 function onFileChange(e: Event): void {
   uploadForm.file = (e.target as HTMLInputElement).files?.[0] ?? null
+}
+
+function onUploadZoneFiles(files: FileList): void {
+  uploadForm.file = files[0] ?? null
+}
+
+function setUploadFile(file: File | null): void {
+  uploadForm.file = file
+}
+
+function onDropFile(event: DragEvent): void {
+  isDraggingFile.value = false
+  setUploadFile(event.dataTransfer?.files?.[0] ?? null)
+}
+
+async function createNewType(): Promise<void> {
+  if (!newTypeName.value.trim()) return
+
+  creatingType.value = true
+  try {
+    const res = await $fetch<{ success: boolean; data: any }>(
+      `${getApiBase()}/api/document-types`,
+      {
+        method: 'POST',
+        headers: authHeaders(),
+        body: {
+          name: newTypeName.value.trim(),
+          has_expiration: newTypeExpires.value,
+          is_required: false,
+        },
+      },
+    )
+    docTypes.value.push(res.data)
+    uploadForm.document_type_id = String(res.data.id)
+    showNewType.value = false
+    newTypeName.value = ''
+    newTypeExpires.value = false
+    success(`Type "${res.data.name}" cree`)
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? 'Erreur creation type')
+  } finally {
+    creatingType.value = false
+  }
 }
 
 async function submitUpload(): Promise<void> {
@@ -409,46 +461,21 @@ async function deleteDoc(id: number): Promise<void> {
 }
 
 async function downloadDoc(doc: any) {
-  try {
-    const baseUrl = doc?.download_url || `${getApiBase()}/api/documents/${doc.id}/download`
-    const url = withToken(baseUrl)
-
-    const res = await fetch(url, { method: 'GET' })
-    if (!res.ok) throw new Error()
-
-    const blob = await res.blob()
-    const blobUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = blobUrl
-    a.download = doc.name || `document-${doc.id}`
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(blobUrl)
-  } catch {
-    toastError?.('Erreur de téléchargement')
-  }
+  await documentViewer.downloadDocument({
+    id: Number(doc.id),
+    name: doc.name,
+    extension: doc.extension,
+    redirectTo: `/admin/clients/${clientId.value}`,
+  })
 }
 
 async function previewDoc(doc: any) {
-  try {
-    const baseUrl = doc?.preview_url || `${getApiBase()}/api/documents/${doc.id}/preview`
-    const url = withToken(baseUrl)
-
-    const res = await fetch(url, { method: 'GET' })
-    if (!res.ok) throw new Error()
-
-    const blob = await res.blob()
-    if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
-
-    const contentType = (res.headers.get('content-type') || '').toLowerCase()
-    isPdf.value = doc?.is_pdf === true || contentType.includes('application/pdf')
-
-    previewUrl.value = URL.createObjectURL(blob)
-    isPreviewOpen.value = true
-  } catch {
-    toastError?.('Session expirée ou non autorisée')
-  }
+  await documentViewer.openPreview({
+    id: Number(doc.id),
+    name: doc.name,
+    extension: doc.extension,
+    redirectTo: `/admin/clients/${clientId.value}`,
+  })
 }
 
 function closePreview() {
@@ -566,12 +593,13 @@ function openContratPreview(c: any): void {
 
           <!-- Identity -->
           <div class="flex items-center gap-4">
-            <div
-              class="w-14 h-14 rounded-2xl flex items-center justify-center font-bold text-lg shrink-0"
-              style="background: rgba(200,169,110,0.15); color: #c8a96e"
-            >
-              {{ (client.raison_sociale ?? '?').slice(0, 2).toUpperCase() }}
-            </div>
+            <ProfileImageLightbox
+              :src="client.client_user?.photo_url"
+              :initials="client.client_user?.initials ?? (client.raison_sociale ?? '?').slice(0, 2).toUpperCase()"
+              :label="`Photo de ${client.raison_sociale}`"
+              :size="56"
+              rounded="xl"
+            />
             <div>
               <h1 class="font-serif text-2xl" style="color: var(--app-text)">
                 {{ client.raison_sociale }}
@@ -840,11 +868,32 @@ function openContratPreview(c: any): void {
           </div>
           <div class="px-6 py-5 space-y-4">
             <div>
-              <label class="f-label">Type de document *</label>
-              <select v-model="uploadForm.document_type_id" class="f-input">
+              <div class="mb-1 flex items-center justify-between gap-3">
+                <label class="f-label mb-0">Type de document *</label>
+                <button type="button" class="text-xs font-semibold underline" style="color:#c8a96e" @click="showNewType = !showNewType">
+                  {{ showNewType ? 'Annuler' : '+ Nouveau type' }}
+                </button>
+              </div>
+              <select v-if="!showNewType" v-model="uploadForm.document_type_id" class="f-input">
                 <option value="">-- Sélectionner --</option>
                 <option v-for="t in docTypes" :key="t.id" :value="t.id">{{ t.name }}</option>
               </select>
+              <div v-else class="rounded-xl border border-gold/20 bg-gold/5 p-3 space-y-2">
+                <p class="text-xs font-bold text-gold">Creer un nouveau type</p>
+                <input v-model="newTypeName" class="f-input" placeholder="Ex: Attestation fiscale, Extrait RC..." />
+                <label class="flex items-center gap-2 text-sm cursor-pointer">
+                  <input v-model="newTypeExpires" type="checkbox" class="rounded" />
+                  Ce type a une date d'expiration
+                </label>
+                <button
+                  type="button"
+                  class="btn btn-gold btn-sm w-full"
+                  :disabled="creatingType || !newTypeName.trim()"
+                  @click="createNewType"
+                >
+                  {{ creatingType ? 'Creation...' : '+ Creer ce type' }}
+                </button>
+              </div>
             </div>
             <div>
               <label class="f-label">Date d'expiration (optionnel)</label>
@@ -852,7 +901,12 @@ function openContratPreview(c: any): void {
             </div>
             <div>
               <label class="f-label">Fichier *</label>
-              <input type="file" class="f-input" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" @change="onFileChange" />
+              <UiUploadZone
+                title="Cliquez ou glissez un fichier"
+                subtitle="PDF, JPG, PNG, DOC, DOCX - max 10MB"
+                accept=".pdf,.jpg,.jpeg,.png,.doc,.docx"
+                @files="onUploadZoneFiles"
+              />
               <p v-if="uploadForm.file" class="text-xs mt-1 text-green-400">
                 ✓ {{ uploadForm.file.name }} ({{ (uploadForm.file.size / 1024 / 1024).toFixed(2) }} Mo)
               </p>

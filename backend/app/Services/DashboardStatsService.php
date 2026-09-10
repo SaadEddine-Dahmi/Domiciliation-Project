@@ -89,7 +89,7 @@ class DashboardStatsService
     {
         $entreprise = $this->safeMetric('client.entreprise', fn() => Entreprise::where('client_user_id', $user->id)
             ->with([
-                'domiciliataire:id,nom,prenom,email,telephone',
+                'domiciliataire:id,nom,prenom,email,telephone,photo_path',
                 'contrats' => fn($query) => $this->visibleContratScope($query)->latest()->limit(1),
             ])
             ->first(), null);
@@ -108,6 +108,8 @@ class DashboardStatsService
                 'prenom' => $entreprise->domiciliataire->prenom,
                 'email' => $entreprise->domiciliataire->email,
                 'telephone' => $entreprise->domiciliataire->telephone,
+                'photo_url' => $entreprise->domiciliataire->photo_url,
+                'initials' => $entreprise->domiciliataire->initials,
             ] : null,
             'contrat' => $contrat ? [
                 'id' => $contrat->id,
