@@ -11,27 +11,26 @@
   </Transition>
 
   <aside
-    class="app-sidebar fixed top-0 left-0 bottom-0 z-50 flex flex-col transition-[width,transform] duration-300 ease-in-out"
+    class="app-sidebar fixed top-0 left-0 bottom-0 z-50 flex flex-col overflow-hidden transition-[width,transform] duration-300 ease-in-out"
+    :class="{ 'app-sidebar--collapsed': !showLabels }"
     :style="asideStyle"
   >
 
     <!-- ── HEADER / LOGO ── -->
     <div
-  class="shrink-0 flex items-center h-16 px-3 gap-2"
+  class="shrink-0 flex items-center h-16"
+  :class="showLabels ? 'px-3 gap-2' : 'justify-center px-2'"
   style="border-bottom: 1px solid var(--app-border-2);"
 >
+  <template v-if="showLabels">
   <img
-    :src="showLabels ? logoSrc : logoIconSrc"
+    :src="logoSrc"
     :alt="appName"
-    class="shrink-0 select-none"
-    :class="showLabels ? 'h-11 w-auto max-w-60' : 'h-11 w-11'"
+    class="shrink min-w-0 select-none h-8 max-h-8 w-auto max-w-[150px]"
   >
 
   <!-- Brand — only when expanded (desktop) or always on mobile -->
-  <div
-    class="flex-1 min-w-0 overflow-hidden transition-all duration-200"
-    :style="showLabels ? 'opacity:1;max-width:200px' : 'opacity:0;max-width:0;pointer-events:none'"
-  >
+  <div class="flex-1 min-w-0 overflow-hidden">
     <span class="sr-only">{{ appName }}</span>
   </div>
 
@@ -39,24 +38,51 @@
        for visual consistency with the rest of the sidebar. -->
   <button
     class="group relative hidden lg:flex w-8 h-8 rounded-lg items-center justify-center shrink-0 transition-colors nav-inactive focus-ring"
-    :aria-label="isOpen ? 'Réduire la barre latérale' : 'Agrandir la barre latérale'"
+    aria-label="Réduire la barre latérale"
     @click="toggle"
   >
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
          stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
       <rect x="3" y="3" width="18" height="18" rx="2"/>
       <path d="M9 3v18"/>
-      <path v-if="isOpen"  d="M5 9l-2 3 2 3"/>
-      <path v-if="!isOpen" d="M5 9l2 3-2 3"/>
+      <path d="M5 9l-2 3 2 3"/>
     </svg>
     <span
       class="nav-tooltip pointer-events-none absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
       style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
-    >{{ isOpen ? 'Réduire' : 'Agrandir' }}</span>
+    >Réduire</span>
+  </button>
+  </template>
+
+  <button
+    v-else
+    class="collapsed-logo-toggle group relative hidden lg:flex h-12 w-12 items-center justify-center rounded-lg nav-inactive focus-ring"
+    aria-label="Ouvrir la barre latérale"
+    @click="toggle"
+  >
+    <img
+      :src="logoIconSrc"
+      :alt="appName"
+      class="collapsed-logo-toggle__logo absolute h-8 w-8 select-none transition-all duration-150 ease-out"
+    >
+    <svg
+      class="collapsed-logo-toggle__icon absolute transition-all duration-150 ease-out"
+      width="20" height="20" viewBox="0 0 24 24" fill="none"
+      stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+    >
+      <rect x="3" y="3" width="18" height="18" rx="2"/>
+      <path d="M9 3v18"/>
+      <path d="M5 9l2 3-2 3"/>
+    </svg>
+    <span
+      class="collapsed-header-tooltip pointer-events-none px-2.5 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap z-60 hidden lg:block"
+      style="background: var(--app-surface-2); border: 1px solid var(--app-border); color: var(--app-text); box-shadow: 0 4px 16px rgba(0,0,0,0.18);"
+    >Ouvrir la barre latérale</span>
   </button>
 
   <!-- Mobile close button -->
   <button
+    v-if="showLabels"
     class="lg:hidden w-8 h-8 rounded-lg flex items-center justify-center shrink-0 nav-inactive focus-ring"
     aria-label="Fermer le menu"
     @click="closeMobile"
@@ -253,8 +279,8 @@ const { isOpen, isMobileOpen, toggle, toggleMobile, closeMobile } = useSidebar()
 // no brand string is ever hardcoded in this component.
 const config       = useRuntimeConfig()
 const appName      = computed(() => config.public.appName as string)
-const { isDark } = useTheme()
-const logoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
+const { isDark, isGray } = useTheme()
+const logoSrc = computed(() => isDark.value || isGray.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
 const logoIconSrc = '/brand/logo-icon.svg'
 
 // Where the user card links to — same convention already used by
@@ -306,7 +332,6 @@ const asideStyle = computed(() => {
     width: isOpen.value ? '230px' : '64px',
     background: 'var(--app-surface)',
     borderRight: '1px solid var(--app-border-2)',
-    transform: 'translateX(0)',
   }
 })
 
@@ -346,6 +371,37 @@ async function handleLogout(): Promise<void> {
   -ms-overflow-style: none;
 }
 .sidebar-scroll::-webkit-scrollbar { display: none; }
+
+.app-sidebar--collapsed {
+  width: 64px;
+  min-width: 64px;
+  max-width: 64px;
+}
+
+.collapsed-logo-toggle__icon,
+.collapsed-logo-toggle:hover .collapsed-logo-toggle__logo {
+  opacity: 0;
+  transform: scale(0.88);
+}
+
+.collapsed-logo-toggle:hover .collapsed-logo-toggle__icon {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.collapsed-header-tooltip {
+  position: fixed;
+  left: 76px;
+  top: 18px;
+  opacity: 0;
+  transform: translateX(-4px);
+  transition: opacity 0.12s ease, transform 0.12s ease;
+}
+
+.collapsed-logo-toggle:hover .collapsed-header-tooltip {
+  opacity: 1;
+  transform: translateX(0);
+}
 
 .nav-tooltip {
   opacity: 0;

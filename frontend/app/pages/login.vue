@@ -23,8 +23,8 @@ function getAppName(): string {
   return (config.public.appName as string) ?? 'DomPro'
 }
 const appName = getAppName()
-const { isDark } = useTheme()
-const brandLogoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
+const { isDark, isGray } = useTheme()
+const brandLogoSrc = computed(() => isDark.value || isGray.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
 
 const form = reactive({ email: '', password: '' })
 
@@ -54,7 +54,7 @@ const valueProps = [
       style="border-right:1px solid var(--app-border-2)"
     >
       <NuxtLink to="/" class="inline-flex">
-        <img class="h-10 w-auto max-w-[180px]" :src="brandLogoSrc" :alt="appName">
+        <img class="h-8 max-h-8 w-auto max-w-[150px]" :src="brandLogoSrc" :alt="appName">
       </NuxtLink>
 
       <h2 class="font-serif text-5xl leading-tight">

@@ -25,8 +25,8 @@ function getAppName(): string {
 }
 
 const appName = getAppName()
-const { isDark } = useTheme()
-const brandLogoSrc = computed(() => isDark.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
+const { isDark, isGray } = useTheme()
+const brandLogoSrc = computed(() => isDark.value || isGray.value ? '/brand/logo-dark.svg' : '/brand/logo.svg')
 
 const services = [
   {
@@ -182,9 +182,10 @@ const steps = [
 }
 .landing-nav__logo {
   display: block;
-  height: 2.5rem;
+  height: 2rem;
+  max-height: 2rem;
   width: auto;
-  max-width: 180px;
+  max-width: 150px;
 }
 .landing-nav__links {
   display: flex;
