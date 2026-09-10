@@ -89,6 +89,77 @@ class NotificationMessageTest extends TestCase
             ->assertJsonPath('data.is_read', true);
     }
 
+    /** Client unread message count only includes unread direct messages received by that client. */
+    public function test_client_unread_message_count_counts_received_unread_direct_messages(): void
+    {
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $clientUser = User::factory()->create(['role' => 'client']);
+        $otherClient = User::factory()->create(['role' => 'client']);
+
+        AppNotification::create([
+            'user_id' => $clientUser->id,
+            'from_user_id' => $tenant->id,
+            'message' => 'Unread',
+            'is_read' => false,
+        ]);
+        AppNotification::create([
+            'user_id' => $clientUser->id,
+            'from_user_id' => $tenant->id,
+            'message' => 'Read',
+            'is_read' => true,
+        ]);
+        AppNotification::create([
+            'user_id' => $otherClient->id,
+            'from_user_id' => $tenant->id,
+            'message' => 'Other client',
+            'is_read' => false,
+        ]);
+        AppNotification::create([
+            'user_id' => $clientUser->id,
+            'message' => 'System notification',
+            'is_read' => false,
+        ]);
+
+        $this->actingAs($clientUser, 'sanctum')
+            ->getJson('/api/messages/unread-count')
+            ->assertOk()
+            ->assertJsonPath('data.unread_messages_count', 1);
+    }
+
+    /** Visiting messages can clear every unread direct message for the current client. */
+    public function test_client_can_mark_all_received_messages_read(): void
+    {
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $clientUser = User::factory()->create(['role' => 'client']);
+        $otherClient = User::factory()->create(['role' => 'client']);
+
+        $message = AppNotification::create([
+            'user_id' => $clientUser->id,
+            'from_user_id' => $tenant->id,
+            'message' => 'Unread',
+            'is_read' => false,
+        ]);
+        $otherMessage = AppNotification::create([
+            'user_id' => $otherClient->id,
+            'from_user_id' => $tenant->id,
+            'message' => 'Other client',
+            'is_read' => false,
+        ]);
+        $systemNotification = AppNotification::create([
+            'user_id' => $clientUser->id,
+            'message' => 'System notification',
+            'is_read' => false,
+        ]);
+
+        $this->actingAs($clientUser, 'sanctum')
+            ->postJson('/api/messages/read-all')
+            ->assertOk();
+
+        $this->assertTrue($message->fresh()->is_read);
+        $this->assertFalse($otherMessage->fresh()->is_read);
+        $this->assertFalse($systemNotification->fresh()->is_read);
+    }
+
     /** Notification preferences save & read back correctly, with graceful fallback default. */
     public function test_notification_preferences_roundtrip(): void
     {

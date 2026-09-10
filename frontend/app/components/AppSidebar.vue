@@ -264,12 +264,14 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { useMessagesStore } from '~/stores/messages'
 import { useNotificationsStore } from '~/stores/notifs'
 import { useSidebar } from '~/composables/useSidebar'
 import { computed, ref, onMounted } from 'vue'
 
 const props  = defineProps<{ nav: any[] }>()
 const auth   = useAuthStore()
+const messages = useMessagesStore()
 const notifs = useNotificationsStore()
 const router = useRouter()
 const route  = useRoute()
@@ -314,6 +316,7 @@ onMounted(() => {
   }, { passive: true })
   if (auth.isAuthenticated) {
     notifs.refreshUnreadCount()
+    if (auth.isClient) messages.refreshUnreadCount()
   }
 })
 
@@ -354,6 +357,10 @@ function navBadge(item: any): string | number | null {
   if (path === '/admin/notifs' || path === '/client/notifs') {
     if (notifs.unreadCount <= 0) return null
     return notifs.unreadCount > 99 ? '99+' : notifs.unreadCount
+  }
+  if (path === '/client/messages') {
+    if (messages.unreadCount <= 0) return null
+    return messages.unreadCount > 99 ? '99+' : messages.unreadCount
   }
   return item.badge ?? null
 }

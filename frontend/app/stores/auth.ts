@@ -2,6 +2,7 @@
 // Manages authentication state and session restoration.
 
 import { defineStore } from 'pinia'
+import { useMessagesStore } from '~/stores/messages'
 import { useNotificationsStore } from '~/stores/notifs'
 
 export type Role = 'admin' | 'domiciliataire' | 'client'
@@ -92,6 +93,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function login(payload: { email: string; password: string }): Promise<boolean> {
     const notifs = useNotificationsStore()
+    const messages = useMessagesStore()
     loading.value = true
     error.value = ''
 
@@ -105,6 +107,7 @@ export const useAuthStore = defineStore('auth', () => {
       token.value = res.data.token
       notifs.setUnreadCount(res.data.user?.unread_notifications_count ?? 0)
       saveToStorage()
+      if (user.value.role === 'client') await messages.refreshUnreadCount()
       return true
     } catch (e: any) {
       error.value =
@@ -146,6 +149,7 @@ export const useAuthStore = defineStore('auth', () => {
       user.value = buildUser(res.data.user)
       token.value = res.data.token
       saveToStorage()
+      if (user.value.role === 'client') await messages.refreshUnreadCount()
       return true
     } catch (e: any) {
       error.value = e?.data?.errors
@@ -159,11 +163,13 @@ export const useAuthStore = defineStore('auth', () => {
 
   function logout(): void {
     const notifs = useNotificationsStore()
+    const messages = useMessagesStore()
     user.value = null
     token.value = ''
     error.value = ''
     isPendingApproval.value = false
     notifs.reset()
+    messages.reset()
 
     if (isClientRuntime()) {
       localStorage.removeItem(getStorageKey())
@@ -172,6 +178,7 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function restoreSession(): Promise<void> {
     const notifs = useNotificationsStore()
+    const messages = useMessagesStore()
     if (!isClientRuntime() || (user.value && token.value)) return
 
     try {
@@ -197,6 +204,8 @@ export const useAuthStore = defineStore('auth', () => {
 
         user.value = buildUser(res.data)
         notifs.setUnreadCount(res.data?.unread_notifications_count ?? 0)
+        if (user.value.role === 'client') await messages.refreshUnreadCount()
+        else messages.reset()
         saveToStorage()
       }
     } catch {

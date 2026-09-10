@@ -34,6 +34,20 @@ class MessageController extends Controller
         return response()->json($this->paginatedResponse($messages));
     }
 
+    public function unreadCount()
+    {
+        $count = AppNotification::query()
+            ->whereNotNull('from_user_id')
+            ->where('user_id', auth()->id())
+            ->where('is_read', false)
+            ->count();
+
+        return response()->json([
+            'success' => true,
+            'data' => ['unread_messages_count' => $count],
+        ]);
+    }
+
     // Sends a direct message from a domiciliataire to one of their
     // clients. Verifies the target client actually belongs to this
     // tenant before allowing the send.
@@ -88,6 +102,17 @@ class MessageController extends Controller
         }
 
         return response()->json(['success' => true, 'data' => $notification->fresh()]);
+    }
+
+    public function markAllRead()
+    {
+        AppNotification::query()
+            ->whereNotNull('from_user_id')
+            ->where('user_id', auth()->id())
+            ->where('is_read', false)
+            ->update(['is_read' => true, 'read_at' => now()]);
+
+        return response()->json(['success' => true, 'data' => null]);
     }
 
     // Returns the read-receipt status of a sent message (domiciliataire side).

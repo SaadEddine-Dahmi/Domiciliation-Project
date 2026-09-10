@@ -6,10 +6,12 @@
 ============================================================ -->
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { useMessagesStore } from '~/stores/messages'
 
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const { error: toastError } = useToast()
 const auth = useAuthStore()
+const messagesStore = useMessagesStore()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -39,6 +41,7 @@ async function load(): Promise<void> {
       { headers: authHeaders(), query: { per_page: 100 } }
     )
     messages.value = res.data ?? []
+    await markAllReceivedRead()
   } catch (e: any) {
     loadError.value = e?.data?.message ?? 'Erreur de chargement des messages'
     toastError?.(loadError.value)
@@ -58,7 +61,33 @@ async function openMsg(msg: any): Promise<void> {
       })
       msg.is_read = true
       msg.read_at = new Date().toISOString()
+      messagesStore.markOneRead()
     } catch {}
+  }
+}
+
+async function markAllReceivedRead(): Promise<void> {
+  if (!auth.isClient) return
+
+  const unread = messages.value.filter(m => (m.receiver_id ?? m.user_id) === auth.user?.id && !m.is_read)
+  if (!unread.length) {
+    messagesStore.markAllReadLocally()
+    return
+  }
+
+  try {
+    await $fetch(`${getApiBase()}/api/messages/read-all`, {
+      method: 'POST',
+      headers: authHeaders(),
+    })
+    const readAt = new Date().toISOString()
+    unread.forEach((msg) => {
+      msg.is_read = true
+      msg.read_at = readAt
+    })
+    messagesStore.markAllReadLocally()
+  } catch {
+    await messagesStore.refreshUnreadCount()
   }
 }
 

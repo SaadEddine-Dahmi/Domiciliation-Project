@@ -121,7 +121,9 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::put('/notifications/preferences', [NotificationController::class, 'updatePreferences']);
 
     Route::get('/messages', [MessageController::class, 'index']);
+    Route::get('/messages/unread-count', [MessageController::class, 'unreadCount']);
     Route::post('/messages', [MessageController::class, 'send']);
+    Route::post('/messages/read-all', [MessageController::class, 'markAllRead']);
     Route::post('/messages/{id}/read', [MessageController::class, 'markRead']);
     Route::get('/messages/{id}/receipt', [MessageController::class, 'receipt']);
 
