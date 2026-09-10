@@ -7,16 +7,12 @@
 -->
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { dashboardPathForRole } from '~/utils/authRoutes'
 
-definePageMeta({ layout: 'default' })
+definePageMeta({ layout: 'default', middleware: ['guest'] })
 
 const auth   = useAuthStore()
 const router = useRouter()
-
-// Guard: an already-authenticated user shouldn't see the login form.
-if (auth.isAuthenticated) {
-  await navigateTo(auth.isAdmin || auth.isDomiciliataire ? '/admin/dashboard' : '/client/dashboard')
-}
 
 function getAppName(): string {
   const config = useRuntimeConfig()
@@ -32,9 +28,7 @@ async function submit() {
   const ok = await auth.login(form)
   if (!ok) return
 
-  if (auth.isAdmin)          return router.push('/admin/dashboard')
-  if (auth.isDomiciliataire) return router.push('/admin/dashboard')
-  if (auth.isClient)         return router.push('/client/dashboard')
+  return router.push(dashboardPathForRole(auth.user?.role))
 }
 
 // Real, non-numeric value points instead of invented statistics

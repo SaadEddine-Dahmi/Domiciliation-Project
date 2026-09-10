@@ -4,15 +4,12 @@
 -->
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { dashboardPathForRole } from '~/utils/authRoutes'
 
-definePageMeta({ layout: 'default' })
+definePageMeta({ layout: 'default', middleware: ['guest'] })
 
 const auth   = useAuthStore()
 const router = useRouter()
-
-if (auth.isAuthenticated) {
-  await navigateTo(auth.isAdmin || auth.isDomiciliataire ? '/admin/dashboard' : '/client/dashboard')
-}
 
 function getAppName(): string {
   const config = useRuntimeConfig()
@@ -45,7 +42,7 @@ async function submit() {
   })
 
   if (ok && !auth.isPendingApproval) {
-    await router.push('/admin/dashboard')
+    await router.push(dashboardPathForRole(auth.user?.role))
   }
 }
 

@@ -79,6 +79,33 @@ class AuthenticationTest extends TestCase
         $this->assertNotEmpty($res->json('data.token'));
     }
 
+    /** Auth endpoints are guest-only and return the role dashboard for an authenticated token. */
+    public function test_auth_routes_redirect_authenticated_token_users_by_role(): void
+    {
+        $admin = User::factory()->create(['role' => 'admin', 'status' => 'active']);
+        $domiciliataire = User::factory()->create(['role' => 'domiciliataire', 'status' => 'active']);
+        $client = User::factory()->create(['role' => 'client', 'status' => 'active']);
+
+        $this->actingAs($admin, 'sanctum')
+            ->postJson('/api/auth/login', ['email' => 'admin@example.com', 'password' => 'password123'])
+            ->assertStatus(409)
+            ->assertJsonPath('redirect_to', '/admin/dashboard');
+
+        $this->actingAs($domiciliataire, 'sanctum')
+            ->postJson('/api/auth/register', [
+                'nom' => 'Already',
+                'email' => 'already@example.com',
+                'password' => 'password123',
+            ])
+            ->assertStatus(409)
+            ->assertJsonPath('redirect_to', '/admin/dashboard');
+
+        $this->actingAs($client, 'sanctum')
+            ->postJson('/api/auth/login', ['email' => 'client@example.com', 'password' => 'password123'])
+            ->assertStatus(409)
+            ->assertJsonPath('redirect_to', '/client/dashboard');
+    }
+
     /** Login is blocked for a pending account, with the correct French message. */
     public function test_login_blocked_for_pending_account(): void
     {

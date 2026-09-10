@@ -16,6 +16,7 @@
 -->
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { dashboardPathForRole } from '~/utils/authRoutes'
 
 definePageMeta({ layout: 'default' })
 
@@ -42,7 +43,7 @@ const brandLogoSrc = computed(() => isDark.value || isGray.value ? '/brand/logo-
 
 /** Where "Mon espace" / post-logout redirects should point, based on role */
 const dashboardPath = computed(() =>
-  auth.isAdmin || auth.isDomiciliataire ? '/admin/dashboard' : '/client/dashboard'
+  dashboardPathForRole(auth.user?.role)
 )
 
 function handleLogout(): void {

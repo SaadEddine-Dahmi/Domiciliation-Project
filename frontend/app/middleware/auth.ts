@@ -8,7 +8,7 @@
 // ============================================================
 import { useAuthStore } from '~/stores/auth'
 
-export default defineNuxtRouteMiddleware((to) => {
+export default defineNuxtRouteMiddleware(async (to) => {
     const auth = useAuthStore()
 
     // Pages publiques — aucune vérification
@@ -19,7 +19,7 @@ export default defineNuxtRouteMiddleware((to) => {
     if (!import.meta.client) return
 
     // Restaurer la session si pas encore fait
-    auth.restoreSession()
+    await auth.restoreSession()
 
     // Non authentifié → page de login
     if (!auth.isAuthenticated) return navigateTo('/login')

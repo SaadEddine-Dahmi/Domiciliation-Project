@@ -22,7 +22,7 @@ use App\Http\Controllers\Api\SearchController;
 use App\Http\Controllers\Api\TemplateController;
 use Illuminate\Support\Facades\Route;
 
-Route::middleware('throttle:auth')->group(function () {
+Route::middleware(['guest:sanctum', 'throttle:auth'])->group(function () {
     Route::post('/auth/register', [AuthController::class, 'register']);
     Route::post('/auth/login', [AuthController::class, 'login']);
 });
