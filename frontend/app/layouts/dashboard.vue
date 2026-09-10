@@ -24,6 +24,7 @@
     </div>
 
     <AppToast />
+    <AppConfirmDialog />
   </div>
 </template>
 

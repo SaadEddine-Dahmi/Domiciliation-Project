@@ -7,6 +7,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const articlesStore = useArticlesStore()
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 
 // ── State ─────────────────────────────────────────────────
 const templates    = ref<TemplateEntity[]>([])
@@ -159,7 +160,12 @@ async function submitTemplate(): Promise<void> {
 // ── Delete ────────────────────────────────────────────────
 
 async function deleteTemplate(id: number): Promise<void> {
-  if (!confirm('Supprimer ce modèle définitivement ?')) return
+  if (!(await confirmAction({
+    title: 'Supprimer le modele',
+    message: 'Supprimer ce modele definitivement ?',
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
   try {
     await templateService.remove(id)
     success('Modèle supprimé')

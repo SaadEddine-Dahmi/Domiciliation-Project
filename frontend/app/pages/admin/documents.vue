@@ -6,6 +6,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const auth = useAuthStore()
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -218,7 +219,12 @@ function closePreview() {
 
 // ── Delete ─────────────────────────────────────────────────
 async function deleteDoc(id: number) {
-  if (!confirm('Supprimer ce document ?')) return
+  if (!(await confirmAction({
+    title: 'Supprimer le document',
+    message: 'Supprimer ce document ?',
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
   try {
     await $fetch(`${getApiBase()}/api/documents/${id}`, {
       method: 'DELETE', headers: authHeaders(),

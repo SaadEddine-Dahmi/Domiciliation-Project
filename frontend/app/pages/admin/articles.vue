@@ -8,6 +8,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const articlesStore = useArticlesStore()
 const { items, loading } = storeToRefs(articlesStore)
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 
 // ── State ─────────────────────────────────────────────────
 const search      = ref('')
@@ -105,7 +106,12 @@ async function toggleActive(article: any): Promise<void> {
 
 // ── Delete ────────────────────────────────────────────────
 async function deleteArticle(id: string): Promise<void> {
-  if (!confirm('Supprimer cet article définitivement ?')) return
+  if (!(await confirmAction({
+    title: 'Supprimer l article',
+    message: 'Supprimer cet article definitivement ?',
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
   try {
     await articlesStore.remove(id)
     success('Article supprimé')

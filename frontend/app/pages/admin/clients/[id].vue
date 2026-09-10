@@ -35,6 +35,7 @@ const route = useRoute()
 const router = useRouter()
 const clientsStore = useClientsStore()
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 
 const clientId = computed(() => Number(route.params.id))
 
@@ -389,7 +390,12 @@ async function submitUpload(): Promise<void> {
 }
 
 async function deleteDoc(id: number): Promise<void> {
-  if (!confirm('Supprimer ce document ?')) return
+  if (!(await confirmAction({
+    title: 'Supprimer le document',
+    message: 'Supprimer ce document ?',
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
   try {
     await $fetch(`${getApiBase()}/api/documents/${id}`, {
       method: 'DELETE',

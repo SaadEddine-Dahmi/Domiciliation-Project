@@ -3,10 +3,6 @@
     class="relative rounded-full overflow-hidden flex items-center justify-center shrink-0 font-bold select-none"
     :style="wrapperStyle"
   >
-    <span class="absolute inset-0 flex items-center justify-center">
-      {{ initials }}
-    </span>
-
     <img
       v-if="photoUrl"
       :key="photoUrl"
@@ -15,6 +11,10 @@
       class="absolute inset-0 w-full h-full object-cover avatar-fade-in"
       @error="onImageError"
     />
+
+    <span v-else class="absolute inset-0 flex items-center justify-center">
+      {{ initials }}
+    </span>
   </div>
 </template>
 

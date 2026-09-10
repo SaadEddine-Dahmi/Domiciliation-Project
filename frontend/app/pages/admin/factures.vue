@@ -3,6 +3,7 @@
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 const route = useRoute()
 
 function getApiBase(): string {
@@ -141,7 +142,11 @@ function replaceFacture(updated: any): void {
 }
 
 async function archiveFacture(f: any): Promise<void> {
-  if (!confirm(`Archiver la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`)) return
+  if (!(await confirmAction({
+    title: 'Archiver la facture',
+    message: `Archiver la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`,
+    confirmLabel: 'Archiver',
+  }))) return
 
   actionBusyId.value = f.id
   try {
@@ -175,7 +180,12 @@ async function restoreFacture(f: any): Promise<void> {
 }
 
 async function deleteFacture(f: any): Promise<void> {
-  if (!confirm(`Supprimer définitivement la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`)) return
+  if (!(await confirmAction({
+    title: 'Supprimer la facture',
+    message: `Supprimer definitivement la facture ${f.numero_facture ?? ('FAC-' + f.id)} ?`,
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
 
   actionBusyId.value = f.id
   try {

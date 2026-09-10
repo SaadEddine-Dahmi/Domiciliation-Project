@@ -32,6 +32,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const auth  = useAuthStore()
 const toast = useToast()
 const { success, error: toastError } = toast
+const { confirm: confirmAction } = useConfirm()
 
 function getApiBase() {
   const config = useRuntimeConfig()
@@ -249,7 +250,12 @@ async function onPhotoChange(e: Event): Promise<void> {
 }
 
 async function removePhoto(): Promise<void> {
-  if (!confirm('Supprimer la photo de profil ?')) return
+  if (!(await confirmAction({
+    title: 'Supprimer la photo',
+    message: 'Supprimer la photo de profil ?',
+    confirmLabel: 'Supprimer',
+    variant: 'danger',
+  }))) return
   try {
     const res = await $fetch<{ success: boolean; data: { photo_url: null; initials: string } }>(
       `${getApiBase()}/api/profile/photo`,

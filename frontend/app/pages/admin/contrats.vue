@@ -40,6 +40,7 @@ import { contratService } from '~/services/contrat.service'
 definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 
 const { success, error: toastError } = useToast()
+const { confirm: confirmAction } = useConfirm()
 const router = useRouter()
 
 function getApiBase(): string {
@@ -307,7 +308,12 @@ async function submitActivate(): Promise<void> {
 
 // ── Résilier ──────────────────────────────────────────────
 async function terminate(id: number): Promise<void> {
-  if (!confirm('Résilier ce contrat ? Cette action est irréversible.')) return
+  if (!(await confirmAction({
+    title: 'Resilier le contrat',
+    message: 'Resilier ce contrat ? Cette action est irreversible.',
+    confirmLabel: 'Resilier',
+    variant: 'danger',
+  }))) return
   try {
     await $fetch(`${getApiBase()}/api/contrats/${id}/terminate`, {
       method: 'POST',
@@ -332,7 +338,11 @@ function replaceContrat(updated: any): void {
 }
 
 async function archiveContract(c: any): Promise<void> {
-  if (!confirm('Archiver ce contrat ?')) return
+  if (!(await confirmAction({
+    title: 'Archiver le contrat',
+    message: 'Archiver ce contrat ?',
+    confirmLabel: 'Archiver',
+  }))) return
   actionBusyId.value = c.id
   try {
     const res = await $fetch<{ success: boolean; data: any }>(
