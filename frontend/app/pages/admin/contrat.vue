@@ -70,6 +70,7 @@ function authHeaders(): Record<string, string> {
 const step = ref(1);
 const totalSteps = 4;
 const saving = ref(false);
+const previewing = ref(false);
 const loadingDraft = ref(false);
 const contratId = ref<number | null>(null);
 
@@ -610,68 +611,75 @@ async function saveDraft(): Promise<void> {
   }
 }
 
-// Live Preview Handler using the universal component
-function openLivePreview(): void {
-  if (!pdfPreview.value || typeof pdfPreview.value.openLive !== "function") {
-    console.warn(
-      "L'aperçu n'est pas prêt. Veuillez rafraîchir la page ou vérifier l'import du composant.",
-    );
-    return;
-  }
-
-  pdfPreview.value.openLive(
-    {
-      titreContrat: contract.form.titreContrat,
-      instruction_no: contract.form.instruction_no,
-      duree_mois: contract.form.months,
-      date_debut: contract.form.dateDebut,
-      date_fin: contract.form.dateFin,
-      date_signature: contract.form.date_signature,
-      redevanceMensuelle: contract.monthlyTotal,
-      redevanceAnnuelle: contract.grandTotal,
-      mode_paiement: contract.form.mode_paiement,
-      caution: contract.form.caution,
-      companyName: contract.form.companyName,
-      companyRC: contract.form.companyRC,
-      companyIF: contract.form.companyIF,
-      companyTP: contract.form.companyTP,
-      companyAdresse: contract.form.companyAdresse,
-      companyEmail: contract.form.companyEmail,
-      companyTelephone: contract.form.companyTelephone,
-      companyRepresentant: contract.form.companyRepresentant,
-      companyCIN: contract.form.companyCIN,
+function previewPayload(): Record<string, unknown> {
+  return {
+    titre_contrat: contract.form.titreContrat || null,
+    instruction_no: contract.form.instruction_no || null,
+    date_debut: contract.form.dateDebut || null,
+    date_fin: contract.form.dateFin || null,
+    duree_mois: contract.form.months || null,
+    prix_mensuel: contract.monthlyTotal || null,
+    prix_total: contract.grandTotal || null,
+    caution: contract.form.caution || null,
+    mode_paiement: contract.form.mode_paiement || null,
+    ville_signature: contract.form.ville_signature || null,
+    date_signature: contract.form.date_signature || null,
+    tokens: {
+      domiciliataire_nom: contract.form.companyName,
+      domiciliataire_rc: contract.form.companyRC,
+      domiciliataire_if: contract.form.companyIF,
+      domiciliataire_tp: contract.form.companyTP,
+      domiciliataire_siege_succursales: contract.form.companyAdresse,
+      domiciliataire_adresse: contract.form.companyAdresse,
+      domiciliataire_representant: contract.form.companyRepresentant,
+      domiciliataire_cin: contract.form.companyCIN,
+      raison_sociale: contract.form.societe,
       societe: contract.form.societe,
       forme_juridique: selectedClient.value?.forme_juridique,
       adresse_domiciliation: contract.form.companyAdresse,
       ville_client: selectedClient.value?.ville,
-      gerantNom: contract.form.gerantNom,
-      gerantPrenom: contract.form.gerantPrenom,
-      gerantCIN: contract.form.gerantCIN,
-      nationalite: contract.form.nationalite,
-      dateNaissance: contract.form.dateNaissance,
-      tel: contract.form.tel,
+      gerant_nom: contract.form.gerantNom,
+      gerant_prenom: contract.form.gerantPrenom,
+      gerant_cin: contract.form.gerantCIN,
+      gerant_identite: contract.form.gerantCIN,
+      gerant_nationalite: contract.form.nationalite,
+      date_naissance: contract.form.dateNaissance,
+      gerant_telephone: contract.form.tel,
+      telephone: contract.form.tel,
+      gerant_email: contract.form.email,
       email: contract.form.email,
-      adressePerso: contract.form.adressePerso,
-      ville_signature: contract.form.ville_signature,
-      articles: orderedArticles.value,
+      gerant_adresse: contract.form.adressePerso,
     },
-    contract.form.titreContrat || "Aperçu du contrat",
-  );
+    articles: orderedArticles.value.map((article) => ({
+      title: article.title ?? "",
+      body: article.body ?? "",
+      ordre: article.ordre,
+    })),
+  };
 }
 
-/**
- * Opens the ContratPreviewModal pointed at the SAVED contract's live
- * document stream (id known — contract already exists in the database).
- */
-function openSavedPreview(): void {
-  if (!contratId.value) return;
-  const url = contratService.streamPdfUrl(String(contratId.value), "preview");
-  if (pdfPreview.value && typeof pdfPreview.value.openUrl === "function") {
-    pdfPreview.value.openUrl(
-      url,
-      contract.form.titreContrat || `Contrat #${contratId.value}`,
-    );
+async function openLivePreview(): Promise<void> {
+  if (!pdfPreview.value || typeof pdfPreview.value.openHtml !== "function") {
+    console.warn("L'aperçu n'est pas prêt.");
+    return;
   }
+
+  previewing.value = true;
+  try {
+    const res = await contratService.previewHtml(previewPayload());
+    pdfPreview.value.openHtml(
+      res.data.html,
+      contract.form.titreContrat || "Aperçu du contrat",
+    );
+  } catch (e: any) {
+    toastError?.(e?.data?.message ?? "Erreur lors de la generation de l'aperçu");
+  } finally {
+    previewing.value = false;
+  }
+}
+
+async function openSavedPreview(): Promise<void> {
+  await openLivePreview();
 }
 
 watch(() => contract.form.dateDebut, recalcMonths);
@@ -1762,7 +1770,7 @@ onMounted(async () => {
             </button>
             <a
               v-if="contratId"
-              :href="contratService.streamPdfUrl(String(contratId), 'download')"
+              :href="contratService.relativeStreamPdfUrl(String(contratId), 'download')"
               target="_blank"
               class="btn btn-gold btn-md">
               <svg

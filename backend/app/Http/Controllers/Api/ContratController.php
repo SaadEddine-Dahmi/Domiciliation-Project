@@ -327,6 +327,63 @@ class ContratController extends Controller
         return $this->pdfs->stream($contrat, $request->query('mode', 'preview'));
     }
 
+    public function preview(Request $request)
+    {
+        $user = auth()->user();
+        if ($blocked = $this->denyUnlessDomiciliataire($user)) {
+            return $blocked;
+        }
+
+        $data = $request->validate([
+            'titre_contrat' => ['nullable', 'string', 'max:255'],
+            'instruction_no' => ['nullable', 'string', 'max:20'],
+            'date_debut' => ['nullable', 'date'],
+            'date_fin' => ['nullable', 'date'],
+            'duree_mois' => ['nullable', 'integer', 'min:1'],
+            'prix_mensuel' => ['nullable', 'numeric', 'min:0'],
+            'prix_total' => ['nullable', 'numeric', 'min:0'],
+            'caution' => ['nullable', 'numeric', 'min:0'],
+            'mode_paiement' => ['nullable', 'string', 'max:100'],
+            'ville_signature' => ['nullable', 'string', 'max:100'],
+            'date_signature' => ['nullable', 'date'],
+            'tokens' => ['nullable', 'array'],
+            'articles' => ['nullable', 'array'],
+            'articles.*.title' => ['nullable', 'string', 'max:255'],
+            'articles.*.body' => ['nullable', 'string'],
+            'articles.*.ordre' => ['nullable', 'integer'],
+        ]);
+
+        $tokens = $this->previewTokenMap($data);
+        $articles = collect($data['articles'] ?? [])
+            ->sortBy(fn($article) => $article['ordre'] ?? 0)
+            ->values()
+            ->map(fn($article) => (object) [
+                'title' => $article['title'] ?? '',
+                'body' => $this->resolvePreviewTokens($article['body'] ?? '', $tokens),
+            ]);
+
+        $html = view('pdf.contrat', [
+            'contrat' => (object) [
+                'id' => $data['id'] ?? null,
+                'titre_contrat' => $this->contractTitle($data['titre_contrat'] ?? null),
+                'date_debut' => $data['date_debut'] ?? null,
+                'date_fin' => $data['date_fin'] ?? null,
+                'duree_mois' => $data['duree_mois'] ?? null,
+                'prix_mensuel' => $data['prix_mensuel'] ?? null,
+                'prix_total' => $data['prix_total'] ?? null,
+                'instruction_no' => $data['instruction_no'] ?? null,
+                'ville_signature' => $data['ville_signature'] ?? null,
+                'date_signature' => $data['date_signature'] ?? null,
+                'caution' => $data['caution'] ?? null,
+                'mode_paiement' => $data['mode_paiement'] ?? null,
+            ],
+            'tokens' => $tokens,
+            'articles' => $articles,
+        ])->render();
+
+        return response()->json(['success' => true, 'data' => ['html' => $html]]);
+    }
+
     private function validatedPayload(Request $request, bool $isUpdate = false): array
     {
         $required = $isUpdate ? 'sometimes' : 'required';
@@ -472,6 +529,8 @@ class ContratController extends Controller
         return [
             'entreprise.representant',
             'domiciliataire:id,nom,prenom,email,telephone',
+            'domiciliataire.representant',
+            'domiciliataire.profile',
             'articles' => fn($query) => $query->orderBy('contrat_articles.ordre'),
             'renewals:id,renewed_from_id,statut,archived_at',
         ];
@@ -501,6 +560,9 @@ class ContratController extends Controller
     {
         return [
             'entreprise.representant',
+            'domiciliataire:id,nom,prenom,email,telephone',
+            'domiciliataire.representant',
+            'domiciliataire.profile',
             'articles' => fn($query) => $query->orderBy('contrat_articles.ordre'),
         ];
     }
@@ -508,5 +570,66 @@ class ContratController extends Controller
     private function contractTitle(?string $title): string
     {
         return $title ?: 'Contrat de Domiciliation';
+    }
+
+    private function previewTokenMap(array $data): array
+    {
+        $input = $data['tokens'] ?? [];
+        $money = static fn($value): string => $value !== null && $value !== ''
+            ? number_format((float) $value, 2, ',', ' ') . ' DH'
+            : '';
+        $date = static fn($value): string => $value
+            ? \Carbon\Carbon::parse($value)->format('d/m/Y')
+            : '';
+
+        return [
+            'domiciliataire_nom' => $input['domiciliataire_nom'] ?? '',
+            'domiciliataire_rc' => $input['domiciliataire_rc'] ?? '',
+            'domiciliataire_if' => $input['domiciliataire_if'] ?? '',
+            'domiciliataire_tp' => $input['domiciliataire_tp'] ?? '',
+            'domiciliataire_siege_succursales' => $input['domiciliataire_siege_succursales'] ?? $input['domiciliataire_adresse'] ?? '',
+            'domiciliataire_representant' => $input['domiciliataire_representant'] ?? '',
+            'domiciliataire_cin' => $input['domiciliataire_cin'] ?? '',
+            'raison_sociale' => $input['raison_sociale'] ?? $input['societe'] ?? '',
+            'societe' => $input['societe'] ?? $input['raison_sociale'] ?? '',
+            'forme_juridique' => $input['forme_juridique'] ?? '',
+            'adresse_domiciliation' => $input['adresse_domiciliation'] ?? '',
+            'ville_client' => $input['ville_client'] ?? '',
+            'gerant_nom' => $input['gerant_nom'] ?? '',
+            'gerant_prenom' => $input['gerant_prenom'] ?? '',
+            'gerant_identite' => $input['gerant_identite'] ?? $input['gerant_cin'] ?? '',
+            'gerant_cin' => $input['gerant_cin'] ?? $input['gerant_identite'] ?? '',
+            'gerant_telephone' => $input['gerant_telephone'] ?? $input['telephone'] ?? '',
+            'telephone' => $input['telephone'] ?? $input['gerant_telephone'] ?? '',
+            'gerant_email' => $input['gerant_email'] ?? $input['email'] ?? '',
+            'email' => $input['email'] ?? $input['gerant_email'] ?? '',
+            'gerant_adresse' => $input['gerant_adresse'] ?? '',
+            'gerant_nationalite' => $input['gerant_nationalite'] ?? '',
+            'date_naissance' => $date($input['date_naissance'] ?? null),
+            'date_debut' => $date($data['date_debut'] ?? null),
+            'date_fin' => $date($data['date_fin'] ?? null),
+            'date_signature' => $date($data['date_signature'] ?? null),
+            'duree_mois' => (string) ($data['duree_mois'] ?? ''),
+            'instruction_no' => $data['instruction_no'] ?? '',
+            'ville_signature' => $data['ville_signature'] ?? '',
+            'prix_mensuel' => $money($data['prix_mensuel'] ?? null),
+            'prix_total' => $money($data['prix_total'] ?? null),
+            'caution' => $money($data['caution'] ?? null),
+            'mode_paiement' => $data['mode_paiement'] ?? '',
+            'redevance_mensuelle' => $money($data['prix_mensuel'] ?? null),
+            'redevance_annuelle' => $money($data['prix_total'] ?? null),
+        ];
+    }
+
+    private function resolvePreviewTokens(string $text, array $tokens): string
+    {
+        $replace = [];
+        foreach ($tokens as $key => $value) {
+            $replace[strtolower($key)] = (string) $value;
+        }
+
+        return preg_replace_callback('/\{\{\s*([a-zA-Z0-9_]+)\s*\}\}/', static function ($match) use ($replace) {
+            return $replace[strtolower($match[1])] ?? $match[0];
+        }, $text);
     }
 }

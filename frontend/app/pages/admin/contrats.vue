@@ -42,6 +42,7 @@ definePageMeta({ layout: 'dashboard', middleware: ['auth'] })
 const { success, error: toastError } = useToast()
 const { confirm: confirmAction } = useConfirm()
 const router = useRouter()
+const route = useRoute()
 
 function getApiBase(): string {
   const config = useRuntimeConfig()
@@ -62,7 +63,9 @@ const items          = ref<any[]>([])
 const loading        = ref(true)
 const q              = ref('')
 const sortBy         = ref<'recent' | 'oldest' | 'price_desc' | 'price_asc'>('recent')
-const statutFilter = ref<'' | 'draft' | 'active' | 'active_soon' | 'expired' | 'terminated' | 'archived' | 'legalized' | 'not_legalized'>('')
+type StatutFilter = '' | 'draft' | 'active' | 'active_soon' | 'expired' | 'terminated' | 'archived' | 'legalized' | 'not_legalized'
+const statutFilter = ref<StatutFilter>('')
+const statutFilterValues: StatutFilter[] = ['', 'draft', 'active', 'active_soon', 'expired', 'terminated', 'archived', 'legalized', 'not_legalized']
 const activating     = ref<number | null>(null)
 const actionBusyId   = ref<number | null>(null)
 const showActivate   = ref(false)
@@ -102,6 +105,36 @@ async function load(): Promise<void> {
 // The API returns raw Carbon ISO timestamps (2026-08-13T00:00:00.000000Z).
 // Every date shown in this page goes through this helper — never print
 // c.date_debut / c.date_fin directly in the template.
+function firstQueryValue(value: unknown): string {
+  return Array.isArray(value) ? String(value[0] ?? '') : String(value ?? '')
+}
+
+function applyRouteFilters(): void {
+  const requested = firstQueryValue(route.query.status ?? route.query.statut).toLowerCase()
+  statutFilter.value = statutFilterValues.includes(requested as StatutFilter) ? requested as StatutFilter : ''
+}
+
+function fullName(person: any): string {
+  return person?.nom_complet ?? [person?.nom, person?.prenom].filter(Boolean).join(' ')
+}
+
+function profileAddresses(profile: any): string {
+  const addresses = profile?.adresses_list ?? profile?.adresses ?? profile?.addresses ?? profile?.adresse ?? ''
+  if (Array.isArray(addresses)) {
+    return addresses
+      .map((item: any, index: number) => {
+        if (typeof item === 'string') return item
+        const value = item?.value ?? item?.adresse ?? item?.address ?? ''
+        const label = item?.label ?? item?.nom ?? item?.name ?? `Adresse ${index + 1}`
+        return value ? `${label} : ${value}` : ''
+      })
+      .filter(Boolean)
+      .join(' - ')
+  }
+
+  return String(addresses ?? '')
+}
+
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return '—'
   const d = new Date(iso)
@@ -138,6 +171,11 @@ function effectiveStatut(c: any): string {
   return c.statut
 }
 
+function isLegalizedContract(c: any): boolean {
+  const rawStatus = String(c.statut ?? '').toLowerCase()
+  return !!c.scanned_pdf_path || ['legalized', 'legalised', 'legalise', 'légalisé'].includes(rawStatus)
+}
+
 const filtered = computed(() => {
   let list = items.value
 
@@ -155,8 +193,8 @@ const filtered = computed(() => {
         case 'expired':      return eff === 'expired'
         case 'terminated':   return eff === 'terminated'
         case 'archived':     return !!c.archived_at
-        case 'legalized':    return !!c.scanned_pdf_path
-        case 'not_legalized':return !c.scanned_pdf_path
+        case 'legalized':    return isLegalizedContract(c)
+        case 'not_legalized':return !isLegalizedContract(c)
         default:              return true
       }
     })
@@ -196,42 +234,19 @@ const filtered = computed(() => {
  * drift from what was actually signed on paper.
  */
 function viewPdf(contrat: any): void {
-  if (contrat.scanned_pdf_path) {
+  if (isLegalizedContract(contrat) && contrat.scanned_pdf_path) {
     viewScannedPdf(contrat)
     return
   }
-  if (!pdfPreview.value || typeof pdfPreview.value.openLive !== 'function') {
+  if (!pdfPreview.value || typeof pdfPreview.value.openUrl !== 'function') {
     toastError?.("L'aperçu n'est pas disponible pour ce contrat.")
     return
   }
-  if (!pdfPreview.value || typeof pdfPreview.value.openLive !== 'function') return
 
-  pdfPreview.value.openLive({
-    titreContrat: contrat.titre_contrat,
-    instruction_no: contrat.instruction_no,
-    duree_mois: contrat.duree_mois,
-    date_debut: contrat.date_debut,
-    date_fin: contrat.date_fin,
-    date_signature: contrat.date_signature,
-    redevanceMensuelle: contrat.prix_mensuel,
-    redevanceAnnuelle: contrat.prix_total,
-    mode_paiement: contrat.mode_paiement,
-    caution: contrat.caution,
-    ville_signature: contrat.ville_signature,
-
-    // Entreprise / Client details
-    societe: contrat.entreprise?.raison_sociale,
-    forme_juridique: contrat.entreprise?.forme_juridique,
-    ville_client: contrat.entreprise?.ville,
-    gerantNom: contrat.entreprise?.representant?.nom_complet || contrat.entreprise?.client_nom,
-    gerantCIN: contrat.entreprise?.representant?.cin,
-    tel: contrat.entreprise?.representant?.telephone,
-    email: contrat.entreprise?.representant?.email,
-    adressePerso: contrat.entreprise?.representant?.adresse,
-
-    // Articles and structural details
-    articles: contrat.articles || [],
-  }, contrat.titre_contrat ?? `Contrat #${contrat.id}`)
+  pdfPreview.value.openUrl(
+    contratService.relativeStreamPdfUrl(String(contrat.id), 'preview'),
+    contrat.titre_contrat ?? `Contrat #${contrat.id}`,
+  )
 }
 
 /**
@@ -245,6 +260,10 @@ function viewScannedPdf(contrat: any): void {
     return
   }
   const url = `${getApiBase()}/storage/${contrat.scanned_pdf_path}`
+  if (pdfPreview.value && typeof pdfPreview.value.openUrl === 'function') {
+    pdfPreview.value.openUrl(url, contrat.titre_contrat ?? `Contrat #${contrat.id}`)
+    return
+  }
   window.open(url, '_blank', 'noopener')
 }
 
@@ -468,7 +487,15 @@ const statutLabel: Record<string, string> = {
   terminated: 'Résilié',
 }
 
-onMounted(load)
+watch(
+  () => [route.query.status, route.query.statut],
+  applyRouteFilters,
+)
+
+onMounted(async () => {
+  applyRouteFilters()
+  await load()
+})
 </script>
 
 <template>

@@ -137,6 +137,21 @@ describe('contratService', () => {
     expect(contratService.streamPdfUrl('10', 'download')).toBe(
       'http://localhost:8000/api/contrats/10/pdf/stream?token=token%20123&mode=download',
     )
+    expect(contratService.relativeStreamPdfUrl('10')).toBe(
+      '/api/contrats/10/pdf/stream?token=token%20123&mode=preview',
+    )
+  })
+
+  it('posts draft data to the Blade HTML preview endpoint', async () => {
+    fetchMock.mockResolvedValueOnce({ success: true, data: { html: '<html></html>' } })
+
+    await contratService.previewHtml({ titre_contrat: 'Contrat' })
+
+    expect(fetchMock).toHaveBeenCalledWith('http://localhost:8000/api/contracts/preview', {
+      method: 'POST',
+      headers: { Authorization: 'Bearer token 123' },
+      body: { titre_contrat: 'Contrat' },
+    })
   })
 
   it('omits authorization when local auth state is missing or invalid', async () => {

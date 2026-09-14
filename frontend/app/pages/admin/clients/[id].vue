@@ -23,6 +23,7 @@
 //   loading the client's phone number into the edit form.
 
 import { useClientsStore } from '~/stores/clients'
+import { contratService } from '~/services/contrat.service'
 import ContratPreviewModal from '~/components/ContratPreviewModal.vue'
 import { sortedDialCodeValues } from '~/utils/countryDialCodes'
 
@@ -538,6 +539,13 @@ const contratsSummary = computed(() => {
  * dynamic and never a fixed, hard-coded contract type name.
  */
 function openContratPreview(c: any): void {
+  if (pdfPreview.value && typeof pdfPreview.value.openUrl === 'function') {
+    pdfPreview.value.openUrl(
+      contratService.relativeStreamPdfUrl(String(c.id), 'preview'),
+      c.titre_contrat ?? `Contrat #${c.id}`,
+    )
+    return
+  }
   if (!pdfPreview.value || typeof pdfPreview.value.openLive !== 'function') return
 
   pdfPreview.value.openLive({

@@ -131,4 +131,37 @@ class ContratPdfTest extends TestCase
         $this->assertSame('%PDF-1.4 signed content', $res->getContent());
         $this->assertStringContainsString('attachment', $res->headers->get('Content-Disposition'));
     }
+
+    public function test_preview_endpoint_renders_contract_blade_html_from_draft_payload(): void
+    {
+        $this->actingAsDomiciliataire();
+
+        $res = $this->postJson('/api/contracts/preview', [
+            'titre_contrat' => 'Contrat de Domiciliation',
+            'date_debut' => '2026-01-01',
+            'date_fin' => '2026-12-31',
+            'duree_mois' => 12,
+            'prix_mensuel' => 500,
+            'prix_total' => 6000,
+            'ville_signature' => 'Agadir',
+            'date_signature' => '2026-01-01',
+            'tokens' => [
+                'domiciliataire_nom' => 'AST-FISC',
+                'domiciliataire_rc' => 'RC-1',
+                'raison_sociale' => 'CLIENT SARL',
+                'gerant_nom' => 'Client Owner',
+            ],
+            'articles' => [
+                ['title' => 'Redevance', 'body' => 'Prix: {{prix_mensuel}}', 'ordre' => 1],
+            ],
+        ]);
+
+        $res->assertOk()
+            ->assertJsonPath('success', true);
+
+        $html = $res->json('data.html');
+        $this->assertStringContainsString('Contrat de Domiciliation', $html);
+        $this->assertStringContainsString('AST-FISC', $html);
+        $this->assertStringContainsString('Prix: 500,00 DH', $html);
+    }
 }

@@ -52,6 +52,21 @@ function contractUrl(path = ''): string {
   return `${apiBase()}/api/contrats${path}`
 }
 
+function contractsUrl(path = ''): string {
+  return `${apiBase()}/api/contracts${path}`
+}
+
+function relativeContractUrl(path = ''): string {
+  return `/api/contrats${path}`
+}
+
+function withStreamParams(baseUrl: string, mode: 'preview' | 'download'): string {
+  const token = getToken()
+  const params = token ? `token=${encodeURIComponent(token)}&mode=${mode}` : `mode=${mode}`
+
+  return `${baseUrl}?${params}`
+}
+
 export const contratService = {
   createDraft: (payload: ContratPayload, entrepriseId: number): Promise<ApiSuccess<ContratEntity>> =>
     $fetch(contractUrl(), {
@@ -100,7 +115,18 @@ export const contratService = {
       headers: authHeaders(),
     }),
 
+  previewHtml: (payload: Record<string, unknown>): Promise<ApiSuccess<{ html: string }>> =>
+    $fetch(contractsUrl('/preview'), {
+      method: 'POST',
+      headers: authHeaders(),
+      body: payload,
+    }),
+
   streamPdfUrl(id: string, mode: 'preview' | 'download' = 'preview'): string {
-    return `${contractUrl(`/${id}/pdf/stream`)}?token=${encodeURIComponent(getToken())}&mode=${mode}`
+    return withStreamParams(contractUrl(`/${id}/pdf/stream`), mode)
+  },
+
+  relativeStreamPdfUrl(id: string, mode: 'preview' | 'download' = 'preview'): string {
+    return withStreamParams(relativeContractUrl(`/${id}/pdf/stream`), mode)
   },
 }
