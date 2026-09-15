@@ -541,7 +541,7 @@ const contratsSummary = computed(() => {
 function openContratPreview(c: any): void {
   if (pdfPreview.value && typeof pdfPreview.value.openUrl === 'function') {
     pdfPreview.value.openUrl(
-      contratService.relativeStreamPdfUrl(String(c.id), 'preview'),
+      contratService.streamPdfUrl(String(c.id), 'preview'),
       c.titre_contrat ?? `Contrat #${c.id}`,
     )
     return

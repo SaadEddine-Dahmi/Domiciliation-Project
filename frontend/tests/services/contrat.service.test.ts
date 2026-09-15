@@ -137,9 +137,6 @@ describe('contratService', () => {
     expect(contratService.streamPdfUrl('10', 'download')).toBe(
       'http://localhost:8000/api/contrats/10/pdf/stream?token=token%20123&mode=download',
     )
-    expect(contratService.relativeStreamPdfUrl('10')).toBe(
-      '/api/contrats/10/pdf/stream?token=token%20123&mode=preview',
-    )
   })
 
   it('posts draft data to the Blade HTML preview endpoint', async () => {

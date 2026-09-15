@@ -1770,7 +1770,7 @@ onMounted(async () => {
             </button>
             <a
               v-if="contratId"
-              :href="contratService.relativeStreamPdfUrl(String(contratId), 'download')"
+              :href="contratService.streamPdfUrl(String(contratId), 'download')"
               target="_blank"
               class="btn btn-gold btn-md">
               <svg

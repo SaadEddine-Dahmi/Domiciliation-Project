@@ -244,7 +244,7 @@ function viewPdf(contrat: any): void {
   }
 
   pdfPreview.value.openUrl(
-    contratService.relativeStreamPdfUrl(String(contrat.id), 'preview'),
+    contratService.streamPdfUrl(String(contrat.id), 'preview'),
     contrat.titre_contrat ?? `Contrat #${contrat.id}`,
   )
 }
@@ -259,7 +259,7 @@ function viewScannedPdf(contrat: any): void {
     toastError?.('Aucun document signé trouvé pour ce contrat.')
     return
   }
-  const url = `${getApiBase()}/storage/${contrat.scanned_pdf_path}`
+  const url = contratService.streamPdfUrl(String(contrat.id), 'preview')
   if (pdfPreview.value && typeof pdfPreview.value.openUrl === 'function') {
     pdfPreview.value.openUrl(url, contrat.titre_contrat ?? `Contrat #${contrat.id}`)
     return
@@ -276,7 +276,13 @@ function viewScannedPdf(contrat: any): void {
 // step, no accumulating "contrat_123_20260101_113000.pdf" files.
 function downloadPdf(contrat: any): void {
   if (contrat.scanned_pdf_path) {
-    viewScannedPdf(contrat)
+    const url = contratService.streamPdfUrl(String(contrat.id), 'download')
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `contrat_${contrat.id}.pdf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
     return
   }
 

@@ -56,10 +56,6 @@ function contractsUrl(path = ''): string {
   return `${apiBase()}/api/contracts${path}`
 }
 
-function relativeContractUrl(path = ''): string {
-  return `/api/contrats${path}`
-}
-
 function withStreamParams(baseUrl: string, mode: 'preview' | 'download'): string {
   const token = getToken()
   const params = token ? `token=${encodeURIComponent(token)}&mode=${mode}` : `mode=${mode}`
@@ -124,9 +120,5 @@ export const contratService = {
 
   streamPdfUrl(id: string, mode: 'preview' | 'download' = 'preview'): string {
     return withStreamParams(contractUrl(`/${id}/pdf/stream`), mode)
-  },
-
-  relativeStreamPdfUrl(id: string, mode: 'preview' | 'download' = 'preview'): string {
-    return withStreamParams(relativeContractUrl(`/${id}/pdf/stream`), mode)
   },
 }
