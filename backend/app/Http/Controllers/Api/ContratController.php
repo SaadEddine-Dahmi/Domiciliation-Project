@@ -12,6 +12,7 @@ use App\Models\Entreprise;
 use App\Models\User;
 use App\Services\Auth\QueryTokenAuthenticator;
 use App\Services\Contracts\ContractPdfService;
+use App\Services\Contracts\ContractStorageService;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\Request;
@@ -25,6 +26,7 @@ class ContratController extends Controller
 
     public function __construct(
         private readonly ContractPdfService $pdfs,
+        private readonly ContractStorageService $contractStorage,
         private readonly QueryTokenAuthenticator $queryTokens,
     ) {
     }
@@ -180,13 +182,19 @@ class ContratController extends Controller
 
         DB::transaction(function () use ($contrat, $request) {
             if ($request->hasFile('signed_pdf')) {
-                $path = $request->file('signed_pdf')->storeAs(
-                    'contrats/signed/' . $contrat->entreprise_id,
-                    'contrat_' . $contrat->id . '_signed.pdf',
-                    'public'
-                );
-
-                $contrat->update(['scanned_pdf_path' => $path]);
+                try {
+                    $contrat->update([
+                        'scanned_pdf_path' => $this->contractStorage->storeSignedPdf(
+                            $contrat,
+                            $request->file('signed_pdf')
+                        ),
+                    ]);
+                } catch (\Throwable $e) {
+                    throw new HttpResponseException(response()->json([
+                        'success' => false,
+                        'message' => 'Erreur lors du stockage du contrat signÃ©.',
+                    ], 500));
+                }
             }
 
             $contrat->activate();
@@ -325,6 +333,32 @@ class ContratController extends Controller
         }
 
         return $this->pdfs->stream($contrat, $request->query('mode', 'preview'));
+    }
+
+    public function temporaryPdfUrl(Request $request, string $id)
+    {
+        $user = auth()->user();
+        $contrat = $this->resolveContratForStream($id, $user);
+        if (!$contrat) {
+            return response()->json(['message' => 'Contrat introuvable.'], 404);
+        }
+
+        try {
+            return response()->json([
+                'success' => true,
+                'data' => [
+                    'url' => $this->contractStorage->temporaryUrl($contrat),
+                    'expires_in' => 900,
+                ],
+            ]);
+        } catch (\Illuminate\Contracts\Filesystem\FileNotFoundException) {
+            return response()->json(['message' => 'Contrat introuvable.'], 404);
+        } catch (\Throwable) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Erreur lors de la gÃ©nÃ©ration du lien temporaire.',
+            ], 500);
+        }
     }
 
     public function preview(Request $request)

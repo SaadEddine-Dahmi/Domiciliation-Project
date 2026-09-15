@@ -71,6 +71,7 @@ Route::middleware(['auth:sanctum', 'throttle:api'])->group(function () {
     Route::post('/contrats/preview', [ContratController::class, 'preview']);
     Route::post('/contracts/preview', [ContratController::class, 'preview']);
     Route::get('/contrats/{id}', [ContratController::class, 'show']);
+    Route::get('/contrats/{id}/pdf/temporary-url', [ContratController::class, 'temporaryPdfUrl']);
     Route::put('/contrats/{id}', [ContratController::class, 'update']);
     Route::post('/contrats/{id}/activate', [ContratController::class, 'activate']);
     Route::post('/contrats/{id}/terminate', [ContratController::class, 'terminate']);

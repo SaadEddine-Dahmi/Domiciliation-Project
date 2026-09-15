@@ -9,6 +9,8 @@ use App\Models\Entreprise;
 use App\Models\Representant;
 use App\Models\User;
 use Illuminate\Foundation\Testing\RefreshDatabase;
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Tests\TestCase;
 
 class ContratPdfTest extends TestCase
@@ -97,7 +99,8 @@ class ContratPdfTest extends TestCase
 
     public function test_stream_pdf_returns_signed_file_when_contract_is_legalised(): void
     {
-        \Illuminate\Support\Facades\Storage::fake('public');
+        config()->set('filesystems.contracts_disk', 'minio');
+        Storage::fake('minio');
 
         $tenant = User::factory()->create(['role' => 'domiciliataire']);
         DomiciliataireProfile::create(['user_id' => $tenant->id, 'nom_societe' => 'Ma Société']);
@@ -117,11 +120,11 @@ class ContratPdfTest extends TestCase
             'domiciliataire_id' => $tenant->id,
             'entreprise_id' => $entreprise->id,
             'date_debut' => now(),
-            'scanned_pdf_path' => 'contrats/signed/contract.pdf',
+            'scanned_pdf_path' => "tenants/{$tenant->id}/contracts/contract.pdf",
         ]);
 
-        \Illuminate\Support\Facades\Storage::disk('public')
-            ->put('contrats/signed/contract.pdf', '%PDF-1.4 signed content');
+        Storage::disk('minio')
+            ->put("tenants/{$tenant->id}/contracts/contract.pdf", '%PDF-1.4 signed content');
 
         $token = $tenant->createToken('pdf-test')->plainTextToken;
 
@@ -130,6 +133,36 @@ class ContratPdfTest extends TestCase
         $res->assertOk();
         $this->assertSame('%PDF-1.4 signed content', $res->getContent());
         $this->assertStringContainsString('attachment', $res->headers->get('Content-Disposition'));
+    }
+
+    public function test_signed_contract_pdf_upload_is_stored_on_tenant_minio_path(): void
+    {
+        config()->set('filesystems.contracts_disk', 'minio');
+        Storage::fake('minio');
+
+        $tenant = User::factory()->create(['role' => 'domiciliataire']);
+        $entreprise = Entreprise::create([
+            'domiciliataire_id' => $tenant->id,
+            'raison_sociale' => 'CLIENT SARL',
+        ]);
+
+        $contrat = Contrat::create([
+            'domiciliataire_id' => $tenant->id,
+            'entreprise_id' => $entreprise->id,
+            'date_debut' => now(),
+            'date_signature' => now(),
+            'ville_signature' => 'Casablanca',
+            'statut' => 'draft',
+        ]);
+
+        $this->actingAs($tenant, 'sanctum')->post("/api/contrats/{$contrat->id}/activate", [
+            'signed_pdf' => UploadedFile::fake()->create('signed.pdf', 100, 'application/pdf'),
+        ])->assertOk();
+
+        $path = $contrat->fresh()->scanned_pdf_path;
+
+        $this->assertStringStartsWith("tenants/{$tenant->id}/contracts/", $path);
+        Storage::disk('minio')->assertExists($path);
     }
 
     public function test_preview_endpoint_renders_contract_blade_html_from_draft_payload(): void

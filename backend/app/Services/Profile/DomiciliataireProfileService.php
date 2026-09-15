@@ -8,7 +8,9 @@ use App\Models\DomiciliataireProfile;
 use App\Models\User;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class DomiciliataireProfileService
@@ -57,12 +59,12 @@ class DomiciliataireProfileService
     public function uploadPhoto(User $user, UploadedFile $photo): array
     {
         $previousPath = $user->photo_path;
-        $newPath = $photo->store("profile-photos/{$user->id}", 'public');
+        $newPath = $this->storePhoto($user, $photo);
 
         DB::transaction(fn() => $user->update(['photo_path' => $newPath]));
 
         if ($previousPath && $previousPath !== $newPath) {
-            Storage::disk('public')->delete($previousPath);
+            Storage::disk($this->disk())->delete($previousPath);
         }
 
         return $this->photoPayload($user->fresh());
@@ -75,7 +77,7 @@ class DomiciliataireProfileService
         DB::transaction(fn() => $user->update(['photo_path' => null]));
 
         if ($path) {
-            Storage::disk('public')->delete($path);
+            Storage::disk($this->disk())->delete($path);
         }
 
         return $this->photoPayload($user->fresh());
@@ -84,13 +86,52 @@ class DomiciliataireProfileService
     public function photoResponse(int $userId): ?StreamedResponse
     {
         $user = User::find($userId);
-        if (!$user || !$user->photo_path || !Storage::disk('public')->exists($user->photo_path)) {
+        if (!$user || !$user->photo_path || !Storage::disk($this->disk())->exists($user->photo_path)) {
             return null;
         }
 
-        return Storage::disk('public')->response($user->photo_path, null, [
+        return Storage::disk($this->disk())->response($user->photo_path, null, [
             'Cache-Control' => 'public, max-age=86400',
         ]);
+    }
+
+    public function disk(): string
+    {
+        $disk = config('filesystems.tenant_assets_disk');
+
+        if (!is_string($disk) || $disk === '') {
+            throw new \RuntimeException('Tenant asset storage disk is not configured.');
+        }
+
+        return $disk;
+    }
+
+    private function storePhoto(User $user, UploadedFile $photo): string
+    {
+        $extension = $photo->extension() ?: $photo->guessExtension() ?: 'bin';
+        $path = "tenants/{$user->id}/assets/profile-photos/" . Str::uuid() . ".{$extension}";
+
+        try {
+            $stored = Storage::disk($this->disk())->putFileAs(
+                "tenants/{$user->id}/assets/profile-photos",
+                $photo,
+                basename($path)
+            );
+        } catch (\Throwable $e) {
+            Log::error('Profile photo upload failed', [
+                'user_id' => $user->id,
+                'disk' => $this->disk(),
+                'message' => $e->getMessage(),
+            ]);
+
+            throw new \RuntimeException('Unable to store the profile photo.', previous: $e);
+        }
+
+        if (!$stored) {
+            throw new \RuntimeException('Unable to store the profile photo.');
+        }
+
+        return $stored;
     }
 
     private function photoPayload(User $user): array

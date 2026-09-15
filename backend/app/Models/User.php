@@ -84,7 +84,9 @@ class User extends Authenticatable
 
     public function getPhotoUrlAttribute(): ?string
     {
-        if (!$this->photo_path || !Storage::disk('public')->exists($this->photo_path)) {
+        $disk = config('filesystems.tenant_assets_disk');
+
+        if (!$this->photo_path || !is_string($disk) || $disk === '' || !Storage::disk($disk)->exists($this->photo_path)) {
             return null;
         }
 

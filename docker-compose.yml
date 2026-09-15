@@ -26,6 +26,8 @@ services:
         condition: service_healthy
     env_file:
       - ./backend/.env
+    # S3-compatible storage requires league/flysystem-aws-s3-v3 in backend/composer.json.
+    # MinIO values are loaded from ./backend/.env through the env_file above.
     environment:
       DB_HOST: postgres
       LOG_CHANNEL: stderr

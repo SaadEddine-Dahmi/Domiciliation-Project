@@ -18,8 +18,10 @@ class DocumentTest extends TestCase
     /** Domiciliataire can upload a document for one of their own entreprises. */
     public function test_domiciliataire_can_upload_document(): void
     {
+        config()->set('filesystems.documents_disk', 'minio');
         Storage::fake('local');
         Storage::fake('private');
+        Storage::fake('minio');
 
         $tenant = User::factory()->create(['role' => 'domiciliataire']);
         $entreprise = Entreprise::create(['domiciliataire_id' => $tenant->id, 'raison_sociale' => 'CLIENT SARL']);
@@ -33,6 +35,11 @@ class DocumentTest extends TestCase
 
         $res->assertCreated();
         $this->assertDatabaseHas('documents', ['entreprise_id' => $entreprise->id]);
+
+        $path = Document::firstOrFail()->file_path;
+
+        $this->assertStringStartsWith("tenants/{$tenant->id}/documents/{$entreprise->id}/", $path);
+        Storage::disk('minio')->assertExists($path);
     }
 
     /** Client role only sees documents belonging to their own entreprise. */
@@ -65,34 +72,26 @@ class DocumentTest extends TestCase
         $this->assertCount(1, $res->json('data'));
     }
 
-    /**
-     * Document download requires ?token= (Authorization header is impossible
-     * on plain browser GET).
-     *
-     * NOTE: both 'local' and 'private' disks are faked because
-     * DocumentController::disk() picks 'private' if that disk exists in
-     * config, else falls back to 'local'. Faking only one risks the file
-     * landing on a disk the fake isn't watching, causing false 404s.
-     */
+    /** Document download requires ?token= because plain browser GET cannot send Authorization headers. */
     public function test_document_download_requires_query_token(): void
     {
+        config()->set('filesystems.documents_disk', 'minio');
         Storage::fake('local');
         Storage::fake('private');
+        Storage::fake('minio');
 
         $tenant = User::factory()->create(['role' => 'domiciliataire']);
         $entreprise = Entreprise::create(['domiciliataire_id' => $tenant->id, 'raison_sociale' => 'CLIENT']);
         $type = DocumentType::create(['name' => 'CIN']);
 
-        // Determine which disk the controller will actually use and write there.
-        $disks = array_keys(config('filesystems.disks', []));
-        $activeDisk = in_array('private', $disks, true) ? 'private' : 'local';
+        $activeDisk = (string) config('filesystems.documents_disk');
 
-        Storage::disk($activeDisk)->put('documents/1/file.pdf', 'fake-pdf-content');
+        Storage::disk($activeDisk)->put("tenants/{$tenant->id}/documents/1/file.pdf", 'fake-pdf-content');
 
         $doc = Document::create([
             'entreprise_id' => $entreprise->id,
             'document_type_id' => $type->id,
-            'file_path' => 'documents/1/file.pdf',
+            'file_path' => "tenants/{$tenant->id}/documents/1/file.pdf",
             'uploaded_by_user' => $tenant->id,
         ]);
 

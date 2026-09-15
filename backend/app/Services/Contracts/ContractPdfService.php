@@ -7,20 +7,21 @@ namespace App\Services\Contracts;
 use App\Models\Contrat;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\Response;
-use Illuminate\Support\Facades\Storage;
 
 class ContractPdfService
 {
-    public function __construct(private readonly ContractTokenResolver $tokens)
-    {
+    public function __construct(
+        private readonly ContractTokenResolver $tokens,
+        private readonly ContractStorageService $storage,
+    ) {
     }
 
     public function stream(Contrat $contrat, string $mode = 'preview'): Response
     {
         $headers = $this->headers($contrat, $mode);
 
-        if ($contrat->scanned_pdf_path && Storage::disk('public')->exists($contrat->scanned_pdf_path)) {
-            return response(Storage::disk('public')->get($contrat->scanned_pdf_path), 200, $headers);
+        if ($this->storage->exists($contrat)) {
+            return response($this->storage->get($contrat), 200, $headers);
         }
 
         $tokenMap = $this->tokens->map($contrat);

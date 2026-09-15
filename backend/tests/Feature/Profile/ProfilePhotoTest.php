@@ -23,7 +23,8 @@ class ProfilePhotoTest extends TestCase
 
     public function test_replacing_profile_photo_returns_a_new_cache_busted_url(): void
     {
-        Storage::fake('public');
+        config()->set('filesystems.tenant_assets_disk', 'minio');
+        Storage::fake('minio');
 
         $user = $this->actingAsDomiciliataire();
 

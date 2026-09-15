@@ -34,7 +34,7 @@ class DocumentService
     {
         return DB::transaction(function () use ($user, $data, $file) {
             $entreprise = $this->resolveWritableEntreprise($user, (int) $data['entreprise_id']);
-            $path = $file->store('documents/' . $entreprise->id, $this->storage->disk());
+            $path = $this->storage->store($file, (int) $entreprise->domiciliataire_id, (int) $entreprise->id);
 
             $document = Document::create([
                 'entreprise_id' => $entreprise->id,

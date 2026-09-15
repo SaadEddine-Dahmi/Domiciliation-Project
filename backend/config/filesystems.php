@@ -14,6 +14,9 @@ return [
     */
 
     'default' => env('FILESYSTEM_DISK', 'local'),
+    'contracts_disk' => env('CONTRACT_STORAGE_DISK'),
+    'documents_disk' => env('DOCUMENT_STORAGE_DISK'),
+    'tenant_assets_disk' => env('TENANT_ASSETS_STORAGE_DISK'),
 
     /*
     |--------------------------------------------------------------------------
@@ -55,9 +58,22 @@ return [
             'bucket' => env('AWS_BUCKET'),
             'url' => env('AWS_URL'),
             'endpoint' => env('AWS_ENDPOINT'),
-            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT', false),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT'),
             'throw' => false,
             'report' => false,
+        ],
+
+        'minio' => [
+            'driver' => 's3',
+            'key' => env('AWS_ACCESS_KEY_ID'),
+            'secret' => env('AWS_SECRET_ACCESS_KEY'),
+            'region' => env('AWS_DEFAULT_REGION'),
+            'bucket' => env('AWS_BUCKET'),
+            'url' => env('AWS_URL'),
+            'endpoint' => env('AWS_ENDPOINT'),
+            'use_path_style_endpoint' => env('AWS_USE_PATH_STYLE_ENDPOINT'),
+            'throw' => true,
+            'report' => true,
         ],
         
         'private' => [
